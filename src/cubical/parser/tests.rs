@@ -7,7 +7,7 @@ use crate::cubical::syntax::{Term, show_term};
 #[test]
 fn parses_lambda_identity() {
     assert_eq!(
-        parse_term("\\x. x").unwrap(),
+        parse_term("fun x => x").unwrap(),
         Term::TAbs("x".to_string(), Box::new(Term::TVar(0)))
     );
 }
@@ -15,7 +15,7 @@ fn parses_lambda_identity() {
 #[test]
 fn parses_dependent_pi() {
     assert_eq!(
-        parse_term("(x : U0) -> x").unwrap(),
+        parse_term("∀ (x : U0), x").unwrap(),
         Term::TPi(
             "x".to_string(),
             Box::new(Term::TUniv(0)),
@@ -45,10 +45,10 @@ fn parses_path_application() {
 
 #[test]
 fn parses_import_declaration() {
-    let decls = parse_program("import \"foo.uwuc\"").unwrap();
+    let decls = parse_program("import \"foo.owl\"").unwrap();
     assert_eq!(decls.len(), 1);
     match &decls[0] {
-        Decl::Import { path } => assert_eq!(path, "foo.uwuc"),
+        Decl::Import { path } => assert_eq!(path, "foo.owl"),
         _ => panic!("expected import declaration"),
     }
 }
@@ -70,13 +70,13 @@ fn import_without_string_is_parse_error() {
 
 #[test]
 fn typecheck_program_rejects_import() {
-    let err = typecheck_program("import \"foo.uwuc\"").unwrap_err();
+    let err = typecheck_program("import \"foo.owl\"").unwrap_err();
     assert!(err.contains("import requires a file path"));
 }
 
 #[test]
 fn parses_nat_declaration() {
-    let decls = parse_program("data Nat = | zero : Nat | suc : Nat -> Nat").unwrap();
+    let decls = parse_program("inductive Nat where | zero : Nat | suc : Nat -> Nat").unwrap();
     assert_eq!(decls.len(), 1);
     match &decls[0] {
         Decl::Data(dt) => {
@@ -92,7 +92,7 @@ fn parses_nat_declaration() {
 
 #[test]
 fn parses_def_then_data() {
-    let src = "def main : U1 = U0\ndata Nat = | zero : Nat | suc : Nat -> Nat";
+    let src = "def main : U1 := U0\ninductive Nat where | zero : Nat | suc : Nat -> Nat";
     let decls = parse_program(src).unwrap();
     assert_eq!(decls.len(), 2);
     match &decls[0] {
@@ -106,8 +106,47 @@ fn parses_def_then_data() {
 }
 
 #[test]
+fn parses_lean_style_declarations() {
+    let src = "inductive Nat where\n| zero : Nat\n| succ : Nat -> Nat\n\
+               def id : ∀ (A : Type), A -> A := fun (A : Type) (n : A) => n";
+    let decls = parse_program(src).unwrap();
+    assert_eq!(decls.len(), 2);
+    assert!(matches!(&decls[0], Decl::Data(dt) if dt.name == "Nat"));
+    assert!(matches!(&decls[1], Decl::Def { name, .. } if name == "id"));
+    typecheck_program(src).expect("Lean-style declarations should typecheck");
+}
+
+#[test]
+fn parses_unicode_binders() {
+    assert!(matches!(parse_term("∀ (A : Type), A -> A").unwrap(), Term::TPi(_, _, _)));
+    assert!(matches!(parse_term("Σ (A : Type), A").unwrap(), Term::TSigma(_, _, _)));
+}
+
+#[test]
+fn rejects_retired_syntax_aliases() {
+    for source in [
+        "data Nat = | zero : Nat",
+        "theorem id : Type = Type",
+        "def id : Type = Type",
+    ] {
+        assert!(parse_program(source).is_err(), "should reject: {source}");
+    }
+    for source in [
+        "\\x. x",
+        "λx. x",
+        "Π (A : Type). A",
+        "Pi (A : Type). A",
+        "Sigma (A : Type). A",
+        "∃ (A : Type), A",
+        "elim motive { | zero => body } scrutinee",
+    ] {
+        assert!(parse_term(source).is_err(), "should reject: {source}");
+    }
+}
+
+#[test]
 fn parses_data_then_def() {
-    let src = "data Nat = | zero : Nat | suc : Nat -> Nat\ndef main : U1 = U0";
+    let src = "inductive Nat where | zero : Nat | suc : Nat -> Nat\ndef main : U1 := U0";
     let decls = parse_program(src).unwrap();
     assert_eq!(decls.len(), 2);
     match &decls[0] {
@@ -122,7 +161,7 @@ fn parses_data_then_def() {
 
 #[test]
 fn parses_two_defs() {
-    let src = "def a : U0 = U0\ndef b : U0 = U0";
+    let src = "def a : U0 := U0\ndef b : U0 := U0";
     let decls = parse_program(src).unwrap();
     assert_eq!(decls.len(), 2);
     match &decls[0] {
@@ -132,28 +171,6 @@ fn parses_two_defs() {
     match &decls[1] {
         Decl::Def { name, .. } => assert_eq!(name, "b"),
         _ => panic!("expected def declaration"),
-    }
-}
-
-#[test]
-fn parses_eliminator() {
-    let src = "elim motive { | zero => body0 | suc n => body1 } scrutinee";
-    let mut parser = Parser::new(Lexer::new(src).lex().unwrap());
-    parser.global_env = vec![
-        "scrutinee".to_string(),
-        "body1".to_string(),
-        "body0".to_string(),
-        "motive".to_string(),
-    ];
-    let term = parser.parse_term().unwrap();
-    match term {
-        Term::TElim(_, cases, _) => {
-            assert_eq!(cases.len(), 2);
-            assert_eq!(cases[0].con, "zero");
-            assert_eq!(cases[1].con, "suc");
-            assert_eq!(cases[1].binders, vec!["n".to_string()]);
-        }
-        _ => panic!("expected eliminator"),
     }
 }
 
@@ -186,20 +203,6 @@ fn parses_match() {
 }
 
 #[test]
-fn parses_match_with_braced_cases() {
-    let src = "match n return Nat with { | zero => z | suc m => s }";
-    let mut parser = Parser::new(Lexer::new(src).lex().unwrap());
-    parser.global_env = vec![
-        "s".to_string(),
-        "z".to_string(),
-        "Nat".to_string(),
-        "n".to_string(),
-    ];
-    let term = parser.parse_term().unwrap();
-    assert!(matches!(term, Term::TElim(_, _, _)));
-}
-
-#[test]
 fn parses_match_dependent_return_type() {
     let src = "match n return n with | zero => z | suc m => s";
     let mut parser = Parser::new(Lexer::new(src).lex().unwrap());
@@ -216,31 +219,6 @@ fn parses_match_dependent_return_type() {
     }
 }
 
-#[test]
-fn match_desugars_to_equivalent_elim() {
-    let src = "match n return Nat with | zero => z | suc m => s";
-    let mut parser = Parser::new(Lexer::new(src).lex().unwrap());
-    parser.global_env = vec![
-        "s".to_string(),
-        "z".to_string(),
-        "Nat".to_string(),
-        "n".to_string(),
-    ];
-    let from_match = parser.parse_term().unwrap();
-
-    let elim_src = "elim (\\n. Nat) { | zero => z | suc m => s } n";
-    let mut elim_parser = Parser::new(Lexer::new(elim_src).lex().unwrap());
-    elim_parser.global_env = vec![
-        "s".to_string(),
-        "z".to_string(),
-        "Nat".to_string(),
-        "n".to_string(),
-    ];
-    let from_elim = elim_parser.parse_term().unwrap();
-
-    assert_eq!(from_match, from_elim);
-}
-
 fn parse_let_with_globals(src: &str, globals: &[&str]) -> Term {
     let mut parser = Parser::new(Lexer::new(src).lex().unwrap());
     parser.global_env = globals.iter().map(|s| s.to_string()).collect();
@@ -249,7 +227,7 @@ fn parse_let_with_globals(src: &str, globals: &[&str]) -> Term {
 
 #[test]
 fn parses_let() {
-    let term = parse_let_with_globals("let x = t in x", &["t"]);
+    let term = parse_let_with_globals("let x := t in x", &["t"]);
     assert_eq!(
         term,
         Term::TApp(
@@ -261,9 +239,9 @@ fn parses_let() {
 
 #[test]
 fn let_desugars_to_application_of_lambda() {
-    let from_let = parse_let_with_globals("let x = a in b", &["a", "b"]);
+    let from_let = parse_let_with_globals("let x := a in b", &["a", "b"]);
 
-    let mut parser = Parser::new(Lexer::new("(\\x. b) a").lex().unwrap());
+    let mut parser = Parser::new(Lexer::new("(fun x => b) a").lex().unwrap());
     parser.global_env = vec!["a".to_string(), "b".to_string()];
     let from_lambda = parser.parse_term().unwrap();
 
@@ -272,7 +250,7 @@ fn let_desugars_to_application_of_lambda() {
 
 #[test]
 fn parses_s1_declaration() {
-    let decls = parse_program("data S1 = | base : S1 | loop : S1 [ base , base ]").unwrap();
+    let decls = parse_program("inductive S1 where | base : S1 | loop : S1 [ base , base ]").unwrap();
     match &decls[0] {
         Decl::Data(dt) => {
             assert_eq!(dt.name, "S1");
@@ -289,7 +267,7 @@ fn parses_s1_declaration() {
 
 #[test]
 fn round_trip_with_show_term() {
-    let term = parse_term("\\x. (x , x)").unwrap();
+    let term = parse_term("fun x => (x , x)").unwrap();
     let printed = show_term(&[], &term);
     let reparsed = parse_term(&printed).unwrap();
     assert_eq!(term, reparsed);
@@ -298,15 +276,15 @@ fn round_trip_with_show_term() {
 fn dependent_arrow_type_typechecks() {
     use crate::cubical::typechecker::infer;
     let ctx = Vec::new();
-    let ty = parse_term("(A : U0) -> A -> A").unwrap();
+    let ty = parse_term("∀ (A : U0), A -> A").unwrap();
     let inferred = infer(&ctx, &ty).expect("type should be well-formed");
     assert_eq!(inferred, Term::TUniv(0));
 }
 
 #[test]
 fn multi_binder_lambda_matches_nested() {
-    let nested = parse_term("\\A. \\x. x").unwrap();
-    let multi = parse_term("\\A x. x").unwrap();
+    let nested = parse_term("fun A => fun x => x").unwrap();
+    let multi = parse_term("fun A x => x").unwrap();
     assert_eq!(nested, multi);
 }
 
@@ -314,25 +292,25 @@ fn multi_binder_lambda_matches_nested() {
 fn id_definition_typechecks() {
     use crate::cubical::typechecker::{check, infer};
     let ctx = Vec::new();
-    let ty = parse_term("(A : U0) -> A -> A").unwrap();
-    let val = parse_term("\\A x. x").unwrap();
+    let ty = parse_term("∀ (A : U0), A -> A").unwrap();
+    let val = parse_term("fun A x => x").unwrap();
     infer(&ctx, &ty).expect("id type");
     check(&ctx, &val, &ty).expect("id body");
 }
 
 #[test]
 fn recursive_definition_parses() {
-    let src = "data Nat = | zero : Nat | suc : Nat -> Nat\n\
-               def plus : Nat -> Nat -> Nat = \\m n. plus";
+    let src = "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+               def plus : Nat -> Nat -> Nat := fun m n => plus";
     let decls = parse_program(src).expect("recursive def should parse");
     assert_eq!(decls.len(), 2);
 }
 
 #[test]
 fn recursive_plus_case_parses_global_reference() {
-    let src = "data Nat = | zero : Nat | suc : Nat -> Nat\n\
-               def plus : Nat -> Nat -> Nat = \\m n. elim (\\_. Nat) \
-               { | zero => n | suc m' => suc (plus m' n) } m";
+    let src = "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+               def plus : Nat -> Nat -> Nat := fun m n => match m return Nat with \
+               | zero => n | suc m' => suc (plus m' n)";
     let decls = parse_program(src).expect("recursive def should parse");
     assert_eq!(decls.len(), 2);
 }
@@ -344,13 +322,13 @@ fn cumulativity_universe_levels() {
     use crate::cubical::typechecker::check;
     let ctx = Vec::new();
 
-    // lambda term \A x. x has inferred type (A : U0) -> A -> A : U0.
+    // The identity lambda has inferred type ∀ (A : U0), A -> A : U0.
     // Check it against (A : U1) -> A -> A — should succeed because the
     // lambda just binds A and the body checks against the codomain.
-    let val = parse_term("\\A x. x").unwrap();
-    let ty = parse_term("(A : U1) -> A -> A").unwrap();
+    let val = parse_term("fun A x => x").unwrap();
+    let ty = parse_term("∀ (A : U1), A -> A").unwrap();
     check(&ctx, &val, &ty)
-        .expect("\\A x. x should be accepted at type (A : U1) -> A -> A");
+        .expect("identity should be accepted at type ∀ (A : U1), A -> A");
 
     // Negative: a term that doesn't match the expected Pi should fail.
     let val2 = parse_term("U0").unwrap();
@@ -362,14 +340,14 @@ fn cumulativity_universe_levels() {
 fn cumulativity_pi_types() {
     use crate::cubical::typechecker::check;
     let ctx = Vec::new();
-    let val = parse_term("\\A x. x").unwrap();
-    let ty = parse_term("(A : U1) -> A -> A").unwrap();
-    check(&ctx, &val, &ty).expect("(A : U0) -> A -> A should be accepted at (A : U1) -> A -> A");
+    let val = parse_term("fun A x => x").unwrap();
+    let ty = parse_term("∀ (A : U1), A -> A").unwrap();
+    check(&ctx, &val, &ty).expect("the lower-universe identity should be accepted at ∀ (A : U1), A -> A");
 }
 
 #[test]
 fn data_universe_annotation_parses() {
-    let src = "data D : U1 = | mk : D";
+    let src = "inductive D : U1 where | mk : D";
     let decls = parse_program(src).unwrap();
     assert_eq!(decls.len(), 1);
     match &decls[0] {
@@ -383,7 +361,7 @@ fn data_universe_annotation_parses() {
 
 #[test]
 fn data_without_universe_annotation() {
-    let src = "data Nat = | zero : Nat | suc : Nat -> Nat";
+    let src = "inductive Nat where | zero : Nat | suc : Nat -> Nat";
     let decls = parse_program(src).unwrap();
     match &decls[0] {
         Decl::Data(dt) => {

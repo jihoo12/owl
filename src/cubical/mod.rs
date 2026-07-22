@@ -1,8 +1,7 @@
 pub mod env;
 pub mod equality;
-pub mod ffi;
 pub mod interval;
-pub mod json;
+#[allow(dead_code)]
 pub mod nbe;
 pub mod parser;
 pub mod syntax;
@@ -16,7 +15,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use self::env::{Env, apply_globals, check_with_full_env, infer_with_full_env};
-use self::nbe::nbe_eval;
+use self::nbe::{Globals, Neutral, Value, eval_nbe, nbe_eval, nbe_eval_with_globals};
 use self::parser::{Decl, ParseError, ProgramParser};
 use self::syntax::{Name, Term};
 use self::typechecker::{TypeError, check_closed_dt};
@@ -94,10 +93,26 @@ pub fn run(path: impl AsRef<Path>) -> Result<RunOutput, RunError> {
     run_source(path, &source)
 }
 
+/// Read and typecheck a cubical source file without evaluating an entry point.
+///
+/// This accepts libraries containing only datatype declarations, which makes it
+/// suitable for the `owl check` command and for checking imported modules.
+pub fn check(path: impl AsRef<Path>) -> Result<(), RunError> {
+    let path = path.as_ref();
+    let source = std::fs::read_to_string(path)?;
+    check_source(path, &source)
+}
+
 /// Typecheck and evaluate cubical source from a string, using the current
 /// directory for import resolution.
 pub fn run_str(source: &str) -> Result<RunOutput, RunError> {
     run_source(Path::new("."), source)
+}
+
+/// Typecheck cubical source from a string, without requiring a `main`
+/// definition. Imports are resolved relative to the current directory.
+pub fn check_str(source: &str) -> Result<(), RunError> {
+    check_source(Path::new("."), source)
 }
 
 fn run_source(root_path: &Path, source: &str) -> Result<RunOutput, RunError> {
@@ -116,17 +131,58 @@ fn run_source(root_path: &Path, source: &str) -> Result<RunOutput, RunError> {
     )?;
 
     // Prefer `main` over the last definition when both exist.
-    if let Some(main_entry) = env.defs.iter().find(|(name, _, _)| name == "main") {
-        let (name, ty, val) = main_entry;
-        Ok(RunOutput {
-            name: name.clone(),
-            ty: ty.clone(),
-            value: nbe_eval(val),
-            global_names: env.defs.iter().map(|(n, _, _)| n.clone()).collect(),
-        })
+    if let Some((name, _, _)) = env.defs.iter().find(|(name, _, _)| name == "main") {
+        Ok(normalize_definition(&env, name))
     } else {
-        last_def.ok_or(RunError::NoEntryPoint)
+        last_def
+            .map(|output| normalize_definition(&env, &output.name))
+            .ok_or(RunError::NoEntryPoint)
     }
+}
+
+fn build_definition_values(env: &Env) -> Globals {
+    let placeholder = Value::VNeutral(Neutral::NVar(0));
+    let globals = std::rc::Rc::new(std::cell::RefCell::new(vec![placeholder; env.defs.len()]));
+
+    // Definitions are stored newest-first, so evaluate oldest-first. The
+    // shared vector also lets closures see their recursive definition once its
+    // placeholder has been replaced.
+    for index in (0..env.defs.len()).rev() {
+        let (_, _, value) = &env.defs[index];
+        globals.borrow_mut()[index] = eval_nbe(&[], &globals, index, value);
+    }
+    globals
+}
+
+fn normalize_definition(env: &Env, name: &str) -> RunOutput {
+    let index = env
+        .defs
+        .iter()
+        .position(|(candidate, _, _)| candidate == name)
+        .expect("definition selected from environment must exist");
+    let (name, ty, value) = &env.defs[index];
+    let globals = build_definition_values(env);
+    RunOutput {
+        name: name.clone(),
+        ty: ty.clone(),
+        value: nbe_eval_with_globals(value, &globals, index),
+        global_names: env.defs.iter().map(|(name, _, _)| name.clone()).collect(),
+    }
+}
+
+fn check_source(root_path: &Path, source: &str) -> Result<(), RunError> {
+    let mut env = Env::new();
+    let mut loaded = HashSet::new();
+    let import_base = root_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut last_def = None;
+    process_file_source(
+        source,
+        import_base,
+        &mut env,
+        &mut loaded,
+        &mut HashSet::new(),
+        &mut last_def,
+    )
 }
 
 fn resolve_import_path(base: &Path, path: &str) -> PathBuf {
@@ -217,7 +273,6 @@ fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<
 }
 
 fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env) -> Result<RunOutput, RunError> {
-    println!("{}: ✓", name);
     let closed_ty_globals = apply_globals(&env.defs, ty);
     let closed_val = val.clone();
 
@@ -252,13 +307,13 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cubical_import_test_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
-        let nat_path = dir.join("nat.uwuc");
-        let main_path = dir.join("main.uwuc");
+        let nat_path = dir.join("nat.owl");
+        let main_path = dir.join("main.owl");
 
-        fs::write(&nat_path, "data Nat = | zero : Nat | suc : Nat -> Nat\n").unwrap();
+        fs::write(&nat_path, "inductive Nat where | zero : Nat | suc : Nat -> Nat\n").unwrap();
         fs::write(
             &main_path,
-            "import \"nat.uwuc\"\n\ndef main : Nat -> Nat = \\n. n\n",
+            "import \"nat.owl\"\n\ndef main : Nat -> Nat := fun n => n\n",
         )
         .unwrap();
 
@@ -273,16 +328,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cubical_cycle_test_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
-        let a_path = dir.join("a.uwuc");
-        let b_path = dir.join("b.uwuc");
+        let a_path = dir.join("a.owl");
+        let b_path = dir.join("b.owl");
 
         let mut a_file = fs::File::create(&a_path).unwrap();
-        writeln!(a_file, "import \"b.uwuc\"").unwrap();
-        writeln!(a_file, "def a : U0 = U0").unwrap();
+        writeln!(a_file, "import \"b.owl\"").unwrap();
+        writeln!(a_file, "def a : U0 := U0").unwrap();
 
         let mut b_file = fs::File::create(&b_path).unwrap();
-        writeln!(b_file, "import \"a.uwuc\"").unwrap();
-        writeln!(b_file, "def b : U0 = U0").unwrap();
+        writeln!(b_file, "import \"a.owl\"").unwrap();
+        writeln!(b_file, "def b : U0 := U0").unwrap();
 
         let err = run(&a_path).unwrap_err();
         assert!(matches!(err, RunError::Import(_)));
@@ -292,13 +347,13 @@ mod tests {
 
     #[test]
     fn run_plus_on_nat() {
-        let src = "data Nat = | zero : Nat | suc : Nat -> Nat\n\
-                   def plus : Nat -> Nat -> Nat = \\m n. elim (\\_. Nat) \
-                   { | zero => n | suc m' => suc (plus m' n) } m\n\
-                   def four : Nat = plus (suc (suc zero)) (suc (suc zero))";
+        let src = "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+                   def plus : Nat -> Nat -> Nat := fun m n => match m return Nat with \
+                   | zero => n | suc m' => suc (plus m' n)\n\
+                   def four : Nat := plus (suc (suc zero)) (suc (suc zero))";
         let dir = std::env::temp_dir().join(format!("cubical_plus_test_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("main.uwuc");
+        let path = dir.join("main.owl");
         fs::write(&path, src).unwrap();
         let output = run(&path).expect("plus should typecheck");
         assert_eq!(output.name, "four");
@@ -308,13 +363,13 @@ mod tests {
     #[test]
     fn transport_over_ua_still_works() {
         let src = "\
-def id : (A : U0) -> A -> A = \\A x. x\n\
-def transportExample : (A B : U0) -> Equiv A B -> A -> B =\n\
-  \\A B e a. transport (<i> ua e @ i) a\n\
-def main : (A B : U0) -> Equiv A B -> A -> B = transportExample\n";
+def id : ∀ (A : U0), A -> A := fun A x => x\n\
+def transportExample : ∀ (A : U0), ∀ (B : U0), Equiv A B -> A -> B :=\n\
+  fun A B e a => transport (<i> ua e @ i) a\n\
+def main : ∀ (A : U0), ∀ (B : U0), Equiv A B -> A -> B := transportExample\n";
         let dir = std::env::temp_dir().join(format!("cubical_transport_ua_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("main.uwuc");
+        let path = dir.join("main.owl");
         fs::write(&path, src).unwrap();
         let output = run(&path).expect("transport over ua should typecheck");
         // `run()` prefers `main` over earlier definitions
@@ -324,18 +379,40 @@ def main : (A B : U0) -> Equiv A B -> A -> B = transportExample\n";
 
     #[test]
     fn run_mul_via_run_path() {
-        let src = "data Nat = | zero : Nat | suc : Nat -> Nat\n\
-                   def add : Nat -> Nat -> Nat = \\m n. elim (\\_. Nat) { \
-                   | zero => n | suc k => suc (add k n) } m\n\
-                   def mul : Nat -> Nat -> Nat = \\m n. elim (\\_. Nat) { \
-                   | zero => zero | suc k => add n (mul k n) } m\n\
-                   def main : Nat = mul (suc (suc zero)) (suc (suc (suc zero)))";
+        let src = "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+                   def add : Nat -> Nat -> Nat := fun m n => match m return Nat with \
+                   | zero => n | suc k => suc (add k n)\n\
+                   def mul : Nat -> Nat -> Nat := fun m n => match m return Nat with \
+                   | zero => zero | suc k => add n (mul k n)\n\
+                   def main : Nat := mul (suc (suc zero)) (suc (suc (suc zero)))";
         let dir = std::env::temp_dir().join(format!("cubical_mul_test_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("main.uwuc");
+        let path = dir.join("main.owl");
         fs::write(&path, src).unwrap();
         let output = run(&path).expect("mul should compute");
         eprintln!("mul result: {}", output);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_normalizes_global_definitions() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def add : Nat -> Nat -> Nat := fun m n => match m return Nat with | zero => n | suc k => suc (add k n)\n\
+             def main : Nat := add (suc (suc zero)) (suc (suc zero))",
+        )
+        .expect("program should evaluate");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(4));
+    }
+
+    #[test]
+    fn check_accepts_library_without_definition() {
+        let dir = std::env::temp_dir().join(format!("cubical_check_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("nat.owl");
+        fs::write(&path, "inductive Nat where | zero : Nat | suc : Nat -> Nat\n").unwrap();
+
+        check(&path).expect("a datatype-only library should check");
         let _ = fs::remove_dir_all(&dir);
     }
 }

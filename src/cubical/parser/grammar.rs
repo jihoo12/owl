@@ -46,10 +46,7 @@ impl Parser {
             format!("expected ':' after definition name '{}'", name),
         )?;
         let ty = self.parse_term()?;
-        self.expect(
-            TokenKind::Equals,
-            format!("expected '=' after type for definition '{}'", name),
-        )?;
+        self.expect_definition_value(&name)?;
         // Allow the definition body to refer to itself (and later globals).
         self.global_env.insert(0, name.clone());
         let val = self.parse_term()?;
@@ -71,10 +68,14 @@ impl Parser {
             })?);
         }
 
-        self.expect(
-            TokenKind::Equals,
-            format!("expected '=' after datatype name '{}'", name),
-        )?;
+        self.expect_ident("expected 'where' after inductive datatype name")
+            .and_then(|keyword| {
+                if keyword == "where" {
+                    Ok(())
+                } else {
+                    Err(self.error_here("expected 'where' after inductive datatype name"))
+                }
+            })?;
         let mut cons = Vec::new();
         let mut pcons = Vec::new();
         let mut local_dt = Datatype {
@@ -172,24 +173,8 @@ impl Parser {
         if self.consume_ident("let") {
             return self.parse_let();
         }
-        if self.consume(&TokenKind::Backslash) {
-            let binders = self.parse_one_or_more_idents("expected lambda binder after '\\'")?;
-            self.expect(TokenKind::Dot, "expected '.' after lambda binder list")?;
-            for binder in &binders {
-                self.term_env.insert(0, binder.clone());
-            }
-            let body = self.parse_term()?;
-            for _ in &binders {
-                self.term_env.remove(0);
-            }
-            let mut term = body;
-            for binder in binders.into_iter().rev() {
-                term = Term::TAbs(binder, Box::new(term));
-            }
-            return Ok(term);
-        }
         if self.consume_ident("fun") {
-            let binders = self.parse_one_or_more_idents("expected binder after 'fun'")?;
+            let binders = self.parse_lambda_binders("expected binder after 'fun'")?;
             self.expect(
                 TokenKind::FatArrow,
                 "expected '=>' after function binder list",
@@ -217,17 +202,17 @@ impl Parser {
             self.ivar_env.remove(0);
             return Ok(Term::PLam(binder, Box::new(body)));
         }
-        if self.consume_ident("Π") || self.consume_ident("Pi") {
+        if self.consume_ident("∀") {
             let (binder, ty) = self.parse_parenthesized_binder("Pi")?;
-            self.expect(TokenKind::Dot, "expected '.' after Pi binder")?;
+            self.expect_binder_separator("Pi")?;
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
             return Ok(Term::TPi(binder, Box::new(ty), Box::new(body)));
         }
-        if self.consume_ident("Σ") || self.consume_ident("Sigma") {
+        if self.consume_ident("Σ") {
             let (binder, ty) = self.parse_parenthesized_binder("Sigma")?;
-            self.expect(TokenKind::Dot, "expected '.' after Sigma binder")?;
+            self.expect_binder_separator("Sigma")?;
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
@@ -242,7 +227,7 @@ impl Parser {
         if self.consume(&TokenKind::Colon) {
             let _ty = self.parse_term()?;
         }
-        self.expect(TokenKind::Equals, "expected '=' after let binder")?;
+        self.expect(TokenKind::ColonEquals, "expected ':=' after let binder")?;
 
         let value = {
             self.stop_at_in = true;
@@ -447,12 +432,6 @@ impl Parser {
             let g = self.parse_prefix_or_atom()?;
             return Ok(Term::TUnglue(Box::new(phi), Box::new(te), Box::new(g)));
         }
-        if self.consume_ident("elim") {
-            return self.parse_elim();
-        }
-        if self.consume_ident("elim[") {
-            return self.parse_elim();
-        }
         if self.consume_ident("match") {
             return self.parse_match();
         }
@@ -479,42 +458,10 @@ impl Parser {
         self.expect(TokenKind::LParen, "expected '('")?;
         if let Some((names, ty)) = self.try_parse_binder_header()? {
             self.expect(TokenKind::RParen, "unmatched '('")?;
-            if self.consume(&TokenKind::Arrow) {
-                // (x y : T) -> body  — dependent Pi; body is an arrow-level term
-                for name in &names {
-                    self.term_env.insert(0, name.clone());
-                }
-                let body = self.parse_arrow()?;
-                for _ in &names {
-                    self.term_env.remove(0);
-                }
-                let mut term = body;
-                for (idx, name) in names.into_iter().enumerate().rev() {
-                    let shifted_ty = crate::cubical::syntax::shift(idx as i32, 0, &ty);
-                    term = Term::TPi(name, Box::new(shifted_ty), Box::new(term));
-                }
-                return Ok(term);
-            }
-            if self.consume(&TokenKind::Star) {
-                // (x y : T) * body  — dependent Sigma; body is a sigma-level term
-                for name in &names {
-                    self.term_env.insert(0, name.clone());
-                }
-                let body = self.parse_sigma()?;
-                for _ in &names {
-                    self.term_env.remove(0);
-                }
-                let mut term = body;
-                for (idx, name) in names.into_iter().enumerate().rev() {
-                    let shifted_ty = crate::cubical::syntax::shift(idx as i32, 0, &ty);
-                    term = Term::TSigma(name, Box::new(shifted_ty), Box::new(term));
-                }
-                return Ok(term);
-            }
             if names.len() == 1 {
                 return self.resolve_ident(names[0].clone());
             } else {
-                return Err(self.error_here("expected '->' or '*' after multiple binder headers"));
+                return Err(self.error_here("use '∀ (x y : A), ...' for dependent binders"));
             }
         }
         let term = self.parse_term()?;
@@ -542,6 +489,83 @@ impl Parser {
         Ok((binder, ty))
     }
 
+    /// Parse Lean-style lambda binders: both `fun x y => ...` and
+    /// `fun (x : A) (y : B) => ...`.  Binder annotations are accepted for
+    /// readability; lambda terms do not retain annotations in the core AST.
+    fn parse_lambda_binders(
+        &mut self,
+        message: impl Into<String>,
+    ) -> Result<Vec<Name>, ParseError> {
+        let message = message.into();
+        let mut binders = Vec::new();
+        loop {
+            match self.peek().kind.clone() {
+                TokenKind::Ident(name) => {
+                    self.pos += 1;
+                    self.term_env.insert(0, name.clone());
+                    binders.push(name);
+                }
+                TokenKind::LParen => {
+                    self.pos += 1;
+                    let mut names = Vec::new();
+                    while let TokenKind::Ident(name) = self.peek().kind.clone() {
+                        self.pos += 1;
+                        names.push(name);
+                    }
+                    if names.is_empty() {
+                        self.term_env.drain(0..binders.len());
+                        return Err(self.error_here("expected binder name after '('") );
+                    }
+                    if let Err(error) = self.expect(TokenKind::Colon, "expected ':' in typed lambda binder") {
+                        self.term_env.drain(0..binders.len());
+                        return Err(error);
+                    }
+                    // Annotations are checked by the surrounding declaration;
+                    // parsing them here still validates their syntax.
+                    let annotation = self.parse_term();
+                    if let Err(error) = annotation {
+                        self.term_env.drain(0..binders.len());
+                        return Err(error);
+                    }
+                    if let Err(error) = self.expect(TokenKind::RParen, "unmatched '(' in lambda binder") {
+                        self.term_env.drain(0..binders.len());
+                        return Err(error);
+                    }
+                    for name in names {
+                        self.term_env.insert(0, name.clone());
+                        binders.push(name);
+                    }
+                }
+                _ => break,
+            }
+        }
+        self.term_env.drain(0..binders.len());
+        if binders.is_empty() {
+            Err(self.error_here(message))
+        } else {
+            Ok(binders)
+        }
+    }
+
+    fn expect_binder_separator(&mut self, form: &str) -> Result<(), ParseError> {
+        if self.consume(&TokenKind::Dot) || self.consume(&TokenKind::Comma) {
+            Ok(())
+        } else {
+            Err(self.error_here(format!("expected '.' or ',' after {} binder", form)))
+        }
+    }
+
+    fn expect_definition_value(&mut self, name: &str) -> Result<(), ParseError> {
+        if self.consume(&TokenKind::ColonEquals) {
+            Ok(())
+        } else {
+            Err(self.error_here(format!(
+                "expected ':=' after type for definition '{}'",
+                name
+            )))
+        }
+    }
+
     fn try_parse_binder_header(&mut self) -> Result<Option<(Vec<Name>, Term)>, ParseError> {
         let save = self.pos;
         let mut names = Vec::new();
@@ -561,17 +585,6 @@ impl Parser {
         Ok(Some((names, ty)))
     }
 
-    fn parse_elim(&mut self) -> Result<Term, ParseError> {
-        let bracketed = self.consume(&TokenKind::LBracket);
-        let motive = self.parse_term()?;
-        if bracketed {
-            self.expect(TokenKind::RBracket, "expected ']' after eliminator motive")?;
-        }
-        let cases = self.parse_elim_cases(true)?;
-        let scrutinee = self.parse_term()?;
-        Ok(Term::TElim(Box::new(motive), cases, Box::new(scrutinee)))
-    }
-
     fn parse_match(&mut self) -> Result<Term, ParseError> {
         let (scrutinee, binder) = if let TokenKind::Ident(name) = self.peek().kind.clone() {
             self.pos += 1;
@@ -589,32 +602,20 @@ impl Parser {
         self.term_env.remove(0);
 
         self.expect_ident("with")?;
-        let cases = self.parse_elim_cases(false)?;
+        let cases = self.parse_match_cases()?;
         let motive = Term::TAbs(binder, Box::new(return_type));
         Ok(Term::TElim(Box::new(motive), cases, Box::new(scrutinee)))
     }
 
-    /// Parse eliminator/match case arms. When `require_brace` is true (`elim`), `{`
-    /// is mandatory; when false (`match`), cases may start with `|` or `{ | ... }`.
-    fn parse_elim_cases(&mut self, require_brace: bool) -> Result<Vec<ElimCase>, ParseError> {
-        let braced = if require_brace {
-            self.expect(TokenKind::LBrace, "expected '{' before eliminator cases")?;
-            true
-        } else {
-            let braced = self.consume(&TokenKind::LBrace);
-            if !braced && !self.at(&TokenKind::Pipe) {
-                return Err(self.error_here("expected '{' or '|' before match cases"));
-            }
-            braced
-        };
+    /// Parse the `| constructor binders => body` arms of a `match`.
+    fn parse_match_cases(&mut self) -> Result<Vec<ElimCase>, ParseError> {
+        if !self.at(&TokenKind::Pipe) {
+            return Err(self.error_here("expected '|' before match cases"));
+        }
 
         let mut cases = Vec::new();
         self.consume(&TokenKind::Pipe);
         loop {
-            if braced && self.at(&TokenKind::RBrace) {
-                break;
-            }
-
             let con = self.expect_ident("expected constructor name in eliminator case")?;
             let mut binders = Vec::new();
             while let TokenKind::Ident(name) = self.peek().kind.clone() {
@@ -664,9 +665,6 @@ impl Parser {
             }
         }
 
-        if braced {
-            self.expect(TokenKind::RBrace, "expected '}' after eliminator cases")?;
-        }
         Ok(cases)
     }
 
@@ -727,23 +725,10 @@ impl Parser {
             .is_some_and(|dt| dt.pcons.iter().any(|c| c.name == con_name))
     }
 
-    fn parse_one_or_more_idents(
-        &mut self,
-        message: impl Into<String>,
-    ) -> Result<Vec<Name>, ParseError> {
-        let first = self.expect_ident(message)?;
-        let mut names = vec![first];
-        while let TokenKind::Ident(name) = self.peek().kind.clone() {
-            self.pos += 1;
-            names.push(name);
-        }
-        Ok(names)
-    }
-
     fn is_decl_start(&self) -> bool {
         matches!(
             &self.peek().kind,
-            TokenKind::Ident(name) if name == "def" || name == "data" || name == "import"
+            TokenKind::Ident(name) if name == "def" || name == "inductive" || name == "import"
         )
     }
 
@@ -870,6 +855,7 @@ fn describe(kind: &TokenKind) -> String {
         TokenKind::LAngle => "'<'".to_string(),
         TokenKind::RAngle => "'>'".to_string(),
         TokenKind::Colon => "':'".to_string(),
+        TokenKind::ColonEquals => "':='".to_string(),
         TokenKind::Comma => "','".to_string(),
         TokenKind::Dot => "'.'".to_string(),
         TokenKind::Arrow => "'->'".to_string(),

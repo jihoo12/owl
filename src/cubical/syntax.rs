@@ -201,14 +201,14 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
         Term::TAbs(x, b) => {
             let mut env2 = vec![x.clone()];
             env2.extend_from_slice(env);
-            format!("λ{}. {}", x, show_term(&env2, b))
+            format!("fun {} => {}", x, show_term(&env2, b))
         }
         Term::TUniv(n) => format!("U{}", n),
         Term::TIntervalTy => "𝕀".to_string(),
         Term::TPi(x, a, b) => {
             let mut env2 = vec![x.clone()];
             env2.extend_from_slice(env);
-            format!("Π({}:{}). {}", x, show_term(env, a), show_term(&env2, b))
+            format!("∀ ({} : {}), {}", x, show_term(env, a), show_term(&env2, b))
         }
         Term::TInterval(i) => format!("{}", i),
         Term::TCube(c) => format!("{}", c),
@@ -267,7 +267,7 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
         Term::TSigma(x, a, b) => {
             let mut env2 = vec![x.clone()];
             env2.extend_from_slice(env);
-            format!("Σ({}:{}). {}", x, show_term(env, a), show_term(&env2, b))
+            format!("Σ ({} : {}), {}", x, show_term(env, a), show_term(&env2, b))
         }
         Term::TPair(a, b) => format!("({} , {})", show_term(env, a), show_term(env, b)),
         Term::TFst(p) => format!("fst {}", show_term(env, p)),

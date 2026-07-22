@@ -1,0 +1,10 @@
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+def main : Nat := add (suc (suc zero)) (suc (suc zero))

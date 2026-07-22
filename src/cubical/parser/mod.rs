@@ -93,7 +93,7 @@ impl ProgramParser {
         }
         let decl = if self.parser.consume_ident("def") {
             self.parser.parse_def()?
-        } else if self.parser.consume_ident("data") {
+        } else if self.parser.consume_ident("inductive") {
             self.parser.parse_data_decl()?
         } else if self.parser.consume_ident("import") {
             self.parser.parse_import()?

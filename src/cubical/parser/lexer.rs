@@ -13,6 +13,8 @@ pub(super) enum TokenKind {
     LAngle,
     RAngle,
     Colon,
+    /// Lean-style definition separator (`:=`).
+    ColonEquals,
     Comma,
     Dot,
     Arrow,
@@ -134,7 +136,12 @@ impl<'a> Lexer<'a> {
                 }
                 ':' => {
                     self.bump();
-                    tokens.push(tok(TokenKind::Colon, line, col));
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        tokens.push(tok(TokenKind::ColonEquals, line, col));
+                    } else {
+                        tokens.push(tok(TokenKind::Colon, line, col));
+                    }
                 }
                 ',' => {
                     self.bump();
@@ -176,9 +183,11 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     tokens.push(tok(TokenKind::OrSym, line, col));
                 }
-                'λ' => {
+                // These binders are identifiers so the grammar can handle
+                // their binding structure without a separate token family.
+                '∀' | 'Σ' => {
                     self.bump();
-                    tokens.push(tok(TokenKind::Backslash, line, col));
+                    tokens.push(tok(TokenKind::Ident(ch.to_string()), line, col));
                 }
                 '"' => tokens.push(self.lex_string(line, col)?),
                 c if c.is_ascii_digit() => tokens.push(self.lex_int(line, col)?),
