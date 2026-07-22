@@ -70,6 +70,8 @@ pub fn term_size(t: &Term) -> usize {
                 + cases.iter().map(|c| term_size(&c.body)).sum::<usize>()
                 + term_size(scrut)
         }
+
+        Term::Meta(_) | Term::TBy(_) => 1,
     }
 }
 

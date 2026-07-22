@@ -5,6 +5,7 @@ pub mod interval;
 pub mod nbe;
 pub mod parser;
 pub mod syntax;
+pub mod tactics;
 pub mod typechecker;
 
 #[cfg(test)]
@@ -283,13 +284,22 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env) -> Result<RunO
         Term::TUniv(_) => {}
         other => return Err(TypeError::ExpectedUniverse(other).into()),
     }
+
+    // Resolve any tactic blocks in the value before typechecking.
+    let resolved_val = crate::cubical::tactics::resolve_tactics(
+        &env.datatypes,
+        &closed_val,
+        &closed_ty_globals,
+        &Vec::new(),
+    )?;
+
     // Register before checking the body so recursive calls resolve.
-    env.define(name.clone(), closed_ty_globals.clone(), closed_val.clone());
-    check_with_full_env(env, &closed_val, &closed_ty_globals)?;
+    env.define(name.clone(), closed_ty_globals.clone(), resolved_val.clone());
+    check_with_full_env(env, &resolved_val, &closed_ty_globals)?;
     let output = RunOutput {
         name: name.clone(),
         ty: closed_ty_globals.clone(),
-        value: nbe_eval(&closed_val),
+        value: nbe_eval(&resolved_val),
         global_names: env.defs.iter().map(|(n, _, _)| n.clone()).collect(),
     };
 
@@ -414,5 +424,50 @@ def main : ∀ (A : U0), ∀ (B : U0), Equiv A B -> A -> B := transportExample\n
 
         check(&path).expect("a datatype-only library should check");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tactic_id_typechecks() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def id : ∀ (A : U0), A -> A := by intro A x; exact x\n\
+             def main : Nat := id Nat zero",
+        )
+        .expect("tactic id should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_assumption_typechecks() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def id_nat : Nat -> Nat := by intro x; assumption\n\
+             def main : Nat := id_nat (suc zero)",
+        )
+        .expect("tactic assumption should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(1));
+    }
+
+    #[test]
+    fn tactic_apply_typechecks() {
+        // apply is not yet implemented in the tactic engine; verify it gives a clear error
+        let result = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def id : ∀ (A : U0), A -> A := fun A x => x\n\
+             def apply_test : Nat -> Nat := by apply id; assumption\n\
+             def main : Nat := apply_test (suc (suc zero))",
+        );
+        assert!(result.is_err(), "apply should fail with a clear error");
+    }
+
+    #[test]
+    fn tactic_exact_nat_typechecks() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def const_zero : Nat := by exact zero\n\
+             def main : Nat := const_zero",
+        )
+        .expect("tactic exact should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
     }
 }

@@ -5,7 +5,7 @@
 use super::lexer::{err, Token, TokenKind};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
-use crate::cubical::syntax::{ConSig, Datatype, ElimCase, Name, PConSig, Term};
+use crate::cubical::syntax::{ConSig, Datatype, ElimCase, Name, PConSig, Tactic, Term};
 
 pub(super) struct Parser {
     tokens: Vec<Token>,
@@ -173,6 +173,9 @@ impl Parser {
         if self.consume_ident("let") {
             return self.parse_let();
         }
+        if self.consume_ident("by") {
+            return self.parse_tactic_block();
+        }
         if self.consume_ident("fun") {
             let binders = self.parse_lambda_binders("expected binder after 'fun'")?;
             self.expect(
@@ -245,6 +248,53 @@ impl Parser {
             Box::new(Term::TAbs(binder, Box::new(body))),
             Box::new(value),
         ))
+    }
+
+    fn parse_tactic_block(&mut self) -> Result<Term, ParseError> {
+        let mut tactics = Vec::new();
+        let mut intro_count = 0;
+        tactics.push(self.parse_tactic(&mut intro_count)?);
+        while self.consume(&TokenKind::Semicolon) {
+            tactics.push(self.parse_tactic(&mut intro_count)?);
+        }
+        for _ in 0..intro_count {
+            self.term_env.remove(0);
+        }
+        Ok(Term::TBy(tactics))
+    }
+
+    fn parse_tactic(&mut self, intro_count: &mut usize) -> Result<Tactic, ParseError> {
+        if self.consume_ident("exact") {
+            let term = self.parse_term()?;
+            return Ok(Tactic::Exact(term));
+        }
+        if self.consume_ident("intro") {
+            let mut names = Vec::new();
+            loop {
+                match self.peek().kind {
+                    TokenKind::Ident(ref name) if name != "exact"
+                        && name != "intro"
+                        && name != "apply"
+                        && name != "assumption" =>
+                    {
+                        let name = self.expect_ident("expected name after 'intro'")?;
+                        self.term_env.insert(0, name.clone());
+                        *intro_count += 1;
+                        names.push(name);
+                    }
+                    _ => break,
+                }
+            }
+            return Ok(Tactic::Intro(names));
+        }
+        if self.consume_ident("apply") {
+            let term = self.parse_term()?;
+            return Ok(Tactic::Apply(term));
+        }
+        if self.consume_ident("assumption") {
+            return Ok(Tactic::Assumption);
+        }
+        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', or 'assumption'"))
     }
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {
@@ -871,6 +921,7 @@ fn describe(kind: &TokenKind) -> String {
         TokenKind::LBracket => "'['".to_string(),
         TokenKind::RBracket => "']'".to_string(),
         TokenKind::Equals => "'='".to_string(),
+        TokenKind::Semicolon => "';'".to_string(),
         TokenKind::String(s) => format!("\"{}\"", s),
         TokenKind::Eof => "end of input".to_string(),
     }

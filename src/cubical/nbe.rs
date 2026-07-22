@@ -120,6 +120,7 @@ pub enum Neutral {
     NElim(Box<Value>, Vec<ElimCase>, Box<Neutral>),
     NTransport(Box<Value>, Box<Value>),
     NHComp(Box<Value>, DNF, Box<Value>, Box<Value>),
+    NMeta(i32),
 }
 
 impl Closure {
@@ -338,6 +339,8 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
                 global_offset,
             )
         }
+        Term::Meta(i) => Value::VNeutral(Neutral::NMeta(*i)),
+        Term::TBy(_) => panic!("TBy should be resolved before NbE"),
     }
 }
 
@@ -573,6 +576,8 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TElim(motive, cases, scrut) => {
             uses_var_at_level(motive, level) || uses_var_at_level(scrut, level) || cases.iter().any(|c| uses_var_at_level(&c.body, level + 1))
         }
+        Term::Meta(_) => false,
+        Term::TBy(_) => false,
     }
 }
 
@@ -1266,6 +1271,7 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             Box::new(quote(size, globals, global_offset, *tube)),
             Box::new(quote(size, globals, global_offset, *base)),
         ),
+        Neutral::NMeta(i) => Term::Meta(i),
     }
 }
 

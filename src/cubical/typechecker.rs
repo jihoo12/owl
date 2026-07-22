@@ -433,6 +433,18 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
                     .collect(),
                 Box::new(go(scrut, n, val)),
             )),
+            Term::Meta(_) => t.clone(),
+            Term::TBy(tactics) => Term::TBy(
+                tactics
+                    .iter()
+                    .map(|tac| match tac {
+                        crate::cubical::syntax::Tactic::Exact(t) => {
+                            crate::cubical::syntax::Tactic::Exact(go(t, n, val))
+                        }
+                        other => other.clone(),
+                    })
+                    .collect(),
+            ),
             // TVar, TUniv, TIntervalTy: no interval vars
             other => other.clone(),
         }
@@ -575,6 +587,12 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
 
         // Lambdas cannot be inferred
         t @ Term::TAbs(_, _) | t @ Term::PLam(_, _) => Err(TypeError::CannotInfer(t.clone())),
+
+        // Tactic blocks cannot be inferred (need type annotation)
+        t @ Term::TBy(_) => Err(TypeError::CannotInfer(t.clone())),
+
+        // Unresolved metavariable
+        t @ Term::Meta(_) => Err(TypeError::CannotInfer(t.clone())),
 
         // Equiv type
         Term::TEquiv(a, b) => {
@@ -1522,6 +1540,17 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             // unify with the expected type so endpoint annotations are checked.
             let inferred = infer_dt(dts, ctx, &Term::TPCon(d.clone(), pc.clone(), args.clone(), r.clone()))?;
             require_equal(ctx, &nbe_eval(ty), &nbe_eval(&inferred))
+        }
+
+        // Tactic block: run tactics to produce a proof term, then check it
+        Term::TBy(tactics) => {
+            let goal_ty = nbe_eval(ty);
+            let mut engine = crate::cubical::tactics::TacticEngine::new(dts, goal_ty);
+            for tac in tactics {
+                engine.run_tactic(tac, ctx)?;
+            }
+            let proof = engine.into_term()?;
+            check_dt(dts, ctx, &proof, ty)
         }
 
         // Fall through to inference + cumulativity.

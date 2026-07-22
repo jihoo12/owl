@@ -30,6 +30,7 @@ pub(super) enum TokenKind {
     LBracket,
     RBracket,
     Equals,
+    Semicolon,
     String(String),
     Eof,
 }
@@ -146,6 +147,10 @@ impl<'a> Lexer<'a> {
                 ',' => {
                     self.bump();
                     tokens.push(tok(TokenKind::Comma, line, col));
+                }
+                ';' => {
+                    self.bump();
+                    tokens.push(tok(TokenKind::Semicolon, line, col));
                 }
                 '.' => {
                     self.bump();

@@ -47,6 +47,13 @@ pub enum Term {
     TFst(Box<Term>),
     TSnd(Box<Term>),
 
+    // -- Tactics / Meta-variables -------------------------------------------
+    /// Unsolved meta-variable (tactic hole). `Meta(i)` is created by the
+    /// tactic engine and should be fully solved before NbE/typechecking.
+    Meta(i32),
+    /// A tactic block `by t1; t2; ...` — desugared by the typechecker.
+    TBy(Vec<Tactic>),
+
     // -- Inductive types / Higher Inductive Types (HITs) --------------------
     /// Reference to a declared datatype, used as a type. `TData("S1")` ~ `S¹`.
     TData(Name),
@@ -96,6 +103,23 @@ pub struct ElimCase {
     pub con: Name,
     pub binders: Vec<Name>,
     pub body: Box<Term>,
+}
+
+// ---------------------------------------------------------------------------
+// Tactics
+// ---------------------------------------------------------------------------
+
+/// A single tactic command in a `by` block.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Tactic {
+    /// `exact t` — provide a complete proof term `t` for the current goal.
+    Exact(Term),
+    /// `intro x1 x2 ...` — introduce one or more Pi-type binders.
+    Intro(Vec<Name>),
+    /// `apply f` — apply a function; creates subgoals for its arguments.
+    Apply(Term),
+    /// `assumption` — search the context for a hypothesis matching the goal.
+    Assumption,
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +338,20 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
                 show_term(env, scrut)
             )
         }
+        Term::Meta(i) => format!("?{}", i),
+        Term::TBy(tactics) => {
+            let tactic_strs: Vec<String> = tactics.iter().map(|t| show_tactic(env, t)).collect();
+            format!("by {}", tactic_strs.join("; "))
+        }
+    }
+}
+
+fn show_tactic(env: &[Name], t: &Tactic) -> String {
+    match t {
+        Tactic::Exact(term) => format!("exact {}", show_term(env, term)),
+        Tactic::Intro(names) => format!("intro {}", names.join(" ")),
+        Tactic::Apply(term) => format!("apply {}", show_term(env, term)),
+        Tactic::Assumption => "assumption".to_string(),
     }
 }
 
@@ -400,6 +438,21 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
                 .collect(),
             b(shift(d, c, scrut)),
         ),
+        Term::Meta(_) => term.clone(),
+        Term::TBy(tactics) => Term::TBy(
+            tactics
+                .iter()
+                .map(|tac| shift_tactic(d, c, tac))
+                .collect(),
+        ),
+    }
+}
+
+fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
+    match tac {
+        Tactic::Exact(t) => Tactic::Exact(shift(d, c, t)),
+        Tactic::Apply(t) => Tactic::Apply(shift(d, c, t)),
+        other => other.clone(),
     }
 }
 
@@ -500,6 +553,21 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                 .collect(),
             b(subst(j, s, scrut)),
         ),
+        Term::Meta(_) => term.clone(),
+        Term::TBy(tactics) => Term::TBy(
+            tactics
+                .iter()
+                .map(|tac| subst_tactic(j, s, tac))
+                .collect(),
+        ),
+    }
+}
+
+fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
+    match tac {
+        Tactic::Exact(t) => Tactic::Exact(subst(j, s, t)),
+        Tactic::Apply(t) => Tactic::Apply(subst(j, s, t)),
+        other => other.clone(),
     }
 }
 
@@ -559,6 +627,8 @@ pub fn max_var(t: &Term) -> i32 {
             }
             m.max(-1)
         }
+        Term::Meta(_) => -1,
+        Term::TBy(_) => -1,
     }
 }
 
@@ -690,6 +760,8 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             }
             check_positivity_in(target, scrut, negative)
         }
+        Term::Meta(_) => Ok(()),
+        Term::TBy(_) => Ok(()),
     }
 }
 

@@ -2,7 +2,7 @@ use super::grammar::Parser;
 use super::lexer::{Lexer, TokenKind};
 use super::*;
 use crate::cubical::interval::I;
-use crate::cubical::syntax::{Term, show_term};
+use crate::cubical::syntax::{Tactic, Term, show_term};
 
 #[test]
 fn parses_lambda_identity() {
@@ -369,4 +369,94 @@ fn data_without_universe_annotation() {
         }
         _ => panic!("expected data declaration"),
     }
+}
+
+#[test]
+fn parses_exact_tactic() {
+    let term = parse_term("by exact fun x => x").unwrap();
+    match term {
+        Term::TBy(tactics) => {
+            assert_eq!(tactics.len(), 1);
+            match &tactics[0] {
+                Tactic::Exact(Term::TAbs(x, _)) => assert_eq!(x, "x"),
+                other => panic!("expected exact tactic with lambda, got {:?}", other),
+            }
+        }
+        other => panic!("expected TBy, got {:?}", other),
+    }
+}
+
+#[test]
+fn parses_semicolon_separated_tactics() {
+    let term = parse_term("by intro x; exact x").unwrap();
+    match term {
+        Term::TBy(tactics) => {
+            assert_eq!(tactics.len(), 2);
+            assert!(matches!(&tactics[0], Tactic::Intro(names) if names == &vec!["x".to_string()]));
+            assert!(matches!(&tactics[1], Tactic::Exact(Term::TVar(0))));
+        }
+        other => panic!("expected TBy, got {:?}", other),
+    }
+}
+
+#[test]
+fn parses_assumption_tactic() {
+    let term = parse_term("by assumption").unwrap();
+    match term {
+        Term::TBy(tactics) => {
+            assert_eq!(tactics.len(), 1);
+            assert!(matches!(&tactics[0], Tactic::Assumption));
+        }
+        other => panic!("expected TBy, got {:?}", other),
+    }
+}
+
+#[test]
+fn parses_apply_tactic() {
+    let mut parser = Parser::new(Lexer::new("by apply f").lex().unwrap());
+    parser.term_env.push("f".to_string());
+    let term = parser.parse_term().unwrap();
+    match term {
+        Term::TBy(tactics) => {
+            assert_eq!(tactics.len(), 1);
+            assert!(matches!(&tactics[0], Tactic::Apply(Term::TVar(0))));
+        }
+        other => panic!("expected TBy, got {:?}", other),
+    }
+}
+
+#[test]
+fn tactic_def_typechecks() {
+    let src = r#"
+        inductive Nat where
+          | zero : Nat
+          | suc : Nat -> Nat
+        def id : ∀ (A : U0), A -> A := by intro A x; exact x
+    "#;
+    let decls = parse_program(src).unwrap();
+    assert_eq!(decls.len(), 2);
+}
+
+#[test]
+fn tactic_def_exact_typechecks() {
+    let src = r#"
+        inductive Nat where
+          | zero : Nat
+          | suc : Nat -> Nat
+        def const : ∀ (A : U0), ∀ (B : U0), A -> B -> A := by intro A B a b; exact a
+    "#;
+    let decls = parse_program(src).unwrap();
+    assert_eq!(decls.len(), 2);
+}
+
+#[test]
+fn tactic_def_assumption_typechecks() {
+    let src = r#"
+        inductive Nat where
+          | zero : Nat
+          | suc : Nat -> Nat
+        def id_nat : Nat -> Nat := by intro x; assumption
+    "#;
+    let decls = parse_program(src).unwrap();
+    assert_eq!(decls.len(), 2);
 }
