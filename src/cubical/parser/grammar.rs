@@ -272,13 +272,7 @@ impl Parser {
             let mut names = Vec::new();
             loop {
                 match self.peek().kind {
-                    TokenKind::Ident(ref name) if name != "exact"
-                        && name != "intro"
-                        && name != "apply"
-                        && name != "assumption"
-                        && name != "reflexivity"
-                        && name != "symmetry"
-                        && name != "split" =>
+                    TokenKind::Ident(ref name) if !is_tactic_keyword(name) =>
                     {
                         let name = self.expect_ident("expected name after 'intro'")?;
                         self.term_env.insert(0, name.clone());
@@ -306,7 +300,31 @@ impl Parser {
         if self.consume_ident("split") {
             return Ok(Tactic::Split);
         }
-        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', or 'split'"))
+        if self.consume_ident("constructor") {
+            // Optional: `constructor con_name` to pick a specific constructor
+            let name = match self.peek().kind.clone() {
+                TokenKind::Ident(ref n) if !is_tactic_keyword(n) => {
+                    self.pos += 1;
+                    Some(n.clone())
+                }
+                _ => None,
+            };
+            return Ok(Tactic::Constructor(name));
+        }
+        if self.consume_ident("destruct") {
+            let name = self.expect_ident("expected hypothesis name after 'destruct'")?;
+            return Ok(Tactic::Destruct(name));
+        }
+        if self.consume_ident("transitivity") {
+            return Ok(Tactic::Transitivity);
+        }
+        if self.consume_ident("compute") {
+            return Ok(Tactic::Compute);
+        }
+        if self.consume_ident("trivial") {
+            return Ok(Tactic::Trivial);
+        }
+        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', or 'trivial'"))
     }
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {
@@ -937,4 +955,35 @@ fn describe(kind: &TokenKind) -> String {
         TokenKind::String(s) => format!("\"{}\"", s),
         TokenKind::Eof => "end of input".to_string(),
     }
+}
+
+/// Returns true if `name` is a reserved keyword that should NOT be consumed
+/// as an optional argument (e.g. the constructor name after `constructor`).
+fn is_tactic_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "exact"
+            | "intro"
+            | "apply"
+            | "assumption"
+            | "reflexivity"
+            | "symmetry"
+            | "split"
+            | "constructor"
+            | "destruct"
+            | "transitivity"
+            | "compute"
+            | "trivial"
+            | "def"
+            | "inductive"
+            | "import"
+            | "match"
+            | "return"
+            | "with"
+            | "fun"
+            | "let"
+            | "in"
+            | "by"
+            | "where"
+    )
 }

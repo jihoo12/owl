@@ -130,6 +130,22 @@ pub enum Tactic {
     /// `split` — split a `Sigma`-type goal `(a, b)` into two sub-goals:
     /// first prove the `A` component, then the `B` component.
     Split,
+    /// `constructor` — apply a constructor of the goal datatype, creating
+    /// subgoals for each argument.  When the goal is an inductive type,
+    /// picks the first constructor (or the named one) and applies it.
+    Constructor(Option<Name>),
+    /// `destruct x` — case-split on a hypothesis `x` of an inductive type,
+    /// creating a subgoal for each constructor case.
+    Destruct(Name),
+    /// `transitivity` — when the goal is `Path A x z`, split into two
+    /// subgoals: prove `Path A x y` and `Path A y z` for an intermediate `y`.
+    Transitivity,
+    /// `compute` — normalize the current goal type (does not produce a proof
+    /// term; purely informational).
+    Compute,
+    /// `trivial` — attempt `reflexivity`; succeeds when the goal is a path
+    /// with definitionally equal endpoints.
+    Trivial,
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +381,14 @@ fn show_tactic(env: &[Name], t: &Tactic) -> String {
         Tactic::Reflexivity => "reflexivity".to_string(),
         Tactic::Symmetry => "symmetry".to_string(),
         Tactic::Split => "split".to_string(),
+        Tactic::Constructor(name) => match name {
+            Some(n) => format!("constructor {}", n),
+            None => "constructor".to_string(),
+        },
+        Tactic::Destruct(name) => format!("destruct {}", name),
+        Tactic::Transitivity => "transitivity".to_string(),
+        Tactic::Compute => "compute".to_string(),
+        Tactic::Trivial => "trivial".to_string(),
     }
 }
 
@@ -465,8 +489,16 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
     match tac {
         Tactic::Exact(t) => Tactic::Exact(shift(d, c, t)),
         Tactic::Apply(t) => Tactic::Apply(shift(d, c, t)),
-        Tactic::Reflexivity | Tactic::Symmetry | Tactic::Split | Tactic::Assumption => tac.clone(),
+        Tactic::Reflexivity
+        | Tactic::Symmetry
+        | Tactic::Split
+        | Tactic::Assumption
+        | Tactic::Transitivity
+        | Tactic::Compute
+        | Tactic::Trivial => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
+        Tactic::Constructor(_) => tac.clone(),
+        Tactic::Destruct(_) => tac.clone(),
     }
 }
 
@@ -581,8 +613,16 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
     match tac {
         Tactic::Exact(t) => Tactic::Exact(subst(j, s, t)),
         Tactic::Apply(t) => Tactic::Apply(subst(j, s, t)),
-        Tactic::Reflexivity | Tactic::Symmetry | Tactic::Split | Tactic::Assumption => tac.clone(),
+        Tactic::Reflexivity
+        | Tactic::Symmetry
+        | Tactic::Split
+        | Tactic::Assumption
+        | Tactic::Transitivity
+        | Tactic::Compute
+        | Tactic::Trivial => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
+        Tactic::Constructor(_) => tac.clone(),
+        Tactic::Destruct(_) => tac.clone(),
     }
 }
 

@@ -29,18 +29,14 @@ def id_nat_fn : Nat -> Nat := fun x => x
 
 def id_nat_apply : Nat -> Nat :=
   by intro x; apply id_nat_fn; exact x
--- apply resolves the function type Nat -> Nat,
--- sees the codomain matches the goal Nat, then sets a subgoal for the domain.
 
 def add_one : Nat -> Nat := fun n => suc n
 
 def double_apply : Nat -> Nat :=
   by intro x; apply add_one; apply add_one; exact x
--- Chained apply: each peels off one Nat -> Nat layer.
 
 def apply_with_def : Nat -> Nat :=
   by intro x; apply id_nat_apply; exact x
--- apply works with named definitions.
 
 -- ─── 5. reflexivity ─────────────────────────────────────────────────────
 
@@ -54,7 +50,6 @@ def refl_suc : Path Nat (suc zero) (suc zero) :=
 
 def sym_zero : Path Nat zero zero :=
   by symmetry; reflexivity
--- symmetry flips Path A u v to Path A v u.
 
 -- ─── 7. split ───────────────────────────────────────────────────────────
 
@@ -65,12 +60,48 @@ def first : Nat := fst pair_first
 
 def second : Nat := snd pair_first
 
--- ─── 8. Combined tactics ────────────────────────────────────────────────
+-- ─── 8. constructor ─────────────────────────────────────────────────────
+
+-- Apply the first constructor (zero) automatically:
+def mk_zero : Nat := by constructor
+
+-- Apply a named constructor with arguments:
+def mk_one : Nat := by constructor suc; exact zero
+
+def mk_two : Nat := by constructor suc; exact (suc zero)
+
+def mk_three : Nat := by constructor suc; exact (suc (suc zero))
+
+-- ─── 9. trivial ─────────────────────────────────────────────────────────
+
+-- Prove a reflexive path automatically:
+def trivial_path : Path Nat zero zero := by trivial
+
+-- Prove a zero-argument constructor automatically:
+def trivial_nat : Nat := by trivial
+
+-- ─── 10. compute ────────────────────────────────────────────────────────
+
+-- Normalize the goal before proving it:
+def computed_id : Nat -> Nat :=
+  by intro x; compute; exact x
+
+-- ─── 11. destruct ───────────────────────────────────────────────────────
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+-- Case-split on a hypothesis:
+def neg : Bool -> Bool :=
+  by intro b; destruct b; exact false; exact true
+
+-- ─── 12. Combined tactics ───────────────────────────────────────────────
 
 def compose_id : Nat -> Nat :=
   by intro x; apply id_nat_fn; apply id_nat_fn; exact x
 
--- ─── 9. Recursive definition referenced by tactic ───────────────────────
+-- ─── 12. Recursive definition referenced by tactic ──────────────────────
 
 def add : Nat -> Nat -> Nat := fun m n =>
   match m return Nat with

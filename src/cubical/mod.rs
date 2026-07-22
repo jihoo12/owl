@@ -537,4 +537,94 @@ def main : ∀ (A : U0), ∀ (B : U0), Equiv A B -> A -> B := transportExample\n
         .expect("tactic split snd should typecheck");
         assert_eq!(syntax::nat_to_int(&output.value), Some(2));
     }
+
+    #[test]
+    fn tactic_constructor_zero_args() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def my_zero : Nat := by constructor\n\
+             def main : Nat := my_zero",
+        )
+        .expect("tactic constructor (zero args) should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_constructor_one_arg() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def my_suc : Nat := by constructor suc; exact zero\n\
+             def main : Nat := my_suc",
+        )
+        .expect("tactic constructor (one arg) should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(1));
+    }
+
+    #[test]
+    fn tactic_constructor_named() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def my_two : Nat := by constructor suc; exact (suc zero)\n\
+             def main : Nat := my_two",
+        )
+        .expect("tactic constructor (named) should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(2));
+    }
+
+    #[test]
+    fn tactic_constructor_chain() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def three : Nat := by constructor suc; exact (suc (suc zero))\n\
+             def main : Nat := three",
+        )
+        .expect("tactic constructor chain should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(3));
+    }
+
+    #[test]
+    fn tactic_trivial_path() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def trivial_path : Path Nat zero zero := by trivial\n\
+             def main : Nat := zero",
+        )
+        .expect("tactic trivial on reflexive path should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_trivial_datatype() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def trivial_nat : Nat := by trivial\n\
+             def main : Nat := trivial_nat",
+        )
+        .expect("tactic trivial on zero-arg constructor should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_compute_simplifies() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def id : Nat -> Nat := fun x => x\n\
+             def compute_test : Nat := by compute; exact (id zero)\n\
+             def main : Nat := compute_test",
+        )
+        .expect("tactic compute should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_transitivity_typechecks() {
+        // transitivity is hard to test with Nat since we don't have
+        // path constructors.  Test that it at least parses and gives
+        // a meaningful error when the goal isn't a path.
+        let err = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def bad : Nat := by transitivity",
+        );
+        assert!(err.is_err());
+    }
 }

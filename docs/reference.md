@@ -47,6 +47,11 @@ The following words are reserved and cannot be used as variable names:
 | `reflexivity` | Tactic: prove reflexive path               |
 | `symmetry`    | Tactic: flip path goal endpoints           |
 | `split`       | Tactic: prove a Sigma-type pair            |
+| `constructor` | Tactic: apply a constructor of goal type   |
+| `destruct`    | Tactic: case-split on a hypothesis         |
+| `transitivity`| Tactic: chain path equalities              |
+| `compute`     | Tactic: normalize the goal type            |
+| `trivial`     | Tactic: prove trivial goals automatically  |
 | `match`       | Pattern matching / elimination             |
 | `return`      | Annotate match return type                 |
 | `with`        | Separator before match cases               |
@@ -726,6 +731,89 @@ def pair : Nat * Nat := by split; exact (suc zero); exact zero
 def first : Nat := fst pair    -- evaluates to 1
 ```
 
+#### `constructor`
+
+Apply a constructor of the goal datatype. When the goal is an inductive type,
+automatically applies a constructor, creating subgoals for each argument.
+
+```
+-- Goal: Nat
+-- constructor picks 'zero' (first constructor, zero args)
+-- Result: zero
+
+def my_zero : Nat := by constructor
+```
+
+Specify a constructor by name:
+
+```
+-- constructor suc applies the 'suc' constructor, creating a subgoal for its Nat argument
+-- exact zero proves that argument
+
+def my_one : Nat := by constructor suc; exact zero
+def my_two : Nat := by constructor suc; exact (suc zero)
+```
+
+#### `destruct`
+
+Case-split on a hypothesis of an inductive type. Creates one subgoal per
+constructor case, with the constructor's arguments added to the context.
+
+```
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+-- After intro b, destruct b creates two subgoals:
+--   Case true: goal is Bool, context is empty
+--   Case false: goal is Bool, context is empty
+
+def neg : Bool -> Bool :=
+  by intro b; destruct b; exact false; exact true
+```
+
+Each case body is proved in sequence. The tactic engine automatically builds
+the eliminator (match expression) from the case bodies.
+
+#### `transitivity`
+
+Split a path equality goal into two subgoals via an intermediate point.
+When the goal is `Path A x z`, creates two subgoals: prove `Path A x y` and
+prove `Path A y z` for a fresh intermediate point `y`.
+
+```
+-- Goal: Path Nat x z
+-- After transitivity:
+--   Subgoal 1: Path Nat x _trans_y  (prove a path from x to some y)
+--   Subgoal 2: Path Nat _trans_y z  (prove a path from that y to z)
+
+-- Note: transitivity requires a HIT with path constructors to be fully useful.
+-- For Nat, it still works for reflexive paths.
+```
+
+#### `compute`
+
+Normalize the current goal type in place. This does not produce a proof term;
+it simplifies the goal for easier reasoning.
+
+```
+-- Normalizes the goal before proving it
+def computed : Nat := by compute; exact (fun x => x) zero
+```
+
+#### `trivial`
+
+Prove trivial goals automatically. Succeeds when:
+- The goal is a path `Path A u v` with `u` and `v` definitionally equal
+  (produces `reflexivity`)
+- The goal is an inductive type with a zero-argument constructor
+  (applies that constructor)
+
+```
+def trivial_path : Path Nat zero zero := by trivial
+def trivial_nat : Nat := by trivial    -- applies 'zero'
+```
+
 ### Example: Multi-Step Tactic Proof
 
 ```
@@ -903,6 +991,11 @@ Here is a simplified BNF-style grammar for the Owl surface syntax:
                | "reflexivity"
                | "symmetry"
                | "split"
+               | "constructor" NAME?
+               | "destruct" NAME
+               | "transitivity"
+               | "compute"
+               | "trivial"
 
 <face>       ::= <face_atom> ("\/" <face_atom>)*
 <face_atom>  ::= <face_lit> ("/\ " <face_lit>)*
@@ -981,6 +1074,17 @@ def refl_path : Path Nat zero zero := by reflexivity
 def sym_path : Path Nat zero zero := by symmetry; reflexivity
 
 def pair_val : Nat * Nat := by split; exact (suc zero); exact (suc (suc zero))
+
+def mk_two : Nat := by constructor suc; exact (suc zero)
+
+def trivial_refl : Path Nat zero zero := by trivial
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+def neg : Bool -> Bool :=
+  by intro b; destruct b; exact false; exact true
 ```
 
 ### Example 6: Mutual Dependencies via Match
