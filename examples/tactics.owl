@@ -1,0 +1,86 @@
+-- tactics.owl — comprehensive demonstration of all Owl tactics
+--
+-- Run with:  owl run examples/tactics.owl
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- ─── 1. exact ───────────────────────────────────────────────────────────
+
+def const_zero : Nat := by exact zero
+
+-- ─── 2. intro + exact ───────────────────────────────────────────────────
+
+def id : ∀ (A : U0), A -> A :=
+  by intro A x; exact x
+
+def const : ∀ (A : U0), ∀ (B : U0), A -> B -> A :=
+  by intro A B a b; exact a
+
+-- ─── 3. intro + assumption ──────────────────────────────────────────────
+
+def id_nat : Nat -> Nat :=
+  by intro x; assumption
+
+-- ─── 4. apply ───────────────────────────────────────────────────────────
+
+def id_nat_fn : Nat -> Nat := fun x => x
+
+def id_nat_apply : Nat -> Nat :=
+  by intro x; apply id_nat_fn; exact x
+-- apply resolves the function type Nat -> Nat,
+-- sees the codomain matches the goal Nat, then sets a subgoal for the domain.
+
+def add_one : Nat -> Nat := fun n => suc n
+
+def double_apply : Nat -> Nat :=
+  by intro x; apply add_one; apply add_one; exact x
+-- Chained apply: each peels off one Nat -> Nat layer.
+
+def apply_with_def : Nat -> Nat :=
+  by intro x; apply id_nat_apply; exact x
+-- apply works with named definitions.
+
+-- ─── 5. reflexivity ─────────────────────────────────────────────────────
+
+def refl_zero : Path Nat zero zero :=
+  by reflexivity
+
+def refl_suc : Path Nat (suc zero) (suc zero) :=
+  by reflexivity
+
+-- ─── 6. symmetry ────────────────────────────────────────────────────────
+
+def sym_zero : Path Nat zero zero :=
+  by symmetry; reflexivity
+-- symmetry flips Path A u v to Path A v u.
+
+-- ─── 7. split ───────────────────────────────────────────────────────────
+
+def pair_first : Nat * Nat :=
+  by split; exact (suc (suc zero)); exact (suc (suc (suc zero)))
+
+def first : Nat := fst pair_first
+
+def second : Nat := snd pair_first
+
+-- ─── 8. Combined tactics ────────────────────────────────────────────────
+
+def compose_id : Nat -> Nat :=
+  by intro x; apply id_nat_fn; apply id_nat_fn; exact x
+
+-- ─── 9. Recursive definition referenced by tactic ───────────────────────
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+def add_via_tactic : Nat -> Nat -> Nat :=
+  by intro m n; exact (add m n)
+
+-- ─── Entry point ────────────────────────────────────────────────────────
+
+def main : Nat := add_via_tactic (suc (suc zero)) (suc (suc (suc zero)))
+-- 2 + 3 = 5

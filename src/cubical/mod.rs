@@ -19,7 +19,7 @@ use self::env::{Env, apply_globals, check_with_full_env, infer_with_full_env};
 use self::nbe::{Globals, Neutral, Value, eval_nbe, nbe_eval, nbe_eval_with_globals};
 use self::parser::{Decl, ParseError, ProgramParser};
 use self::syntax::{Name, Term};
-use self::typechecker::{TypeError, check_closed_dt};
+use self::typechecker::{Ctx, TypeError, check_closed_dt};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunOutput {
@@ -286,11 +286,22 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env) -> Result<RunO
     }
 
     // Resolve any tactic blocks in the value before typechecking.
+    // Build the global context so tactic blocks can reference previously
+    // defined names (and the current definition for recursive references).
+    let mut global_ctx: Ctx = env
+        .defs
+        .iter()
+        .map(|(n, ty, _)| (n.clone(), ty.clone()))
+        .collect();
+    // The parser inserts the current definition's name at global_env[0]
+    // before parsing the value, so it is available for self-reference.
+    // Mirror that here by pushing the current name+type at the front.
+    global_ctx.insert(0, (name.clone(), closed_ty_globals.clone()));
     let resolved_val = crate::cubical::tactics::resolve_tactics(
         &env.datatypes,
         &closed_val,
         &closed_ty_globals,
-        &Vec::new(),
+        &global_ctx,
     )?;
 
     // Register before checking the body so recursive calls resolve.
@@ -450,14 +461,26 @@ def main : ∀ (A : U0), ∀ (B : U0), Equiv A B -> A -> B := transportExample\n
 
     #[test]
     fn tactic_apply_typechecks() {
-        // apply is not yet implemented in the tactic engine; verify it gives a clear error
-        let result = run_str(
+        let output = run_str(
             "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
-             def id : ∀ (A : U0), A -> A := fun A x => x\n\
-             def apply_test : Nat -> Nat := by apply id; assumption\n\
+             def id_nat : Nat -> Nat := fun x => x\n\
+             def apply_test : Nat -> Nat := by intro x; apply id_nat; exact x\n\
              def main : Nat := apply_test (suc (suc zero))",
-        );
-        assert!(result.is_err(), "apply should fail with a clear error");
+        )
+        .expect("tactic apply should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(2));
+    }
+
+    #[test]
+    fn tactic_apply_then_exact_typechecks() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def add_one : Nat -> Nat := fun n => suc n\n\
+             def apply_chain_test : Nat -> Nat := by intro x; apply add_one; apply add_one; exact x\n\
+             def main : Nat := apply_chain_test (suc zero)",
+        )
+        .expect("tactic chained apply should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(3));
     }
 
     #[test]
@@ -469,5 +492,49 @@ def main : ∀ (A : U0), ∀ (B : U0), Equiv A B -> A -> B := transportExample\n
         )
         .expect("tactic exact should typecheck");
         assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_reflexivity_typechecks() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def refl_zero : Path Nat zero zero := by reflexivity\n\
+             def main : Nat := zero",
+        )
+        .expect("tactic reflexivity should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_symmetry_typechecks() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def sym_test : Path Nat zero zero := by symmetry; reflexivity\n\
+             def main : Nat := zero",
+        )
+        .expect("tactic symmetry + reflexivity should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_split_typechecks() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def pair_test : Nat * Nat := by split; exact zero; exact (suc zero)\n\
+             def main : Nat := fst pair_test",
+        )
+        .expect("tactic split should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(0));
+    }
+
+    #[test]
+    fn tactic_split_snd_typechecks() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def pair_test2 : Nat * Nat := by split; exact (suc zero); exact (suc (suc zero))\n\
+             def main : Nat := snd pair_test2",
+        )
+        .expect("tactic split snd should typecheck");
+        assert_eq!(syntax::nat_to_int(&output.value), Some(2));
     }
 }

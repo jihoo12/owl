@@ -116,10 +116,20 @@ pub enum Tactic {
     Exact(Term),
     /// `intro x1 x2 ...` — introduce one or more Pi-type binders.
     Intro(Vec<Name>),
-    /// `apply f` — apply a function; creates subgoals for its arguments.
+    /// `apply f` — apply a function to the goal; creates a subgoal for the
+    /// function's domain type.  Works for both dependent and non-dependent
+    /// Pi types.
     Apply(Term),
     /// `assumption` — search the context for a hypothesis matching the goal.
     Assumption,
+    /// `reflexivity` — prove `Path A x x` when the endpoints are
+    /// definitionally equal.
+    Reflexivity,
+    /// `symmetry` — flip the goal from `Path A x y` to `Path A y x`.
+    Symmetry,
+    /// `split` — split a `Sigma`-type goal `(a, b)` into two sub-goals:
+    /// first prove the `A` component, then the `B` component.
+    Split,
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +362,9 @@ fn show_tactic(env: &[Name], t: &Tactic) -> String {
         Tactic::Intro(names) => format!("intro {}", names.join(" ")),
         Tactic::Apply(term) => format!("apply {}", show_term(env, term)),
         Tactic::Assumption => "assumption".to_string(),
+        Tactic::Reflexivity => "reflexivity".to_string(),
+        Tactic::Symmetry => "symmetry".to_string(),
+        Tactic::Split => "split".to_string(),
     }
 }
 
@@ -452,7 +465,8 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
     match tac {
         Tactic::Exact(t) => Tactic::Exact(shift(d, c, t)),
         Tactic::Apply(t) => Tactic::Apply(shift(d, c, t)),
-        other => other.clone(),
+        Tactic::Reflexivity | Tactic::Symmetry | Tactic::Split | Tactic::Assumption => tac.clone(),
+        Tactic::Intro(_) => tac.clone(),
     }
 }
 
@@ -567,7 +581,8 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
     match tac {
         Tactic::Exact(t) => Tactic::Exact(subst(j, s, t)),
         Tactic::Apply(t) => Tactic::Apply(subst(j, s, t)),
-        other => other.clone(),
+        Tactic::Reflexivity | Tactic::Symmetry | Tactic::Split | Tactic::Assumption => tac.clone(),
+        Tactic::Intro(_) => tac.clone(),
     }
 }
 

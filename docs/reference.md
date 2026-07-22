@@ -42,8 +42,11 @@ The following words are reserved and cannot be used as variable names:
 | `by`          | Enter tactic mode                          |
 | `exact`       | Tactic: provide a complete proof term      |
 | `intro`       | Tactic: introduce Pi-type binders          |
-| `apply`       | Tactic: apply a function (not yet active)  |
+| `apply`       | Tactic: apply a function to the goal       |
 | `assumption`  | Tactic: use a hypothesis from context      |
+| `reflexivity` | Tactic: prove reflexive path               |
+| `symmetry`    | Tactic: flip path goal endpoints           |
+| `split`       | Tactic: prove a Sigma-type pair            |
 | `match`       | Pattern matching / elimination             |
 | `return`      | Annotate match return type                 |
 | `with`        | Separator before match cases               |
@@ -179,7 +182,7 @@ itself and all earlier definitions by name.
 ```
 def id : forall (A : U0), A -> A := fun A x => x
 
-def const : forall (A B : U0), A -> B -> A := fun A B a b => a
+def const : ∀ (A B : U0), A -> B -> A := fun A B a b => a
 
 def double : Nat -> Nat := fun n => add n n
 ```
@@ -640,9 +643,88 @@ def id_nat : Nat -> Nat := by intro x; assumption
 
 #### `apply`
 
-*Not yet implemented.* Applying a function to the current goal creates
-subgoals for the function's arguments. This tactic currently returns an
-error.
+Apply a function to the current goal. The function must have a Pi type whose
+codomain matches (or is definitionally equal to) the goal. The domain becomes
+the new subgoal. The function must be a named definition (bare lambdas without
+type annotations cannot be inferred by the type checker).
+
+```
+-- Goal: Nat
+-- apply id_nat_fn  where  id_nat_fn : Nat -> Nat, codomain is Nat
+-- New goal: Nat
+
+def id_nat_fn : Nat -> Nat := fun x => x
+
+def apply_test : Nat -> Nat :=
+  by intro x; apply id_nat_fn; exact x
+```
+
+When multiple arguments are needed, chain `apply` tactics:
+
+```
+def add_one : Nat -> Nat := fun n => suc n
+
+def compose_test : Nat -> Nat :=
+  by intro x; apply add_one; apply add_one; exact x
+```
+
+`apply` also works with previously defined tactic proofs:
+
+```
+def id_nat : Nat -> Nat := by intro x; assumption
+
+def test : Nat -> Nat := by intro x; apply id_nat; exact x
+```
+
+The function term can reference earlier definitions and hypotheses available
+in the tactic context at the time of the `apply` tactic.
+
+#### `reflexivity`
+
+Prove a reflexive path. When the goal is `Path A u v` and `u` and `v` are
+definitionally equal, `reflexivity` produces the constant path `<i> u`.
+
+```
+-- Goal: Path Nat zero zero
+-- reflexivity succeeds because zero = zero
+
+def refl_zero : Path Nat zero zero := by reflexivity
+```
+
+#### `symmetry`
+
+Flip the endpoints of a path goal. When the goal is `Path A u v`, symmetry
+changes it to `Path A v u`.
+
+```
+-- Goal: Path Nat zero zero
+-- After symmetry: Path Nat zero zero (same in this case)
+
+def sym_test : Path Nat zero zero := by symmetry; reflexivity
+```
+
+#### `split`
+
+Prove a Sigma type (pair type) by providing each component separately.
+When the goal is `Sigma (x : A), B` (or `A * B`), split changes the goal
+to `A` (the first component). After the first component is proved, the goal
+becomes `B` (possibly substituted with the first component).
+
+```
+-- Goal: Nat * Nat
+-- After split: goal becomes Nat (first component)
+-- After exact (suc zero): goal becomes Nat (second component)
+-- After exact zero: done, produces (suc zero , zero)
+
+def pair : Nat * Nat := by split; exact (suc zero); exact zero
+```
+
+Projections use `fst` and `snd`:
+
+```
+def pair : Nat * Nat := by split; exact (suc zero); exact zero
+def first : Nat := fst pair    -- evaluates to 1
+```
 
 ### Example: Multi-Step Tactic Proof
 
@@ -818,6 +900,9 @@ Here is a simplified BNF-style grammar for the Owl surface syntax:
                | "intro" NAME+
                | "apply" <term>
                | "assumption"
+               | "reflexivity"
+               | "symmetry"
+               | "split"
 
 <face>       ::= <face_atom> ("\/" <face_atom>)*
 <face_atom>  ::= <face_lit> ("/\ " <face_lit>)*
@@ -831,7 +916,7 @@ Here is a simplified BNF-style grammar for the Owl surface syntax:
 ### Example 1: Identity Function
 
 ```
-def id : forall (A : U0), A -> A := fun A x => x
+def id : ∀ (A : U0), A -> A := fun A x => x
 ```
 
 ### Example 2: Natural Numbers and Addition
@@ -874,14 +959,28 @@ def transportExample :
 This constructs a function that converts `A` to `B` given an equivalence,
 using transport along the univalence path.
 
-### Example 5: Tactic Proof
+### Example 5: Tactic Proofs
 
 ```
-def id : forall (A : U0), A -> A := by intro A x; exact x
+def id : ∀ (A : U0), A -> A := by intro A x; exact x
 
 def const_zero : Nat := by exact zero
 
 def id_nat : Nat -> Nat := by intro x; assumption
+
+def id_nat_fn : Nat -> Nat := fun x => x
+
+def id_nat_apply : Nat -> Nat := by intro x; apply id_nat_fn; exact x
+
+def add_one : Nat -> Nat := fun n => suc n
+
+def double_apply : Nat -> Nat := by intro x; apply add_one; apply add_one; exact x
+
+def refl_path : Path Nat zero zero := by reflexivity
+
+def sym_path : Path Nat zero zero := by symmetry; reflexivity
+
+def pair_val : Nat * Nat := by split; exact (suc zero); exact (suc (suc zero))
 ```
 
 ### Example 6: Mutual Dependencies via Match

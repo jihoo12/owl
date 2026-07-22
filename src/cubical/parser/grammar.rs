@@ -205,7 +205,7 @@ impl Parser {
             self.ivar_env.remove(0);
             return Ok(Term::PLam(binder, Box::new(body)));
         }
-        if self.consume_ident("∀") {
+        if self.consume_ident("∀") || self.consume_ident("forall") {
             let (binder, ty) = self.parse_parenthesized_binder("Pi")?;
             self.expect_binder_separator("Pi")?;
             self.term_env.insert(0, binder.clone());
@@ -275,7 +275,10 @@ impl Parser {
                     TokenKind::Ident(ref name) if name != "exact"
                         && name != "intro"
                         && name != "apply"
-                        && name != "assumption" =>
+                        && name != "assumption"
+                        && name != "reflexivity"
+                        && name != "symmetry"
+                        && name != "split" =>
                     {
                         let name = self.expect_ident("expected name after 'intro'")?;
                         self.term_env.insert(0, name.clone());
@@ -294,7 +297,16 @@ impl Parser {
         if self.consume_ident("assumption") {
             return Ok(Tactic::Assumption);
         }
-        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', or 'assumption'"))
+        if self.consume_ident("reflexivity") {
+            return Ok(Tactic::Reflexivity);
+        }
+        if self.consume_ident("symmetry") {
+            return Ok(Tactic::Symmetry);
+        }
+        if self.consume_ident("split") {
+            return Ok(Tactic::Split);
+        }
+        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', or 'split'"))
     }
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {
