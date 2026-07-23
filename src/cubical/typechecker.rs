@@ -13,7 +13,7 @@ use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
 use crate::cubical::interval::{DNF, I, Literal};
 use crate::cubical::nbe::nbe_eval;
-use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, Term, beta, shift, show_term};
+use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, Term, beta, shift, show_term, subst};
 
 // ---------------------------------------------------------------------------
 // Context
@@ -267,8 +267,7 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
         }
         _ => match nbe_eval(t) {
             Term::TUniv(n) => Ok(n),
-            Term::TData(d) => {
-                // Use the annotated level if present, otherwise default to 0.
+            Term::TData(d, _) => {
                 let level = dts.iter()
                     .find(|dt| dt.name == d)
                     .and_then(|dt| dt.universe_level)
@@ -441,8 +440,10 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
             Term::TFst(p) => nbe_eval(&Term::TFst(Box::new(go(p, n, val)))),
             Term::TSnd(p) => nbe_eval(&Term::TSnd(Box::new(go(p, n, val)))),
             // Inductive types / HITs: recurse into all sub-terms.
-            // TData has no interval variables.
-            Term::TData(_) => t.clone(),
+            Term::TData(d, params) => nbe_eval(&Term::TData(
+                d.clone(),
+                params.iter().map(|a| go(a, n, val)).collect(),
+            )),
             Term::TCon(data, con, args) => nbe_eval(&Term::TCon(
                 data.clone(),
                 con.clone(),
@@ -524,18 +525,57 @@ fn shift_cases(cases: &[ElimCase], d: i32) -> Vec<ElimCase> {
         .collect()
 }
 
+/// Compute the expected endpoint for a path-constructor case in an eliminator.
+///
+/// The face term (e.g. `inc(trunc_0)`) is a constructor application whose
+/// free variables are the case binders.  Instead of evaluating
+/// `TElim(motive, cases, face)` through `nbe_eval` — which cannot reduce
+/// when the scrutinee has free variables — we directly look up the matching
+/// case body and apply it to the face's constructor arguments.
 fn eval_elim_face(
-    motive: &Term,
+    _motive: &Term,
     cases: &[ElimCase],
     face: &Term,
-    ord_vars: &[Term],
-    ambient_depth: i32,
+    _ord_vars: &[Term],
+    _ambient_depth: i32,
 ) -> Term {
-    let face_scrut = instantiate_telescope(ord_vars, face);
+    // Peel apart the face to find (con_name, con_args).
+    // The face is either:
+    //   TCon(d, c, args)           — zero or more args in TCon
+    //   TApp(TCon(d,c,base), ...)  — additional args wrapped in TApp
+    fn extract_con(t: &Term) -> Option<(&str, Vec<Term>)> {
+        match t {
+            Term::TCon(_d, c, args) => Some((c, args.clone())),
+            Term::TApp(f, a) => {
+                if let Some((c, mut args)) = extract_con(f) {
+                    args.push(a.as_ref().clone());
+                    Some((c, args))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    if let Some((con_name, con_args)) = extract_con(face) {
+        if let Some(case) = cases.iter().find(|c| c.con == con_name) {
+            // Apply each constructor arg to the case body via beta.
+            // The case body has `case.binders.len()` lambda binders;
+            // each beta substitutes one binder with the corresponding arg.
+            let mut result: Term = (*case.body).clone();
+            for arg in &con_args {
+                result = beta(&result, arg);
+            }
+            return nbe_eval(&result);
+        }
+    }
+
+    // Fallback (shouldn't normally be reached): try the old TElim approach.
     nbe_eval(&Term::TElim(
-        Box::new(shift(ambient_depth, 0, motive)),
-        shift_cases(cases, ambient_depth),
-        Box::new(nbe_eval(&face_scrut)),
+        Box::new(shift(_ambient_depth, 0, _motive)),
+        shift_cases(cases, _ambient_depth),
+        Box::new(nbe_eval(face)),
     ))
 }
 
@@ -1104,21 +1144,29 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         // Inductive types / HITs
         // ------------------------------------------------------------------
 
-        // TData(d) : U_k  where k is the maximum universe level required by
-        // any constructor argument type. We compute this by checking each
-        // arg type in a scope containing all prior args of that telescope.
-        // Datatypes with no constructors and no args default to U_0.
-        Term::TData(d) => {
+        // TData(d, args) : ...  where args are the parameter arguments.
+        // If args fully apply all parameters (or there are no parameters),
+        // the type is U_k. If args are fewer than parameters, we build
+        // a Pi type for the remaining parameters.
+        Term::TData(d, args) => {
             let dt = dts
                 .iter()
                 .find(|dt| &dt.name == d)
                 .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
 
-            // If the datatype has a universe-level annotation, use it directly.
-            if let Some(level) = dt.universe_level {
-                return Ok(Term::TUniv(level));
+            // If the datatype has a universe-level annotation, use it directly
+            // for the fully-applied case.
+            if args.len() >= dt.params.len() {
+                if let Some(level) = dt.universe_level {
+                    return Ok(Term::TUniv(level));
+                }
             }
 
+            // Compute the maximum universe level over all constructor arg types.
+            // For parameterized types, substitute provided parameter args into
+            // the arg_tys before computing levels, so that TVar(0) etc.
+            // referencing parameters get resolved.
+            let num_params = dt.params.len();
             let mut max_level: Level = 0;
 
             // Ordinary constructors
@@ -1126,13 +1174,17 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let mut tel_ctx = ctx.clone();
                 let mut prev_args: Vec<Term> = Vec::new();
                 for (k, arg_ty) in con_sig.arg_tys.iter().enumerate() {
+                    // Substitute provided parameters (reverse order for de Bruijn).
+                    let mut substituted = arg_ty.clone();
+                    for i in (0..num_params.min(args.len())).rev() {
+                        substituted = beta(&substituted, &args[i]);
+                    }
                     let arg_ty_inst = prev_args
                         .iter()
                         .rev()
-                        .fold(arg_ty.clone(), |ty, a| beta(&ty, a));
+                        .fold(substituted, |ty, a| beta(&ty, a));
                     let lvl = type_level_dt(dts, &tel_ctx, &arg_ty_inst)?;
                     max_level = max_level.max(lvl);
-                    // Push a fresh variable for this arg into the context.
                     let var_name = format!("_con_arg_{}", k);
                     let depth = k as i32;
                     prev_args.push(shift(depth + 1, 0, &Term::TVar(0)));
@@ -1145,10 +1197,14 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let mut tel_ctx = ctx.clone();
                 let mut prev_args: Vec<Term> = Vec::new();
                 for (k, arg_ty) in pcon_sig.arg_tys.iter().enumerate() {
+                    let mut substituted = arg_ty.clone();
+                    for i in (0..num_params.min(args.len())).rev() {
+                        substituted = beta(&substituted, &args[i]);
+                    }
                     let arg_ty_inst = prev_args
                         .iter()
                         .rev()
-                        .fold(arg_ty.clone(), |ty, a| beta(&ty, a));
+                        .fold(substituted, |ty, a| beta(&ty, a));
                     let lvl = type_level_dt(dts, &tel_ctx, &arg_ty_inst)?;
                     max_level = max_level.max(lvl);
                     let var_name = format!("_pcon_arg_{}", k);
@@ -1158,12 +1214,50 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 }
             }
 
-            Ok(Term::TUniv(max_level))
+            // If args fully apply all params (or no params), return U_k.
+            // If args are fewer than params, build a Pi type for remaining params.
+            if args.len() >= dt.params.len() {
+                Ok(Term::TUniv(max_level))
+            } else {
+                // Build a Pi type for the remaining parameters.
+                // Each remaining param's type may reference earlier params via de Bruijn indices.
+                // We substitute the provided args into the parameter telescope, then
+                // wrap the result in Pi types for the remaining params.
+                let provided = args.len();
+                let remaining = &dt.params[provided..];
+                let mut result = Term::TUniv(max_level);
+                // Build from innermost to outermost (remaining params are later in the list)
+                // The body references params via de Bruijn: param 0 is index 0, param 1 is index 1, etc.
+                // After substituting provided args, remaining param 0 becomes index 0, etc.
+                let mut offset = remaining.len() as i32;
+                for (_i, (pname, pty)) in remaining.iter().enumerate().rev() {
+                    // Shift the param type to account for the remaining binders
+                    let shifted_pty = shift(offset, 0, pty);
+                    result = Term::TPi(
+                        pname.clone(),
+                        Box::new(shifted_pty),
+                        Box::new(result),
+                    );
+                    offset -= 1;
+                }
+                // Substitute provided args for the outermost params
+                let mut final_result = result;
+                for (_i, arg) in args.iter().enumerate().rev() {
+                    final_result = beta(&final_result, arg);
+                }
+                // The result still has free vars for remaining params (indices 0..remaining.len()-1),
+                // so shift them down by `provided`
+                let final_result = shift(-(provided as i32), 0, &final_result);
+                Ok(final_result)
+            }
         }
 
-        // TCon(d, c, args) : TData(d)
+        // TCon(d, c, args) : TData(d, params)
         // Check each arg against the constructor's declared argument types,
         // substituting earlier args into later (dependent) argument types.
+        // For parameterized types, arg_tys reference parameters via de Bruijn
+        // indices (TVar(0) for first param). We infer parameter values from
+        // argument types when they are free variables in the param range.
         Term::TCon(d, c, args) => {
             let dt = dts
                 .iter()
@@ -1171,42 +1265,116 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
             // Check if this is an ordinary constructor.
             if let Some(sig) = dt.find_con(c) {
-                if args.len() != sig.arity() {
-                    return Err(TypeError::WrongNumberOfArgs {
-                        con: c.clone(),
-                        expected: sig.arity(),
-                        got: args.len(),
-                    });
+                let num_params = dt.params.len();
+                // Phase 1: Infer parameter values from argument types.
+                // When arg_tys[k] (after substituting determined params and
+                // earlier args) is TVar(i) with i < num_params, that argument
+                // is the parameter itself — infer its type from the argument.
+                let mut param_terms: Vec<Option<Term>> = vec![None; num_params];
+                {
+                    let mut prev_args: Vec<Term> = Vec::new();
+                    for (k, arg) in args.iter().enumerate() {
+                        // Build the arg type, substituting determined params and
+                        // earlier (non-param) args.
+                        let mut arg_ty = sig.arg_tys[k].clone();
+                        for i in (0..num_params).rev() {
+                            if let Some(ref pv) = param_terms[i] {
+                                arg_ty = beta(&arg_ty, pv);
+                            }
+                        }
+                        for prev in prev_args.iter().rev() {
+                            arg_ty = beta(&arg_ty, prev);
+                        }
+                        // If arg_ty is a free variable in the parameter range,
+                        // the arg IS the parameter value — infer its type.
+                        if let Term::TVar(idx) = &arg_ty {
+                            let i = *idx as usize;
+                            if i < num_params && param_terms[i].is_none() {
+                                param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
+                                // Do NOT add to prev_args; this arg is a param.
+                                continue;
+                            }
+                        }
+                        // Otherwise it's a regular argument — record for
+                        // dependent-type substitution in later arg_tys.
+                        prev_args.push(nbe_eval(arg));
+                    }
                 }
+                // Phase 2: Build fully-substituted arg_tys and check args.
                 let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
                 for (k, arg) in args.iter().enumerate() {
-                    let arg_ty = checked_args
-                        .iter()
-                        .rev()
-                        .fold(sig.arg_tys[k].clone(), |ty, prev| beta(&ty, prev));
+                    let mut arg_ty = sig.arg_tys[k].clone();
+                    // Substitute determined parameters (reverse order).
+                    for i in (0..num_params).rev() {
+                        if let Some(ref pv) = param_terms[i] {
+                            arg_ty = beta(&arg_ty, pv);
+                        }
+                    }
+                    // Substitute earlier regular args.
+                    for prev in checked_args.iter().rev() {
+                        arg_ty = beta(&arg_ty, prev);
+                    }
                     check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
                     checked_args.push(nbe_eval(arg));
                 }
-                Ok(Term::TData(d.clone()))
+                // Build the parameter list for the return type.
+                let params: Vec<Term> = param_terms
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        p.clone().unwrap_or_else(|| Term::TVar(i as i32))
+                    })
+                    .collect();
+                Ok(Term::TData(d.clone(), params))
             // Path constructor used as a term (without explicit @).
-            // Its type is Path (TData(d)) face0[args] face1[args].
+            // Its type is Path (TData(d, params)) face0[args] face1[args].
             } else if let Some(sig) = dt.find_pcon(c) {
-                if args.len() != sig.arity() {
-                    return Err(TypeError::WrongNumberOfArgs {
-                        con: c.clone(),
-                        expected: sig.arity(),
-                        got: args.len(),
-                    });
+                let num_params = dt.params.len();
+                // Same parameter-inference logic as above.
+                let mut param_terms: Vec<Option<Term>> = vec![None; num_params];
+                {
+                    let mut prev_args: Vec<Term> = Vec::new();
+                    for (k, arg) in args.iter().enumerate() {
+                        let mut arg_ty = sig.arg_tys[k].clone();
+                        for i in (0..num_params).rev() {
+                            if let Some(ref pv) = param_terms[i] {
+                                arg_ty = beta(&arg_ty, pv);
+                            }
+                        }
+                        for prev in prev_args.iter().rev() {
+                            arg_ty = beta(&arg_ty, prev);
+                        }
+                        if let Term::TVar(idx) = &arg_ty {
+                            let i = *idx as usize;
+                            if i < num_params && param_terms[i].is_none() {
+                                param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
+                                continue;
+                            }
+                        }
+                        prev_args.push(nbe_eval(arg));
+                    }
                 }
                 let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
                 for (k, arg) in args.iter().enumerate() {
-                    let arg_ty = checked_args
-                        .iter()
-                        .rev()
-                        .fold(sig.arg_tys[k].clone(), |ty, prev| beta(&ty, prev));
+                    let mut arg_ty = sig.arg_tys[k].clone();
+                    for i in (0..num_params).rev() {
+                        if let Some(ref pv) = param_terms[i] {
+                            arg_ty = beta(&arg_ty, pv);
+                        }
+                    }
+                    for prev in checked_args.iter().rev() {
+                        arg_ty = beta(&arg_ty, prev);
+                    }
                     check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
                     checked_args.push(nbe_eval(arg));
                 }
+                let params: Vec<Term> = param_terms
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        p.clone().unwrap_or_else(|| Term::TVar(i as i32))
+                    })
+                    .collect();
                 let face0 = checked_args
                     .iter()
                     .rev()
@@ -1216,7 +1384,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     .rev()
                     .fold(sig.face1.clone(), |ty, a| beta(&ty, a));
                 Ok(Term::TPath(
-                    Box::new(Term::TData(d.clone())),
+                    Box::new(Term::TData(d.clone(), params.clone())),
                     Box::new(nbe_eval(&face0)),
                     Box::new(nbe_eval(&face1)),
                 ))
@@ -1225,7 +1393,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             }
         }
 
-        // TPCon(d, pc, args, r) : Path (TData(d)) face0[args] face1[args]
+        // TPCon(d, pc, args, r) : Path (TData(d, params)) face0[args] face1[args]
         Term::TPCon(d, pc, args, r) => {
             let dt = dts
                 .iter()
@@ -1241,29 +1409,60 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     got: args.len(),
                 });
             }
-            // Check ordinary args against telescope, same as TCon.
+            let num_params = dt.params.len();
+            // Phase 1: Infer parameter values from argument types.
+            let mut param_terms: Vec<Option<Term>> = vec![None; num_params];
+            {
+                let mut prev_args: Vec<Term> = Vec::new();
+                for (k, arg) in args.iter().enumerate() {
+                    let mut arg_ty = sig.arg_tys[k].clone();
+                    for i in (0..num_params).rev() {
+                        if let Some(ref pv) = param_terms[i] {
+                            arg_ty = beta(&arg_ty, pv);
+                        }
+                    }
+                    for prev in prev_args.iter().rev() {
+                        arg_ty = beta(&arg_ty, prev);
+                    }
+                    if let Term::TVar(idx) = &arg_ty {
+                        let i = *idx as usize;
+                        if i < num_params && param_terms[i].is_none() {
+                            param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
+                            continue;
+                        }
+                    }
+                    prev_args.push(nbe_eval(arg));
+                }
+            }
+            // Phase 2: Check args with fully-substituted arg_tys.
             let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
             for (k, arg) in args.iter().enumerate() {
-                let arg_ty = checked_args
-                    .iter()
-                    .rev()
-                    .fold(sig.arg_tys[k].clone(), |ty, prev| beta(&ty, prev));
+                let mut arg_ty = sig.arg_tys[k].clone();
+                for i in (0..num_params).rev() {
+                    if let Some(ref pv) = param_terms[i] {
+                        arg_ty = beta(&arg_ty, pv);
+                    }
+                }
+                for prev in checked_args.iter().rev() {
+                    arg_ty = beta(&arg_ty, prev);
+                }
                 check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
                 checked_args.push(nbe_eval(arg));
             }
             // Check interval argument.
             check_interval(ctx, r)?;
-            // TPCon(d, pc, args, r) is the path constructor applied at interval
-            // position r — it is a POINT of TData(d), not a path.  At the
-            // endpoints r=I0 / r=I1 it reduces to face0 / face1 respectively
-            // (handled by reduce_pcon_endpoints_dt in check_dt).
-            Ok(Term::TData(d.clone()))
+            let params: Vec<Term> = param_terms
+                .iter()
+                .enumerate()
+                .map(|(i, p)| p.clone().unwrap_or_else(|| Term::TVar(i as i32)))
+                .collect();
+            Ok(Term::TData(d.clone(), params))
         }
 
         // TElim(motive, cases, scrut)
         //
-        // motive : TData(d) → U_n
-        // scrut  : TData(d)
+        // motive : TData(d, params) → U_n
+        // scrut  : TData(d, params)
         // For each constructor  c  with args A₀…Aₖ:
         //   case body : motive (TCon(d, c, args))
         //   (under binders for the constructor args in context)
@@ -1272,10 +1471,10 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         //   body is PLam-shaped (see ElimCase docs in syntax.rs)
         // Returns: motive scrut
         Term::TElim(motive, cases, scrut) => {
-            // Infer scrutinee — must be TData(d).
+            // Infer scrutinee — must be TData(d, params).
             let scrut_ty = infer_dt(dts, ctx, scrut)?;
-            let d = match nbe_eval(&scrut_ty) {
-                Term::TData(d) => d,
+            let (d, scrut_params) = match nbe_eval(&scrut_ty) {
+                Term::TData(d, params) => (d, params),
                 other => return Err(TypeError::ExpectedData(other)),
             };
             let dt = dts
@@ -1283,24 +1482,59 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 .find(|dt| dt.name == d)
                 .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
 
-            // Verify motive has type Π(_:TData(d)).C where C is a well-formed type.
+            // Verify motive has type Π(_:TData(d, params)).C where C is a well-formed type.
+            let motive_dom = Term::TData(d.clone(), scrut_params.clone());
             match motive.as_ref() {
                 Term::TAbs(x, body) => {
                     let motive_ctx =
-                        extend_ctx(x.clone(), Term::TData(d.clone()), ctx);
+                        extend_ctx(x.clone(), nbe_eval(&motive_dom), ctx);
                     type_level_dt(dts, &motive_ctx, body)?;
                 }
                 _ => {
                     let motive_inferred = infer_dt(dts, ctx, motive)?;
                     match nbe_eval(&motive_inferred) {
                         Term::TPi(x, dom, cod) => {
-                            require_equal(ctx, &nbe_eval(&dom), &Term::TData(d.clone()))?;
+                            require_equal(ctx, &nbe_eval(&dom), &nbe_eval(&motive_dom))?;
                             let cod_ctx = extend_ctx(x, nbe_eval(&dom), ctx);
                             type_level_dt(dts, &cod_ctx, &cod)?;
                         }
                         other => return Err(TypeError::ExpectedPi(other)),
                     }
                 }
+            }
+
+            // Helper: substitute determined params into a constructor's arg_tys.
+            // For parameterized types, arg_tys reference params via de Bruijn
+            // indices (TVar(0) for first param). We substitute the scrutinee's
+            // parameter values to get concrete arg types.
+            fn subst_params(arg_tys: &[Term], params: &[Term]) -> Vec<Term> {
+                arg_tys
+                    .iter()
+                    .map(|ty| {
+                        let mut t = ty.clone();
+                        for p in params.iter().rev() {
+                            t = beta(&t, p);
+                        }
+                        t
+                    })
+                    .collect()
+            }
+
+            // Substitute params into pcon face terms.
+            //
+            // Face terms are parsed in a scope where constructor args occupy
+            // indices 0..num_args-1 and datatype params occupy indices
+            // num_args..num_args+num_params-1.  `beta` always targets
+            // TVar(0) which would corrupt the constructor-arg references,
+            // so we use `subst` at the correct param indices instead.
+            fn subst_params_face(face: &Term, params: &[Term], num_args: usize) -> Term {
+                let mut t = face.clone();
+                // Substitute from highest index to lowest so earlier
+                // substitutions don't shift the indices we still need.
+                for (k, p) in params.iter().enumerate().rev() {
+                    t = subst((num_args + k) as i32, p, &t);
+                }
+                t
             }
 
             // Check all ordinary constructor cases.
@@ -1310,12 +1544,15 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     .find(|c| c.con == con_sig.name)
                     .ok_or_else(|| TypeError::MissingCase(con_sig.name.clone()))?;
 
-                if case.binders.len() != con_sig.arity() {
+                // Substitute params into arg_tys for this constructor.
+                let subst_arg_tys = subst_params(&con_sig.arg_tys, &scrut_params);
+
+                if case.binders.len() != subst_arg_tys.len() {
                     return Err(TypeError::BadElimCase {
                         con: con_sig.name.clone(),
                         msg: format!(
                             "expected {} binders, got {}",
-                            con_sig.arity(),
+                            subst_arg_tys.len(),
                             case.binders.len()
                         ),
                     });
@@ -1323,39 +1560,28 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
 
                 // Build extended context: push binders outermost-first,
                 // last binder ends up at index 0.
-                // arg_tys[k] is in a scope with k prior args (indices 0..k-1),
-                // but as we push onto ctx those already-bound args shift.
-                // We build the ctx incrementally: each new binder's type is
-                // evaluated in the ctx so far (with previous binders live).
                 let mut case_ctx = ctx.clone();
                 let mut con_args_in_ctx: Vec<Term> = Vec::new();
                 for (k, binder_name) in case.binders.iter().enumerate() {
-                    // arg_tys[k] mentions indices 0..k-1 in declaration scope.
-                    // In case_ctx those are already bound at depth 0..k-1 from
-                    // the bottom of the stack.  Substitute them: fold innermost first.
                     let arg_ty = con_args_in_ctx
                         .iter()
                         .rev()
-                        .fold(con_sig.arg_tys[k].clone(), |ty, a| beta(&ty, a));
+                        .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
                     let arg_ty_ev = nbe_eval(&arg_ty);
-                    // This arg, once in context, is TVar(0) in case_ctx after push.
-                    // For the next iteration we record it as TVar(0) shifted up by
-                    // the depth we've pushed so far.
                     let depth = k as i32;
                     con_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
                     case_ctx = extend_ctx(binder_name.clone(), arg_ty_ev, &case_ctx);
                 }
 
-                // Expected type: motive applied to TCon(d, c, all binders as vars).
-                // The binders in case_ctx are at indices 0..arity-1 (innermost=0).
-                // TCon's args are positional outermost-first, so arg[0] = TVar(arity-1), etc.
-                let arity = con_sig.arity();
+                // Expected type: motive applied to TCon(d, c, params, all binders as vars).
+                let arity = subst_arg_tys.len();
                 let con_term_args: Vec<Term> = (0..arity)
                     .map(|k| Term::TVar((arity - 1 - k) as i32))
                     .collect();
                 let scrut_as_con = Term::TCon(d.clone(), con_sig.name.clone(), con_term_args);
+                let shifted_motive = shift((arity) as i32, 0, motive);
                 let expected_ty = nbe_eval(&Term::TApp(
-                    Box::new(shift(arity as i32, 0, motive)),
+                    Box::new(shifted_motive),
                     Box::new(scrut_as_con),
                 ));
                 check_dt(dts, &case_ctx, &case.body, &expected_ty)?;
@@ -1368,93 +1594,76 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     .find(|c| c.con == pcon_sig.name)
                     .ok_or_else(|| TypeError::MissingCase(pcon_sig.name.clone()))?;
 
+                let subst_arg_tys = subst_params(&pcon_sig.arg_tys, &scrut_params);
+
                 // binders = arity ordinary args + 1 interval var (last).
-                let expected_binders = pcon_sig.arity() + 1;
+                let expected_binders = subst_arg_tys.len() + 1;
                 if case.binders.len() != expected_binders {
                     return Err(TypeError::BadElimCase {
                         con: pcon_sig.name.clone(),
                         msg: format!(
                             "expected {} binders ({} ordinary + 1 interval), got {}",
                             expected_binders,
-                            pcon_sig.arity(),
+                            subst_arg_tys.len(),
                             case.binders.len()
                         ),
                     });
                 }
 
-                let ord_binders = &case.binders[..pcon_sig.arity()];
-                let i_name = &case.binders[pcon_sig.arity()];
+                let ord_binders = &case.binders[..subst_arg_tys.len()];
+                let i_name = &case.binders[subst_arg_tys.len()];
 
-                // Build context for the ordinary args (same as ordinary constructor).
+                // Build context for the ordinary args.
                 let mut case_ctx = ctx.clone();
                 let mut pcon_args_in_ctx: Vec<Term> = Vec::new();
                 for (k, binder_name) in ord_binders.iter().enumerate() {
                     let arg_ty = pcon_args_in_ctx
                         .iter()
                         .rev()
-                        .fold(pcon_sig.arg_tys[k].clone(), |ty, a| beta(&ty, a));
+                        .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
                     let depth = k as i32;
                     pcon_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
                     case_ctx = extend_ctx(binder_name.clone(), nbe_eval(&arg_ty), &case_ctx);
                 }
 
-                // Extend with the interval variable (now at index 0).
-                let arity = pcon_sig.arity();
-                let ord_case_ctx = case_ctx.clone();
+                let arity = subst_arg_tys.len();
+                let _ord_case_ctx = case_ctx.clone();
                 case_ctx = extend_ctx(i_name.clone(), interval_ty(), &case_ctx);
 
-                // The case body must have type:
-                //   Path (motive (pcon args i)) face0_case face1_case
-                // where:
-                //   - pcon args i = TPCon(d, pc, [arg vars], TVar(0))  [i at 0]
-                //   - face0_case  = case for the pcon's face0 constructor applied to elim
-                //   - face1_case  = case for the pcon's face1 constructor applied to elim
-                //
-                // The path type A is (motive ∘ TPCon(d,pc,args,i)), so it's a PLam.
-                // The endpoints are motive applied to the boundary TCon terms,
-                // but more precisely: by coherence the boundaries must match what
-                // the ordinary cases return when applied to the boundary args.
-                // We check the body as a PLam over the interval variable and
-                // verify endpoints via boundary substitution into the case body.
-
-                // Ordinary arg vars in case_ctx (interval at 0, ord args at 1..arity).
-                let ord_var: Vec<Term> = (0..arity)
-                    .map(|k| Term::TVar((arity - k) as i32)) // arg[0]=TVar(arity), arg[k]=TVar(arity-k)
-                    .collect();
                 let ord_var_no_i: Vec<Term> = (0..arity)
                     .map(|k| Term::TVar((arity - 1 - k) as i32))
                     .collect();
                 let i_var = Term::TVar(0);
+                let ord_var: Vec<Term> = (0..arity)
+                    .map(|k| Term::TVar((arity - k) as i32))
+                    .collect();
 
-                // TPCon with i as the interval arg.
                 let pcon_term = Term::TPCon(
                     d.clone(),
                     pcon_sig.name.clone(),
                     ord_var.clone(),
                     Box::new(i_var.clone()),
                 );
-
-                // Motive applied to pcon — this is a PLam over i.
-                // motive lives in ctx (no case binders), so shift by (arity+1).
                 let motive_shifted = shift((arity + 1) as i32, 0, motive);
                 let motive_at_pcon = nbe_eval(&Term::TApp(
                     Box::new(motive_shifted.clone()),
                     Box::new(pcon_term),
                 ));
-
+                let face0_subst = subst_params_face(&pcon_sig.face0, &scrut_params, arity);
+                let face1_subst = subst_params_face(&pcon_sig.face1, &scrut_params, arity);
                 let face0_case =
-                    eval_elim_face(motive, cases, &pcon_sig.face0, &ord_var_no_i, arity as i32);
+                    eval_elim_face(motive, cases, &face0_subst, &ord_var_no_i, arity as i32);
                 let face1_case =
-                    eval_elim_face(motive, cases, &pcon_sig.face1, &ord_var_no_i, arity as i32);
+                    eval_elim_face(motive, cases, &face1_subst, &ord_var_no_i, arity as i32);
 
                 let expected_body_ty = Term::TPath(
                     Box::new(Term::PLam(i_name.clone(), Box::new(motive_at_pcon))),
-                    Box::new(face0_case.clone()),
-                    Box::new(face1_case.clone()),
+                    Box::new(shift(1, 0, &face0_case)),
+                    Box::new(shift(1, 0, &face1_case)),
                 );
                 check_dt(dts, &case_ctx, &case.body, &expected_body_ty)?;
 
-                 let body_at0 = match case.body.as_ref() {
+                let body_at0 = match case.body.as_ref() {
                     Term::PLam(_, inner) => shift(-1, 0, &reduce_pcon_endpoints_dt(
                         dts,
                         &apply_literal(&Literal::NegVar(0), inner),
@@ -1474,14 +1683,14 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         Box::new(Term::TInterval(I::I1)),
                     )),
                 };
-                require_equal_endpt(&ord_case_ctx, &face0_case, &body_at0)?;
-                require_equal_endpt(&ord_case_ctx, &face1_case, &body_at1)?;
+                require_equal_endpt(&case_ctx, &shift(1, 0, &face0_case), &body_at0)?;
+                require_equal_endpt(&case_ctx, &shift(1, 0, &face1_case), &body_at1)?;
             }
 
-            // Result type: motive scrut
+            // Return type: motive applied to the scrutinee.
             Ok(nbe_eval(&Term::TApp(
-                Box::new(motive.as_ref().clone()),
-                Box::new(nbe_eval(scrut)),
+                motive.clone(),
+                scrut.clone(),
             )))
         }
     }
@@ -1517,10 +1726,13 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
                         let reduced_args: Vec<Term> =
                             args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
                         let face = if is_i0 { &sig.face0 } else { &sig.face1 };
-                        let face_inst = reduced_args
-                            .iter()
-                            .rev()
-                            .fold(face.clone(), |acc, a| beta(&acc, a));
+                        // Face parsing uses insert(0,...), so TVar(k) = arg_{num_args-1-k}.
+                        // Substitute from highest face-var index to lowest.
+                        let arity = reduced_args.len();
+                        let mut face_inst = face.clone();
+                        for k in (0..arity).rev() {
+                            face_inst = subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
+                        }
                         return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face_inst));
                     }
             }
@@ -1683,17 +1895,17 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
         // endpoint mismatch the caller's annotation encodes.
         Term::TCon(d, c, args) => {
             let expected_ty_nf = nbe_eval(ty);
-            let expected_d = match &expected_ty_nf {
-                Term::TData(ed) => {
+            let (expected_d, expected_params) = match &expected_ty_nf {
+                Term::TData(ed, ep) => {
                     if ed != d {
                         return Err(TypeError::TypeMismatch(
                             Box::new(expected_ty_nf.clone()),
-                            Box::new(Term::TData(d.clone())),
+                            Box::new(Term::TData(d.clone(), vec![])),
                         ));
                     }
-                    ed.clone()
+                    (ed.clone(), ep.clone())
                 }
-                _ => d.clone(),
+                _ => (d.clone(), vec![]),
             };
             let dt = dts
                 .iter()
@@ -1707,16 +1919,62 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                         got: args.len(),
                     });
                 }
+                // Substitute known params from the expected type into arg_tys,
+                // then use the same two-phase inference as infer_dt so that
+                // parameters not provided by the expected type are inferred from
+                // the arguments.
+                let num_params = dt.params.len();
+                let mut param_terms: Vec<Option<Term>> = Vec::with_capacity(num_params);
+                for p in &expected_params {
+                    param_terms.push(Some(p.clone()));
+                }
+                while param_terms.len() < num_params {
+                    param_terms.push(None);
+                }
+                // Phase 1: infer remaining params from arguments.
+                {
+                    let mut prev_args: Vec<Term> = Vec::new();
+                    for (k, arg) in args.iter().enumerate() {
+                        let mut arg_ty = sig.arg_tys[k].clone();
+                        for i in (0..num_params).rev() {
+                            if let Some(ref pv) = param_terms[i] {
+                                arg_ty = beta(&arg_ty, pv);
+                            }
+                        }
+                        for prev in prev_args.iter().rev() {
+                            arg_ty = beta(&arg_ty, prev);
+                        }
+                        if let Term::TVar(idx) = &arg_ty {
+                            let i = *idx as usize;
+                            if i < num_params && param_terms[i].is_none() {
+                                param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
+                                continue;
+                            }
+                        }
+                        prev_args.push(nbe_eval(arg));
+                    }
+                }
+                // Phase 2: check all args with fully-substituted arg_tys.
                 let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
                 for (k, arg) in args.iter().enumerate() {
-                    let arg_ty = checked_args
-                        .iter()
-                        .rev()
-                        .fold(sig.arg_tys[k].clone(), |ty, prev| beta(&ty, prev));
+                    let mut arg_ty = sig.arg_tys[k].clone();
+                    for i in (0..num_params).rev() {
+                        if let Some(ref pv) = param_terms[i] {
+                            arg_ty = beta(&arg_ty, pv);
+                        }
+                    }
+                    for prev in checked_args.iter().rev() {
+                        arg_ty = beta(&arg_ty, prev);
+                    }
                     check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
                     checked_args.push(nbe_eval(arg));
                 }
-                require_equal(ctx, &expected_ty_nf, &Term::TData(d.clone()))
+                let params: Vec<Term> = param_terms
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| p.clone().unwrap_or_else(|| Term::TVar(i as i32)))
+                    .collect();
+                require_equal(ctx, &expected_ty_nf, &Term::TData(d.clone(), params))
             } else if dt.find_pcon(c).is_some() {
                 let inferred = infer_dt(dts, ctx, &Term::TCon(d.clone(), c.clone(), args.clone()))?;
                 require_equal(ctx, &expected_ty_nf, &nbe_eval(&inferred))
@@ -1831,7 +2089,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                     check_dt(dts, ctx, &reduced, ty)
                 }
             }
-        },
+        }
     }
 }
 

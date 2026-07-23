@@ -84,7 +84,7 @@ fn parses_nat_declaration() {
             assert_eq!(dt.cons.len(), 2);
             assert_eq!(dt.cons[0].name, "zero");
             assert_eq!(dt.cons[1].name, "suc");
-            assert_eq!(dt.cons[1].arg_tys, vec![Term::TData("Nat".to_string())]);
+            assert_eq!(dt.cons[1].arg_tys, vec![Term::TData("Nat".to_string(), vec![])]);
         }
         _ => panic!("expected data declaration"),
     }

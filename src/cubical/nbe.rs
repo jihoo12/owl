@@ -73,7 +73,7 @@ pub enum Value {
     VInterval(I),
     VIntervalVar(usize),
     VCube(DNF),
-    VData(Name),
+    VData(Name, Vec<Value>),
     VCon(Name, Name, Vec<Value>),
     VPCon(Name, Name, Vec<Value>, Box<Value>),
     VElim(Box<Value>, Vec<ElimCase>, Box<Value>),
@@ -343,7 +343,10 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
         ),
         Term::TFst(p) => do_fst(globals, global_offset, eval_nbe(env, globals, global_offset, p)),
         Term::TSnd(p) => do_snd(globals, global_offset, eval_nbe(env, globals, global_offset, p)),
-        Term::TData(d) => Value::VData(d.clone()),
+        Term::TData(d, params) => Value::VData(
+            d.clone(),
+            params.iter().map(|p| eval_nbe(env, globals, global_offset, p)).collect(),
+        ),
         Term::TCon(data, con, args) => Value::VCon(
             data.clone(),
             con.clone(),
@@ -646,7 +649,8 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TPair(a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level),
         Term::TFst(p) => uses_var_at_level(p, level),
         Term::TSnd(p) => uses_var_at_level(p, level),
-        Term::TUniv(_) | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) | Term::TData(_) => false,
+        Term::TUniv(_) | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => false,
+        Term::TData(_, params) => params.iter().any(|p| uses_var_at_level(p, level)),
         Term::TCon(_, _, args) => args.iter().any(|a| uses_var_at_level(a, level)),
         Term::TPCon(_, _, args, r) => args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level),
         Term::TElim(motive, cases, scrut) => {
@@ -1459,7 +1463,10 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
         Value::VInterval(i) => Term::TInterval(i),
         Value::VIntervalVar(level) => level_to_var(size, level),
         Value::VCube(c) => Term::TCube(c),
-        Value::VData(d) => Term::TData(d),
+        Value::VData(d, params) => Term::TData(
+            d,
+            params.into_iter().map(|p| quote(size, globals, global_offset, p)).collect(),
+        ),
         Value::VCon(d, c, args) => {
             Term::TCon(d, c, args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect())
         }

@@ -62,8 +62,10 @@ pub enum Term {
     TBy(Vec<Tactic>),
 
     // -- Inductive types / Higher Inductive Types (HITs) --------------------
-    /// Reference to a declared datatype, used as a type. `TData("S1")` ~ `S¹`.
-    TData(Name),
+    /// Reference to a declared datatype, used as a type.
+    /// `TData("S1", [])` ~ `S¹`. For parameterized types:
+    /// `TData("List", [A])` ~ `List A`.
+    TData(Name, Vec<Term>),
     /// Ordinary constructor application: `TCon(datatype, constructor, args)`.
     /// `args` are positional, in declaration order.
     TCon(Name, Name, Vec<Term>),
@@ -209,6 +211,10 @@ impl PConSig {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Datatype {
     pub name: Name,
+    /// Parameter declarations, e.g. `(A : Type)` in `inductive Trunc (A : Type) where ...`.
+    /// Each entry is (param_name, param_type). Parameters are in outermost-first
+    /// order and their types form a telescope (each type can reference earlier params).
+    pub params: Vec<(Name, Term)>,
     pub cons: Vec<ConSig>,
     pub pcons: Vec<PConSig>,
     /// Optional universe-level annotation: `data D : U_n = ...`
@@ -350,7 +356,14 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
         Term::TPair(a, b) => format!("({} , {})", show_term(env, a), show_term(env, b)),
         Term::TFst(p) => format!("fst {}", show_term(env, p)),
         Term::TSnd(p) => format!("snd {}", show_term(env, p)),
-        Term::TData(d) => d.clone(),
+        Term::TData(d, params) => {
+            if params.is_empty() {
+                d.clone()
+            } else {
+                let parts: Vec<String> = params.iter().map(|p| show_term(env, p)).collect();
+                format!("({} {})", d, parts.join(" "))
+            }
+        }
         t @ Term::TCon(_, c, args) => {
             if let Some(n) = nat_to_int(t) {
                 return format!("{}", n);
@@ -493,7 +506,10 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TPair(a, bx) => Term::TPair(b(shift(d, c, a)), b(shift(d, c, bx))),
         Term::TFst(p) => Term::TFst(b(shift(d, c, p))),
         Term::TSnd(p) => Term::TSnd(b(shift(d, c, p))),
-        Term::TData(name) => Term::TData(name.clone()),
+        Term::TData(name, params) => Term::TData(
+            name.clone(),
+            params.iter().map(|p| shift(d, c, p)).collect(),
+        ),
         Term::TCon(data, con, args) => Term::TCon(
             data.clone(),
             con.clone(),
@@ -627,7 +643,10 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
         Term::TPair(a, bx) => Term::TPair(b(subst(j, s, a)), b(subst(j, s, bx))),
         Term::TFst(p) => Term::TFst(b(subst(j, s, p))),
         Term::TSnd(p) => Term::TSnd(b(subst(j, s, p))),
-        Term::TData(name) => Term::TData(name.clone()),
+        Term::TData(name, params) => Term::TData(
+            name.clone(),
+            params.iter().map(|p| subst(j, s, p)).collect(),
+        ),
         Term::TCon(data, con, args) => Term::TCon(
             data.clone(),
             con.clone(),
@@ -754,7 +773,7 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TPair(a, b) => max_var(a).max(max_var(b)),
         Term::TFst(p) => max_var(p),
         Term::TSnd(p) => max_var(p),
-        Term::TData(_) => -1,
+        Term::TData(_, params) => params.iter().map(max_var).fold(-1, |m, x| m.max(x)),
         Term::TCon(_, _, args) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)),
         Term::TPCon(_, _, args, r) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(max_var(r)),
         Term::TElim(motive, cases, scrut) => {
@@ -826,7 +845,7 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
     match ty {
         Term::TVar(_) => Ok(()),
         Term::TUniv(_) | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => Ok(()),
-        Term::TData(name) => {
+        Term::TData(name, params) => {
             if name == target && negative {
                 Err(PositivityError {
                     datatype: target.to_string(),
@@ -837,6 +856,9 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
                     ),
                 })
             } else {
+                for p in params {
+                    check_positivity_in(target, p, negative)?;
+                }
                 Ok(())
             }
         }
@@ -982,9 +1004,10 @@ mod tests {
     fn positive_nat_is_ok() {
         let dt = Datatype {
             name: "Nat".into(),
+            params: vec![],
             cons: vec![
                 ConSig { name: "zero".into(), arg_tys: vec![] },
-                ConSig { name: "suc".into(), arg_tys: vec![Term::TData("Nat".into())] },
+                ConSig { name: "suc".into(), arg_tys: vec![Term::TData("Nat".into(), vec![])] },
             ],
             pcons: vec![],
             universe_level: None,
@@ -996,13 +1019,14 @@ mod tests {
     fn positive_list_is_ok() {
         let dt = Datatype {
             name: "List".into(),
+            params: vec![],
             cons: vec![
                 ConSig { name: "nil".into(), arg_tys: vec![] },
                 ConSig {
                     name: "cons".into(),
                     arg_tys: vec![
                         Term::TUniv(0),
-                        Term::TData("List".into()),
+                        Term::TData("List".into(), vec![]),
                     ],
                 },
             ],
@@ -1019,12 +1043,13 @@ mod tests {
         // which is a negative position — but it's not the recursive type.
         let dt = Datatype {
             name: "Bad".into(),
+            params: vec![],
             cons: vec![ConSig {
                 name: "mk".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
-                    b(Term::TPi("_".into(), b(Term::TData("Nat".into())), b(Term::TData("Nat".into())))),
-                    b(Term::TData("Nat".into())),
+                    b(Term::TPi("_".into(), b(Term::TData("Nat".into(), vec![])), b(Term::TData("Nat".into(), vec![])))),
+                    b(Term::TData("Nat".into(), vec![])),
                 )],
             }],
             pcons: vec![],
@@ -1039,12 +1064,13 @@ mod tests {
         // Bad appears as the domain of an arrow — negative occurrence.
         let dt = Datatype {
             name: "Bad".into(),
+            params: vec![],
             cons: vec![ConSig {
                 name: "cons".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
-                    b(Term::TData("Bad".into())),
-                    b(Term::TData("Bad".into())),
+                    b(Term::TData("Bad".into(), vec![])),
+                    b(Term::TData("Bad".into(), vec![])),
                 )],
             }],
             pcons: vec![],
@@ -1062,16 +1088,17 @@ mod tests {
         // as the return type (positive). This IS strictly positive.
         let dt = Datatype {
             name: "Bad".into(),
+            params: vec![],
             cons: vec![ConSig {
                 name: "cons".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
                     b(Term::TPi(
                         "_".into(),
-                        b(Term::TData("Nat".into())),
-                        b(Term::TData("Bad".into())),
+                        b(Term::TData("Nat".into(), vec![])),
+                        b(Term::TData("Bad".into(), vec![])),
                     )),
-                    b(Term::TData("Bad".into())),
+                    b(Term::TData("Bad".into(), vec![])),
                 )],
             }],
             pcons: vec![],
@@ -1086,16 +1113,17 @@ mod tests {
         // Bad appears as the domain of the inner arrow — negative.
         let dt = Datatype {
             name: "Bad".into(),
+            params: vec![],
             cons: vec![ConSig {
                 name: "cons".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
                     b(Term::TPi(
                         "_".into(),
-                        b(Term::TData("Bad".into())),
-                        b(Term::TData("Nat".into())),
+                        b(Term::TData("Bad".into(), vec![])),
+                        b(Term::TData("Nat".into(), vec![])),
                     )),
-                    b(Term::TData("Bad".into())),
+                    b(Term::TData("Bad".into(), vec![])),
                 )],
             }],
             pcons: vec![],
@@ -1110,12 +1138,13 @@ mod tests {
         // data Pair = mk (Σ(_ : Nat). Nat)
         let dt = Datatype {
             name: "Pair".into(),
+            params: vec![],
             cons: vec![ConSig {
                 name: "mk".into(),
                 arg_tys: vec![Term::TSigma(
                     "_".into(),
-                    b(Term::TData("Nat".into())),
-                    b(Term::TData("Nat".into())),
+                    b(Term::TData("Nat".into(), vec![])),
+                    b(Term::TData("Nat".into(), vec![])),
                 )],
             }],
             pcons: vec![],
@@ -1130,6 +1159,7 @@ mod tests {
         // Path type is always positive.
         let dt = Datatype {
             name: "S1".into(),
+            params: vec![],
             cons: vec![ConSig { name: "base".into(), arg_tys: vec![] }],
             pcons: vec![PConSig {
                 name: "loop".into(),

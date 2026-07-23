@@ -5,7 +5,7 @@
 use super::lexer::{err, Token, TokenKind};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
-use crate::cubical::syntax::{ConSig, Datatype, ElimCase, Name, PConSig, Tactic, Term};
+use crate::cubical::syntax::{ConSig, Datatype, ElimCase, Name, PConSig, Tactic, Term, shift};
 
 pub(super) struct Parser {
     tokens: Vec<Token>,
@@ -59,6 +59,21 @@ impl Parser {
     pub(super) fn parse_data_decl(&mut self) -> Result<Decl, ParseError> {
         let name = self.expect_ident("expected datatype name")?;
 
+        // Parse optional parameter binders: `inductive Trunc (A : Type) where`
+        let mut params: Vec<(Name, Term)> = Vec::new();
+        while self.at(&TokenKind::LParen) && self.peek_ahead_is_binder() {
+            self.expect(TokenKind::LParen, "expected '(' for parameter binder")?;
+            let param_name = self.expect_ident("expected parameter name")?;
+            self.expect(
+                TokenKind::Colon,
+                format!("expected ':' after parameter name '{}'", param_name),
+            )?;
+            let param_ty = self.parse_term()?;
+            self.expect(TokenKind::RParen, "expected ')' after parameter type")?;
+            self.term_env.insert(0, param_name.clone());
+            params.push((param_name, param_ty));
+        }
+
         // Optional universe annotation: `data D : U_n = ...`
         let mut uni_level: Option<i32> = None;
         if self.consume(&TokenKind::Colon) {
@@ -83,6 +98,7 @@ impl Parser {
         let mut pcons = Vec::new();
         let mut local_dt = Datatype {
             name: name.clone(),
+            params: params.clone(),
             cons: Vec::new(),
             pcons: Vec::new(),
             universe_level: None,
@@ -94,13 +110,30 @@ impl Parser {
                 format!("expected ':' after constructor name '{}'", con_name),
             )?;
             let (arg_tys, result) = self.parse_constructor_type(&name, &local_dt)?;
-            if result != Term::TData(name.clone()) {
-                return Err(self.error_here(format!(
-                    "constructor '{}' must return datatype '{}'",
-                    con_name, name
-                )));
+            // For parameterized types, the result is TData(name, param_args).
+            // For non-parameterized types, the result is TData(name, []).
+            match &result {
+                Term::TData(n, result_args) if n == &name => {
+                    // OK — return type matches the declared datatype
+                    let _ = result_args;
+                }
+                _ => {
+                    return Err(self.error_here(format!(
+                        "constructor '{}' must return datatype '{}'",
+                        con_name, name
+                    )));
+                }
             }
             if self.consume(&TokenKind::LBracket) {
+                // Push constructor argument binders so face terms can reference them.
+                // Face terms for path constructors use these to specify endpoints,
+                // e.g. `trunc : A -> A -> Trunc A [ inc a, inc b ]` where `a`
+                // and `b` refer to the constructor's own arguments.
+                let num_args = arg_tys.len();
+                for k in 0..num_args {
+                    self.term_env
+                        .insert(0, format!("{}_{}", con_name, k));
+                }
                 let face0 = self.parse_face_with_extra_datatype(&local_dt)?;
                 self.expect(
                     TokenKind::Comma,
@@ -111,6 +144,9 @@ impl Parser {
                     TokenKind::RBracket,
                     "expected ']' after path-constructor faces",
                 )?;
+                for _ in 0..num_args {
+                    self.term_env.remove(0);
+                }
                 let sig = PConSig {
                     name: con_name,
                     arg_tys,
@@ -134,7 +170,11 @@ impl Parser {
                 name
             )));
         }
-        Ok(Decl::Data(Datatype { name, cons, pcons, universe_level: uni_level }))
+        // Remove parameter binders from term_env
+        for _ in &params {
+            self.term_env.remove(0);
+        }
+        Ok(Decl::Data(Datatype { name, params, cons, pcons, universe_level: uni_level }))
     }
 
     fn parse_constructor_type(
@@ -148,14 +188,23 @@ impl Parser {
         self.datatypes.truncate(old_dts_len);
         let mut args = Vec::new();
         let mut cur = ty;
+        let mut depth: i32 = 0;
         loop {
             match cur {
                 Term::TPi(_, a, b) => {
-                    args.push(*a);
+                    let shifted_a = shift(-depth, 0, &a);
+                    args.push(shifted_a);
+                    depth += 1;
                     cur = *b;
                 }
-                Term::TData(ref n) if n == dt_name => return Ok((args, cur)),
-                other => return Ok((args, other)),
+                Term::TData(ref n, _) if n == dt_name => {
+                    let result = shift(-depth, 0, &cur);
+                    return Ok((args, result));
+                }
+                other => {
+                    let result = shift(-depth, 0, &other);
+                    return Ok((args, result));
+                }
             }
         }
     }
@@ -426,6 +475,10 @@ impl Parser {
         if let Term::TCon(dt, con, mut con_args) = first {
             con_args.extend(args);
             return Ok(Term::TCon(dt, con, con_args));
+        }
+        if let Term::TData(name, mut params) = first {
+            params.extend(args);
+            return Ok(Term::TData(name, params));
         }
         let mut term = first;
         for arg in args {
@@ -801,7 +854,7 @@ impl Parser {
                 } else {
                     (&binders[..], None)
                 };
-                for binder in ord_binders.iter().rev() {
+                for binder in ord_binders.iter() {
                     self.term_env.insert(0, binder.clone());
                 }
                 if let Some(iv) = ivar_binder {
@@ -864,7 +917,7 @@ impl Parser {
             return Ok(Term::TCon(dt, name, Vec::new()));
         }
         if self.datatypes.iter().any(|dt| dt.name == name) {
-            return Ok(Term::TData(name));
+            return Ok(Term::TData(name, vec![]));
         }
         Err(self.error_here(format!("unknown name or constructor '{}'", name)))
     }
@@ -978,6 +1031,16 @@ impl Parser {
     pub(super) fn error_here(&self, message: impl Into<String>) -> ParseError {
         let token = self.peek();
         err(message, token.line, token.col)
+    }
+
+    /// Check if the current position looks like `(name : type)` — a parenthesized
+    /// binder. Returns true if we see `(` followed by an identifier.
+    fn peek_ahead_is_binder(&self) -> bool {
+        if self.pos + 1 < self.tokens.len() {
+            matches!(&self.tokens[self.pos + 1].kind, TokenKind::Ident(_))
+        } else {
+            false
+        }
     }
 }
 

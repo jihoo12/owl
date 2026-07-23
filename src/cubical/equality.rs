@@ -87,7 +87,7 @@ pub fn term_size(t: &Term) -> usize {
         }
 
         // Inductive types / HITs
-        Term::TData(_) => 1,
+        Term::TData(_, params) => 1 + params.iter().map(term_size).sum::<usize>(),
 
         Term::TCon(_, _, args) => 1 + args.iter().map(term_size).sum::<usize>(),
 

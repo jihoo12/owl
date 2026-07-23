@@ -606,7 +606,7 @@ impl<'a> TacticEngine<'a> {
                 let goal_nf = nbe_eval(&self.goal_ty);
 
                 match goal_nf {
-                    Term::TData(ref dt_name) => {
+                    Term::TData(ref dt_name, _) => {
                         let dt = self
                             .dts
                             .iter()
@@ -690,7 +690,7 @@ impl<'a> TacticEngine<'a> {
 
                 // Infer the datatype name.
                 let dt_name = match &var_ty {
-                    Term::TData(n) => n.clone(),
+                    Term::TData(n, _) => n.clone(),
                     other => {
                         return Err(TypeError::Other(format!(
                             "destruct: '{}' has type {}, which is not an inductive type",
@@ -969,7 +969,7 @@ impl<'a> TacticEngine<'a> {
                     }
                     // For non-path types, try to find a constructor with
                     // zero arguments (unit-like).
-                    Term::TData(ref dt_name) => {
+                    Term::TData(ref dt_name, _) => {
                         let dt = self
                             .dts
                             .iter()

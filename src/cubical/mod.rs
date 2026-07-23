@@ -19,7 +19,7 @@ use self::env::{Env, apply_globals, check_with_full_env, infer_with_full_env};
 use self::nbe::{Globals, Neutral, Value, eval_nbe, nbe_eval, nbe_eval_with_globals};
 use self::parser::{Decl, ParseError, ProgramParser};
 use self::syntax::{Name, Term};
-use self::typechecker::{Ctx, TypeError, check_closed_dt};
+use self::typechecker::{Ctx, TypeError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunOutput {
@@ -265,9 +265,29 @@ fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<
             format!("{}", e),
         ))))?;
     env.declare_datatype(dt.clone());
+    // Build a context with the parameter types so that arg_tys which
+    // reference parameters via de Bruijn indices (e.g. TVar(0) for the
+    // first parameter) can be checked.
+    let param_ctx: crate::cubical::typechecker::Ctx = dt
+        .params
+        .iter()
+        .enumerate()
+        .rev()
+        .map(|(i, (pname, pty))| {
+            // Shift the param type up by i so it's well-scoped
+            // in a context where i parameters are already bound.
+            (pname.clone(), crate::cubical::syntax::shift(i as i32, 0, pty))
+        })
+        .collect();
     for con in &dt.cons {
         for arg_ty in &con.arg_tys {
-            check_closed_dt(&env.datatypes, arg_ty, &Term::TUniv(0)).map_err(|e| RunError::Type(Box::new(e)))?;
+            crate::cubical::typechecker::check_dt(
+                &env.datatypes,
+                &param_ctx,
+                arg_ty,
+                &Term::TUniv(0),
+            )
+            .map_err(|e| RunError::Type(Box::new(e)))?;
         }
     }
     Ok(())
