@@ -1,0 +1,4 @@
+No dependent path type (PathP) — Path A u v only takes a fixed type A, not a type family varying over the interval. Full cubical systems need this for heterogeneous paths (e.g., paths between elements of different fibers).
+Single-face composition, not general systems — hcomp/comp take one phi face rather than an arbitrary system of multiple compatible faces, which is how "open box" filling normally works in full cubical theories.
+HITs are minimal — only simple point/path constructors shown (no square/higher-cell constructors, no truncation constructors like those needed for set-quotients or n-types).
+No universe polymorphism beyond a simple stratified U0, U1, U2... cumulative hierarchy.
