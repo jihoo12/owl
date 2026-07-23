@@ -45,20 +45,36 @@ pub fn term_size(t: &Term) -> usize {
         | Term::TGlueElem(a, u, v)
         | Term::TUnglue(a, u, v) => 1 + term_size(a) + term_size(u) + term_size(v),
 
-        Term::THComp(a, ph, u, u0) => {
-            1 + term_size(a) + term_size(ph) + term_size(u) + term_size(u0)
+        Term::THComp(a, sys, u0) => {
+            let mut s = 1 + term_size(a) + term_size(u0);
+            for (phi, t) in sys {
+                s += term_size(phi) + term_size(t);
+            }
+            s
         }
 
-        Term::TComp(a, ph, u, u0) => {
-            1 + term_size(a) + term_size(ph) + term_size(u) + term_size(u0)
+        Term::TComp(a, sys, u0) => {
+            let mut s = 1 + term_size(a) + term_size(u0);
+            for (phi, t) in sys {
+                s += term_size(phi) + term_size(t);
+            }
+            s
         }
 
-        Term::TFill(a, ph, u, u0) => {
-            1 + term_size(a) + term_size(ph) + term_size(u) + term_size(u0)
+        Term::TFill(a, sys, u0) => {
+            let mut s = 1 + term_size(a) + term_size(u0);
+            for (phi, t) in sys {
+                s += term_size(phi) + term_size(t);
+            }
+            s
         }
 
-        Term::THFill(a, ph, u, u0) => {
-            1 + term_size(a) + term_size(ph) + term_size(u) + term_size(u0)
+        Term::THFill(a, sys, u0) => {
+            let mut s = 1 + term_size(a) + term_size(u0);
+            for (phi, t) in sys {
+                s += term_size(phi) + term_size(t);
+            }
+            s
         }
 
         Term::TMkEquiv(a, b, f, g, e, s) => {
@@ -557,53 +573,81 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
     // ------------------------------------------------------------------
     // Cubical form congruence (structural: no fuel consumed)
     // ------------------------------------------------------------------
-    if let (Term::THComp(a1, phi1, u1, u01), Term::THComp(a2, phi2, u2, u02)) = (t1, t2) {
-        return and_result(
-            and_result(
-                eta_eq_memo(fuel, ctx, a1, a2, memo),
-                eta_eq_memo(fuel, ctx, phi1, phi2, memo),
-            ),
-            and_result(
-                eta_eq_memo(fuel, ctx, u1, u2, memo),
-                eta_eq_memo(fuel, ctx, u01, u02, memo),
-            ),
+    if let (Term::THComp(a1, sys1, u01), Term::THComp(a2, sys2, u02)) = (t1, t2) {
+        if sys1.len() != sys2.len() {
+            return NotEqual;
+        }
+        let mut result = and_result(
+            eta_eq_memo(fuel, ctx, a1, a2, memo),
+            eta_eq_memo(fuel, ctx, u01, u02, memo),
         );
+        for ((phi1, t1), (phi2, t2)) in sys1.iter().zip(sys2.iter()) {
+            result = and_result(
+                result,
+                and_result(
+                    eta_eq_memo(fuel, ctx, phi1, phi2, memo),
+                    eta_eq_memo(fuel, ctx, t1, t2, memo),
+                ),
+            );
+        }
+        return result;
     }
-    if let (Term::TComp(a1, phi1, u1, u01), Term::TComp(a2, phi2, u2, u02)) = (t1, t2) {
-        return and_result(
-            and_result(
-                eta_eq_memo(fuel, ctx, a1, a2, memo),
-                eta_eq_memo(fuel, ctx, phi1, phi2, memo),
-            ),
-            and_result(
-                eta_eq_memo(fuel, ctx, u1, u2, memo),
-                eta_eq_memo(fuel, ctx, u01, u02, memo),
-            ),
+    if let (Term::TComp(a1, sys1, u01), Term::TComp(a2, sys2, u02)) = (t1, t2) {
+        if sys1.len() != sys2.len() {
+            return NotEqual;
+        }
+        let mut result = and_result(
+            eta_eq_memo(fuel, ctx, a1, a2, memo),
+            eta_eq_memo(fuel, ctx, u01, u02, memo),
         );
+        for ((phi1, t1), (phi2, t2)) in sys1.iter().zip(sys2.iter()) {
+            result = and_result(
+                result,
+                and_result(
+                    eta_eq_memo(fuel, ctx, phi1, phi2, memo),
+                    eta_eq_memo(fuel, ctx, t1, t2, memo),
+                ),
+            );
+        }
+        return result;
     }
-    if let (Term::TFill(a1, phi1, u1, u01), Term::TFill(a2, phi2, u2, u02)) = (t1, t2) {
-        return and_result(
-            and_result(
-                eta_eq_memo(fuel, ctx, a1, a2, memo),
-                eta_eq_memo(fuel, ctx, phi1, phi2, memo),
-            ),
-            and_result(
-                eta_eq_memo(fuel, ctx, u1, u2, memo),
-                eta_eq_memo(fuel, ctx, u01, u02, memo),
-            ),
+    if let (Term::TFill(a1, sys1, u01), Term::TFill(a2, sys2, u02)) = (t1, t2) {
+        if sys1.len() != sys2.len() {
+            return NotEqual;
+        }
+        let mut result = and_result(
+            eta_eq_memo(fuel, ctx, a1, a2, memo),
+            eta_eq_memo(fuel, ctx, u01, u02, memo),
         );
+        for ((phi1, t1), (phi2, t2)) in sys1.iter().zip(sys2.iter()) {
+            result = and_result(
+                result,
+                and_result(
+                    eta_eq_memo(fuel, ctx, phi1, phi2, memo),
+                    eta_eq_memo(fuel, ctx, t1, t2, memo),
+                ),
+            );
+        }
+        return result;
     }
-    if let (Term::THFill(a1, phi1, u1, u01), Term::THFill(a2, phi2, u2, u02)) = (t1, t2) {
-        return and_result(
-            and_result(
-                eta_eq_memo(fuel, ctx, a1, a2, memo),
-                eta_eq_memo(fuel, ctx, phi1, phi2, memo),
-            ),
-            and_result(
-                eta_eq_memo(fuel, ctx, u1, u2, memo),
-                eta_eq_memo(fuel, ctx, u01, u02, memo),
-            ),
+    if let (Term::THFill(a1, sys1, u01), Term::THFill(a2, sys2, u02)) = (t1, t2) {
+        if sys1.len() != sys2.len() {
+            return NotEqual;
+        }
+        let mut result = and_result(
+            eta_eq_memo(fuel, ctx, a1, a2, memo),
+            eta_eq_memo(fuel, ctx, u01, u02, memo),
         );
+        for ((phi1, t1), (phi2, t2)) in sys1.iter().zip(sys2.iter()) {
+            result = and_result(
+                result,
+                and_result(
+                    eta_eq_memo(fuel, ctx, phi1, phi2, memo),
+                    eta_eq_memo(fuel, ctx, t1, t2, memo),
+                ),
+            );
+        }
+        return result;
     }
     if let (Term::TGlue(a1, phi1, te1), Term::TGlue(a2, phi2, te2)) = (t1, t2) {
         return and_result(

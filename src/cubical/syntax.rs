@@ -9,6 +9,10 @@ use std::fmt;
 pub type Name = String;
 pub type Level = i32;
 
+/// A system of face-tube pairs: `[(phi₁, t₁), (phi₂, t₂), ...]`
+/// Used in hcomp/comp/fill/hfill to specify boundary conditions on multiple faces.
+pub type System = Vec<(Term, Term)>;
+
 // ---------------------------------------------------------------------------
 // Term Syntax
 // ---------------------------------------------------------------------------
@@ -26,10 +30,10 @@ pub enum Term {
     TPath(Box<Term>, Box<Term>, Box<Term>),
     PLam(Name, Box<Term>),
     PApp(Box<Term>, Box<Term>),
-    THComp(Box<Term>, Box<Term>, Box<Term>, Box<Term>),
-    TComp(Box<Term>, Box<Term>, Box<Term>, Box<Term>),
-    TFill(Box<Term>, Box<Term>, Box<Term>, Box<Term>),
-    THFill(Box<Term>, Box<Term>, Box<Term>, Box<Term>),
+    THComp(Box<Term>, System, Box<Term>),
+    TComp(Box<Term>, System, Box<Term>),
+    TFill(Box<Term>, System, Box<Term>),
+    THFill(Box<Term>, System, Box<Term>),
     TEquiv(Box<Term>, Box<Term>),
     TMkEquiv(
         Box<Term>,
@@ -277,34 +281,34 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             format!("⟨{}⟩ {}", i, show_term(&env2, b))
         }
         Term::PApp(p, r) => format!("{} @ {}", show_term(env, p), show_term(env, r)),
-        Term::THComp(a, phi, u, u0) => format!(
-            "hcomp {} [{}] ({}) {}",
-            show_term(env, a),
-            show_term(env, phi),
-            show_term(env, u),
-            show_term(env, u0)
-        ),
-        Term::TComp(a, phi, u, u0) => format!(
-            "comp {} [{}] ({}) {}",
-            show_term(env, a),
-            show_term(env, phi),
-            show_term(env, u),
-            show_term(env, u0)
-        ),
-        Term::TFill(a, phi, u, u0) => format!(
-            "fill {} [{}] ({}) {}",
-            show_term(env, a),
-            show_term(env, phi),
-            show_term(env, u),
-            show_term(env, u0)
-        ),
-        Term::THFill(a, phi, u, u0) => format!(
-            "hfill {} [{}] ({}) {}",
-            show_term(env, a),
-            show_term(env, phi),
-            show_term(env, u),
-            show_term(env, u0)
-        ),
+        Term::THComp(a, sys, u0) => {
+            let sys_str: Vec<String> = sys
+                .iter()
+                .map(|(phi, t)| format!("{} -> {}", show_term(env, phi), show_term(env, t)))
+                .collect();
+            format!("hcomp {} [{}] {}", show_term(env, a), sys_str.join(", "), show_term(env, u0))
+        }
+        Term::TComp(a, sys, u0) => {
+            let sys_str: Vec<String> = sys
+                .iter()
+                .map(|(phi, t)| format!("{} -> {}", show_term(env, phi), show_term(env, t)))
+                .collect();
+            format!("comp {} [{}] {}", show_term(env, a), sys_str.join(", "), show_term(env, u0))
+        }
+        Term::TFill(a, sys, u0) => {
+            let sys_str: Vec<String> = sys
+                .iter()
+                .map(|(phi, t)| format!("{} -> {}", show_term(env, phi), show_term(env, t)))
+                .collect();
+            format!("fill {} [{}] {}", show_term(env, a), sys_str.join(", "), show_term(env, u0))
+        }
+        Term::THFill(a, sys, u0) => {
+            let sys_str: Vec<String> = sys
+                .iter()
+                .map(|(phi, t)| format!("{} -> {}", show_term(env, phi), show_term(env, t)))
+                .collect();
+            format!("hfill {} [{}] {}", show_term(env, a), sys_str.join(", "), show_term(env, u0))
+        }
         Term::TEquiv(a, b) => format!("Equiv {} {}", show_term(env, a), show_term(env, b)),
         Term::TMkEquiv(a, b, f, g, eta, eps) => format!(
             "mkEquiv {} {} {} {} {} {}",
@@ -442,28 +446,24 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         }
         Term::PLam(x, body) => Term::PLam(x.clone(), b(shift(d, c + 1, body))),
         Term::PApp(p, r) => Term::PApp(b(shift(d, c, p)), b(shift(d, c, r))),
-        Term::THComp(a, phi, u, u0) => Term::THComp(
+        Term::THComp(a, sys, u0) => Term::THComp(
             b(shift(d, c, a)),
-            b(shift(d, c, phi)),
-            b(shift(d, c, u)),
+            sys.iter().map(|(phi, t)| (shift(d, c, phi), shift(d, c, t))).collect(),
             b(shift(d, c, u0)),
         ),
-        Term::TComp(a, phi, u, u0) => Term::TComp(
+        Term::TComp(a, sys, u0) => Term::TComp(
             b(shift(d, c, a)),
-            b(shift(d, c, phi)),
-            b(shift(d, c, u)),
+            sys.iter().map(|(phi, t)| (shift(d, c, phi), shift(d, c, t))).collect(),
             b(shift(d, c, u0)),
         ),
-        Term::TFill(a, phi, u, u0) => Term::TFill(
+        Term::TFill(a, sys, u0) => Term::TFill(
             b(shift(d, c, a)),
-            b(shift(d, c, phi)),
-            b(shift(d, c, u)),
+            sys.iter().map(|(phi, t)| (shift(d, c, phi), shift(d, c, t))).collect(),
             b(shift(d, c, u0)),
         ),
-        Term::THFill(a, phi, u, u0) => Term::THFill(
+        Term::THFill(a, sys, u0) => Term::THFill(
             b(shift(d, c, a)),
-            b(shift(d, c, phi)),
-            b(shift(d, c, u)),
+            sys.iter().map(|(phi, t)| (shift(d, c, phi), shift(d, c, t))).collect(),
             b(shift(d, c, u0)),
         ),
         Term::TEquiv(a, bx) => Term::TEquiv(b(shift(d, c, a)), b(shift(d, c, bx))),
@@ -579,28 +579,24 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
             Term::PLam(x.clone(), b(subst(j + 1, &s1, body)))
         }
         Term::PApp(p, r) => Term::PApp(b(subst(j, s, p)), b(subst(j, s, r))),
-        Term::THComp(a, phi, u, u0) => Term::THComp(
+        Term::THComp(a, sys, u0) => Term::THComp(
             b(subst(j, s, a)),
-            b(subst(j, s, phi)),
-            b(subst(j, s, u)),
+            sys.iter().map(|(phi, t)| (subst(j, s, phi), subst(j, s, t))).collect(),
             b(subst(j, s, u0)),
         ),
-        Term::TComp(a, phi, u, u0) => Term::TComp(
+        Term::TComp(a, sys, u0) => Term::TComp(
             b(subst(j, s, a)),
-            b(subst(j, s, phi)),
-            b(subst(j, s, u)),
+            sys.iter().map(|(phi, t)| (subst(j, s, phi), subst(j, s, t))).collect(),
             b(subst(j, s, u0)),
         ),
-        Term::TFill(a, phi, u, u0) => Term::TFill(
+        Term::TFill(a, sys, u0) => Term::TFill(
             b(subst(j, s, a)),
-            b(subst(j, s, phi)),
-            b(subst(j, s, u)),
+            sys.iter().map(|(phi, t)| (subst(j, s, phi), subst(j, s, t))).collect(),
             b(subst(j, s, u0)),
         ),
-        Term::THFill(a, phi, u, u0) => Term::THFill(
+        Term::THFill(a, sys, u0) => Term::THFill(
             b(subst(j, s, a)),
-            b(subst(j, s, phi)),
-            b(subst(j, s, u)),
+            sys.iter().map(|(phi, t)| (subst(j, s, phi), subst(j, s, t))).collect(),
             b(subst(j, s, u0)),
         ),
         Term::TEquiv(a, bx) => Term::TEquiv(b(subst(j, s, a)), b(subst(j, s, bx))),
@@ -713,10 +709,34 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TPath(a, u, v) => max_var(a).max(max_var(u)).max(max_var(v)),
         Term::PLam(_, b) => (max_var(b) - 1).max(-1),
         Term::PApp(p, r) => max_var(p).max(max_var(r)),
-        Term::THComp(a, phi, u, u0) => max_var(a).max(max_var(phi)).max(max_var(u)).max(max_var(u0)),
-        Term::TComp(a, phi, u, u0) => max_var(a).max(max_var(phi)).max(max_var(u)).max(max_var(u0)),
-        Term::TFill(a, phi, u, u0) => max_var(a).max(max_var(phi)).max(max_var(u)).max(max_var(u0)),
-        Term::THFill(a, phi, u, u0) => max_var(a).max(max_var(phi)).max(max_var(u)).max(max_var(u0)),
+        Term::THComp(a, sys, u0) => {
+            let mut m = max_var(a).max(max_var(u0));
+            for (phi, t) in sys {
+                m = m.max(max_var(phi)).max(max_var(t));
+            }
+            m
+        }
+        Term::TComp(a, sys, u0) => {
+            let mut m = max_var(a).max(max_var(u0));
+            for (phi, t) in sys {
+                m = m.max(max_var(phi)).max(max_var(t));
+            }
+            m
+        }
+        Term::TFill(a, sys, u0) => {
+            let mut m = max_var(a).max(max_var(u0));
+            for (phi, t) in sys {
+                m = m.max(max_var(phi)).max(max_var(t));
+            }
+            m
+        }
+        Term::THFill(a, sys, u0) => {
+            let mut m = max_var(a).max(max_var(u0));
+            for (phi, t) in sys {
+                m = m.max(max_var(phi)).max(max_var(t));
+            }
+            m
+        }
         Term::TEquiv(a, b) => max_var(a).max(max_var(b)),
         Term::TMkEquiv(a, b, f, g, eta, eps) => max_var(a)
             .max(max_var(b))
@@ -845,13 +865,15 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             check_positivity_in(target, u, negative)?;
             check_positivity_in(target, v, negative)
         }
-        Term::THComp(a, phi, u, u0)
-        | Term::TComp(a, phi, u, u0)
-        | Term::TFill(a, phi, u, u0)
-        | Term::THFill(a, phi, u, u0) => {
+        Term::THComp(a, sys, u0)
+        | Term::TComp(a, sys, u0)
+        | Term::TFill(a, sys, u0)
+        | Term::THFill(a, sys, u0) => {
             check_positivity_in(target, a, negative)?;
-            check_positivity_in(target, phi, negative)?;
-            check_positivity_in(target, u, negative)?;
+            for (phi, t) in sys {
+                check_positivity_in(target, phi, negative)?;
+                check_positivity_in(target, t, negative)?;
+            }
             check_positivity_in(target, u0, negative)
         }
         Term::TMkEquiv(a, b, f, g, eta, eps) => {

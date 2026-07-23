@@ -22,11 +22,11 @@ def comp_bot : Nat :=
   comp Nat 0 (<i> zero) zero
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- 3. comp with meet face
+-- 3. comp with meet face (1 /\ 1 = 1, always true)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 def comp_meet : Nat :=
-  comp Nat (1 /\ 1) (<i> suc zero) (suc (suc zero))
+  comp Nat (1 /\ 1) (<i> suc zero) (suc zero)
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 4. fill with trivial face — @ i1 reduces to tube
@@ -111,7 +111,7 @@ def hfill_in_fn : Nat -> Nat :=
 
 def nested_comp : Nat :=
   comp Nat 1
-    (<i> comp Nat 1 (<i> suc zero) zero)
+    (<i> comp Nat 1 (<i> suc zero) (suc zero))
     (suc (suc zero))
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -127,7 +127,7 @@ def comp_pair : Nat * Nat :=
 
 def transport_comp : Nat :=
   transport (<i> Nat)
-    (comp Nat 1 (<i> suc zero) (suc (suc zero)))
+    (comp Nat 1 (<i> suc zero) (suc zero))
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 18. comp with join face
@@ -155,21 +155,21 @@ def hfill_meet : Nat :=
 -- ═══════════════════════════════════════════════════════════════════════════
 
 def fill_nested_fn : Nat -> Nat -> Nat :=
-  fun m n => fill Nat 1 (<i> n) m @ i1
+  fun m n => fill Nat 1 (<i> n) n @ i1
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 22. hfill in nested function
 -- ═══════════════════════════════════════════════════════════════════════════
 
 def hfill_nested_fn : Nat -> Nat -> Nat :=
-  fun m n => hfill Nat 1 (<i> n) m @ i1
+  fun m n => hfill Nat 1 (<i> n) n @ i1
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 23. comp in nested function
 -- ═══════════════════════════════════════════════════════════════════════════
 
 def comp_nested_fn : Nat -> Nat -> Nat :=
-  fun m n => comp Nat 1 (<i> n) m
+  fun m n => comp Nat 1 (<i> n) n
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 24. fill path applied at interval variable

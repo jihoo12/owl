@@ -497,24 +497,42 @@ i0 \/ i1        -- i0 is true OR i1 is true
 ## 9. Homogeneous Composition
 
 ```
-hcomp A phi tube base
+hcomp A [phi => tube, ...] base     -- system syntax (preferred)
+hcomp A phi tube base               -- legacy single-face syntax
 ```
 
-Homogeneous composition composes paths along a face `phi`:
+Homogeneous composition composes paths along faces:
 
 - `A` : the type
-- `phi` : a face formula (cube/DNF)
-- `tube : I -> A` a function providing paths along each face
+- `[phi => tube, ...]` : a system of face-tube pairs (separated by `=>`)
 - `base : A` the base element
+
+Each system entry `phi => tube` specifies:
+- `phi` : a face formula (interval expression)
+- `tube : (i : I) -> A` a path (PLam) that agrees with `base` at `i = 0`
 
 ### Boundary Reductions
 
 ```
-hcomp A phi tube base @ i0  =  base
-hcomp A phi tube base @ i1  =  tube @ i1
+hcomp A [phi => tube, ...] base @ i0  =  base
+hcomp A [phi => tube, ...] base @ i1  =  tube @ i1   (on face phi)
 ```
 
-The tube must satisfy `tube @ 0 = base` on every face of `phi`.
+Each tube must satisfy `tube @ 0 = base` on its face.
+
+### Examples
+
+```
+-- Single face
+hcomp Nat [i1 => <i> suc zero] (suc zero)
+
+-- Multi-face: both tubes match base at i=0
+hcomp Nat [i0 => <i> suc zero, i1 => <i> suc zero] (suc zero)
+
+-- Non-trivial faces
+hcomp Nat [1 /\ 1 => <i> suc zero] (suc zero)
+hcomp Nat [0 \/ 0 => <i> zero] zero
+```
 
 ---
 
@@ -523,12 +541,14 @@ The tube must satisfy `tube @ 0 = base` on every face of `phi`.
 Owl implements the three core Kan operations for cubical type theory: `comp`
 (heterogeneous composition), `fill` (dependent fill), and `hfill` (homogeneous
 fill). These operations generalize `hcomp` to work with type families and
-provide canonical path constructors.
+provide canonical path constructors. All three support the multi-face system
+syntax `[phi => tube, ...]` as well as the legacy single-face syntax `phi tube`.
 
 ### Heterogeneous Composition (`comp`)
 
 ```
-comp A phi tube base
+comp A [phi => tube, ...] base     -- system syntax
+comp A phi tube base               -- legacy single-face syntax
 ```
 
 Heterogeneous composition composes a family of paths along a face `phi`:
@@ -557,7 +577,8 @@ When `phi = 0` (always false), `comp` reduces to `base`.
 ### Dependent Fill (`fill`)
 
 ```
-fill A phi tube base
+fill A [phi => tube, ...] base     -- system syntax
+fill A phi tube base               -- legacy single-face syntax
 ```
 
 Dependent fill constructs a path from `base` to `comp A phi tube base`:
@@ -582,7 +603,8 @@ When `phi = 0` (always false), `fill` reduces to `fun j -> base`.
 ### Homogeneous Fill (`hfill`)
 
 ```
-hfill A phi tube base
+hfill A [phi => tube, ...] base     -- system syntax
+hfill A phi tube base               -- legacy single-face syntax
 ```
 
 Homogeneous fill constructs a path from `base` to `hcomp A phi tube base`:
@@ -1132,10 +1154,12 @@ Here is a simplified BNF-style grammar for the Owl surface syntax:
                | <term> "@" <atom>
                | "fst" <atom> | "snd" <atom>
                | "match" <term> "return" <term> "with" <cases>
-               | "hcomp" <atom> <atom> <atom> <atom>
-               | "comp" <atom> <atom> <atom> <atom>
-               | "fill" <atom> <atom> <atom> <atom>
-               | "hfill" <atom> <atom> <atom> <atom>
+               | "hcomp" <atom> ("[" <system> "]" | <atom> <atom>) <atom>
+               | "comp" <atom> ("[" <system> "]" | <atom> <atom>) <atom>
+               | "fill" <atom> ("[" <system> "]" | <atom> <atom>) <atom>
+               | "hfill" <atom> ("[" <system> "]" | <atom> <atom>) <atom>
+
+<system>     ::= <term> "=>" <term> ("," <term> "=>" <term>)*
                | "Equiv" <atom> <atom>
                | "mkEquiv" <atom> <atom> <atom> <atom> <atom> <atom>
                | "equivFwd" <atom> <atom>

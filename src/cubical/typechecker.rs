@@ -88,6 +88,7 @@ pub enum TypeError {
     MissingCase(Name),
     ExpectedData(Term),
     // PathP: first argument must be a type family
+    #[allow(dead_code)]
     PathPNotTypeFamily(Term),
 }
 
@@ -380,28 +381,24 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
                 Box::new(go(p, n, val)),
                 Box::new(go(r, n, val)),
             )),
-            Term::THComp(a, ph, u, u0) => nbe_eval(&Term::THComp(
+            Term::THComp(a, sys, u0) => nbe_eval(&Term::THComp(
                 Box::new(go(a, n, val)),
-                Box::new(go(ph, n, val)),
-                Box::new(go(u, n, val)),
+                sys.iter().map(|(phi, t)| (go(phi, n, val), go(t, n, val))).collect(),
                 Box::new(go(u0, n, val)),
             )),
-            Term::TComp(a, ph, u, u0) => nbe_eval(&Term::TComp(
+            Term::TComp(a, sys, u0) => nbe_eval(&Term::TComp(
                 Box::new(go(a, n, val)),
-                Box::new(go(ph, n, val)),
-                Box::new(go(u, n, val)),
+                sys.iter().map(|(phi, t)| (go(phi, n, val), go(t, n, val))).collect(),
                 Box::new(go(u0, n, val)),
             )),
-            Term::TFill(a, ph, u, u0) => nbe_eval(&Term::TFill(
+            Term::TFill(a, sys, u0) => nbe_eval(&Term::TFill(
                 Box::new(go(a, n, val)),
-                Box::new(go(ph, n, val)),
-                Box::new(go(u, n, val)),
+                sys.iter().map(|(phi, t)| (go(phi, n, val), go(t, n, val))).collect(),
                 Box::new(go(u0, n, val)),
             )),
-            Term::THFill(a, ph, u, u0) => nbe_eval(&Term::THFill(
+            Term::THFill(a, sys, u0) => nbe_eval(&Term::THFill(
                 Box::new(go(a, n, val)),
-                Box::new(go(ph, n, val)),
-                Box::new(go(u, n, val)),
+                sys.iter().map(|(phi, t)| (go(phi, n, val), go(t, n, val))).collect(),
                 Box::new(go(u0, n, val)),
             )),
             Term::TEquiv(a, b) => Term::TEquiv(Box::new(go(a, n, val)), Box::new(go(b, n, val))),
@@ -913,139 +910,134 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         // Pairs cannot be inferred without annotation
         t @ Term::TPair(_, _) => Err(TypeError::CannotInfer(t.clone())),
 
-        // hcomp A phi tube base
-        Term::THComp(a_ty, phi, tube, base) => {
+        // hcomp A [phi -> tube, ...] base
+        Term::THComp(a_ty, sys, base) => {
             type_level_dt(dts, ctx, a_ty)?;
             let a_ty_ = nbe_eval(a_ty);
-            check_interval_dt(dts, ctx, phi)?;
-            check_dt(dts, ctx, base, &a_ty_)?;
-
-            let phi_ = nbe_eval(phi);
-            match nbe_eval(tube) {
-                Term::PLam(i, body) => {
-                    // (a) body : A in extended context
-                    let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
-                    let a_ty_s = shift(1, 0, &a_ty_);
-                    check_dt(dts, &ctx2, &body, &a_ty_s)?;
-                    // (b) tube@0 ≡ base on each face of phi
-                    let tube_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
-                    check_faces(ctx, &phi_, &tube_at0, &nbe_eval(base))?;
-                }
-                tube_ => {
-                    // Non-lambda tube: treat as Path A u v
-                    let tube_ty = infer_dt(dts, ctx, &tube_)?;
-                    match nbe_eval(&tube_ty) {
-                        Term::TPath(a, u, v) => {
-                            if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_).is_equal() {
-                                return Err(TypeError::TypeMismatch(
-                                    Box::new(nbe_eval(&a_ty_)),
-                                    Box::new(nbe_eval(&a)),
-                                ));
+            check_dt(dts, ctx, &base, &a_ty_)?;
+            for (phi, tube) in sys {
+                check_interval_dt(dts, ctx, &phi)?;
+                let tube_val = nbe_eval(&tube);
+                match tube_val {
+                    Term::PLam(i, body) => {
+                        let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
+                        let a_ty_s = shift(1, 0, &a_ty_);
+                        check_dt(dts, &ctx2, &body, &a_ty_s)?;
+                        let tube_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
+                        let phi_ = nbe_eval(&phi);
+                        check_faces(ctx, &phi_, &tube_at0, &nbe_eval(&base))?;
+                    }
+                    tube_ => {
+                        let tube_ty = infer_dt(dts, ctx, &tube_)?;
+                        match nbe_eval(&tube_ty) {
+                            Term::TPath(a, u, v) => {
+                                if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_).is_equal() {
+                                    return Err(TypeError::TypeMismatch(
+                                        Box::new(nbe_eval(&a_ty_)),
+                                        Box::new(nbe_eval(&a)),
+                                    ));
+                                }
+                                check_dt(dts, ctx, &nbe_eval(&u), &a_ty_)?;
+                                check_dt(dts, ctx, &nbe_eval(&v), &a_ty_)?;
+                                let phi_ = nbe_eval(&phi);
+                                check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            check_dt(dts, ctx, &nbe_eval(&u), &a_ty_)?;
-                            check_dt(dts, ctx, &nbe_eval(&v), &a_ty_)?;
-                            check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(base))?;
+                            other => return Err(TypeError::ExpectedPath(other)),
                         }
-                        other => return Err(TypeError::ExpectedPath(other)),
                     }
                 }
             }
             Ok(a_ty_)
         }
 
-        // comp A phi tube base : A 1
-        //   A : I → U (a type family)
-        //   phi : I (face restriction)
-        //   tube : (i : I) → A i, with tube@0 ≡ base on face phi
-        //   base : A 0
-        Term::TComp(a_fam, phi, tube, base) => {
-            // A is a type family I → Type
+        // comp A [phi -> tube, ...] base : A 1
+        Term::TComp(a_fam, sys, base) => {
             let ctx_i = extend_ctx("i".to_string(), interval_ty(), ctx);
             let _a_fam_ty = type_level_dt(dts, &ctx_i, a_fam)?;
             let a_fam_ = nbe_eval(a_fam);
-            check_interval_dt(dts, ctx, phi)?;
-            // base : A 0
             let a_at0 = match &a_fam_ {
                 Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I0))),
-                _ => nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I0)))),
+                _ => a_fam_.clone(),
             };
             check_dt(dts, ctx, base, &a_at0)?;
-            // tube : (i : I) → A i with boundary tube@0 ≡ base on phi
-            let phi_ = nbe_eval(phi);
-            match nbe_eval(tube) {
-                Term::PLam(i, body) => {
-                    let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
-                    let a_fam_s = shift(1, 0, &a_fam_);
-                    let body_ty = match &a_fam_s {
-                        Term::PLam(_, b) => nbe_eval(&beta(b, &Term::TVar(0))),
-                        _ => shift(1, 0, &a_at0),
-                    };
-                    check_dt(dts, &ctx2, &body, &body_ty)?;
-                    let tube_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
-                    check_faces(ctx, &phi_, &tube_at0, &nbe_eval(base))?;
-                }
-                tube_ => {
-                    let tube_ty = infer_dt(dts, ctx, &tube_)?;
-                    match nbe_eval(&tube_ty) {
-                        Term::TPath(_a, u, v) => {
-                            check_dt(dts, ctx, &nbe_eval(&u), &a_at0)?;
-                            check_dt(dts, ctx, &nbe_eval(&v), &nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I1)))))?;
-                            check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(base))?;
+            for (phi, tube) in sys {
+                check_interval_dt(dts, ctx, &phi)?;
+                match nbe_eval(&tube) {
+                    Term::PLam(i, body) => {
+                        let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
+                        let a_fam_s = shift(1, 0, &a_fam_);
+                        let body_ty = match &a_fam_s {
+                            Term::PLam(_, b) => nbe_eval(&beta(b, &Term::TVar(0))),
+                            _ => shift(1, 0, &a_at0),
+                        };
+                        check_dt(dts, &ctx2, &body, &body_ty)?;
+                        let tube_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
+                        let phi_ = nbe_eval(&phi);
+                        check_faces(ctx, &phi_, &tube_at0, &nbe_eval(&base))?;
+                    }
+                    tube_ => {
+                        let tube_ty = infer_dt(dts, ctx, &tube_)?;
+                        match nbe_eval(&tube_ty) {
+                            Term::TPath(_a, u, v) => {
+                                check_dt(dts, ctx, &nbe_eval(&u), &a_at0)?;
+                                check_dt(dts, ctx, &nbe_eval(&v), &nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I1)))))?;
+                                let phi_ = nbe_eval(&phi);
+                                check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
+                            }
+                            other => return Err(TypeError::ExpectedPath(other)),
                         }
-                        other => return Err(TypeError::ExpectedPath(other)),
                     }
                 }
             }
-            // Result: A 1
             let a_at1 = match &a_fam_ {
                 Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I1))),
-                _ => nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I1)))),
+                _ => a_fam_.clone(),
             };
             Ok(a_at1)
         }
 
-        // fill A phi tube base : (j : I) → A j
-        //   Same premises as comp, but result is a path from base to comp
-        Term::TFill(a_fam, phi, tube, base) => {
+        // fill A [phi -> tube, ...] base : (j : I) → A j
+        Term::TFill(a_fam, sys, base) => {
             let ctx_i = extend_ctx("i".to_string(), interval_ty(), ctx);
             type_level_dt(dts, &ctx_i, a_fam)?;
             let a_fam_ = nbe_eval(a_fam);
-            check_interval_dt(dts, ctx, phi)?;
             let a_at0 = match &a_fam_ {
                 Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I0))),
-                _ => nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I0)))),
+                _ => a_fam_.clone(),
             };
             check_dt(dts, ctx, base, &a_at0)?;
-            let phi_ = nbe_eval(phi);
-            match nbe_eval(tube) {
-                Term::PLam(i, body) => {
-                    let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
-                    let a_fam_s = shift(1, 0, &a_fam_);
-                    let body_ty = match &a_fam_s {
-                        Term::PLam(_, b) => nbe_eval(&beta(b, &Term::TVar(0))),
-                        _ => shift(1, 0, &a_at0),
-                    };
-                    check_dt(dts, &ctx2, &body, &body_ty)?;
-                    let tube_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
-                    check_faces(ctx, &phi_, &tube_at0, &nbe_eval(base))?;
-                }
-                tube_ => {
-                    let tube_ty = infer_dt(dts, ctx, &tube_)?;
-                    match nbe_eval(&tube_ty) {
-                        Term::TPath(_a, u, v) => {
-                            check_dt(dts, ctx, &nbe_eval(&u), &a_at0)?;
-                            check_dt(dts, ctx, &nbe_eval(&v), &nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I1)))))?;
-                            check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(base))?;
+            for (phi, tube) in sys {
+                check_interval_dt(dts, ctx, &phi)?;
+                match nbe_eval(&tube) {
+                    Term::PLam(i, body) => {
+                        let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
+                        let a_fam_s = shift(1, 0, &a_fam_);
+                        let body_ty = match &a_fam_s {
+                            Term::PLam(_, b) => nbe_eval(&beta(b, &Term::TVar(0))),
+                            _ => shift(1, 0, &a_at0),
+                        };
+                        check_dt(dts, &ctx2, &body, &body_ty)?;
+                        let tube_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
+                        let phi_ = nbe_eval(&phi);
+                        check_faces(ctx, &phi_, &tube_at0, &nbe_eval(&base))?;
+                    }
+                    tube_ => {
+                        let tube_ty = infer_dt(dts, ctx, &tube_)?;
+                        match nbe_eval(&tube_ty) {
+                            Term::TPath(_a, u, v) => {
+                                check_dt(dts, ctx, &nbe_eval(&u), &a_at0)?;
+                                check_dt(dts, ctx, &nbe_eval(&v), &nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I1)))))?;
+                                let phi_ = nbe_eval(&phi);
+                                check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
+                            }
+                            other => return Err(TypeError::ExpectedPath(other)),
                         }
-                        other => return Err(TypeError::ExpectedPath(other)),
                     }
                 }
             }
-            // Result: Path (λj. A j) base (comp A phi tube base)
             let comp_result = Term::TComp(
                 a_fam.clone(),
-                phi.clone(),
-                tube.clone(),
+                sys.clone(),
                 base.clone(),
             );
             let a_fam_s = shift(1, 0, a_fam);
@@ -1060,46 +1052,45 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             ))
         }
 
-        // hfill A phi tube base : Path A base (hcomp A phi tube base)
-        //   A : Type (constant type, not a family)
-        //   Same premises as hcomp
-        Term::THFill(a_ty, phi, tube, base) => {
+        // hfill A [phi -> tube, ...] base : Path A base (hcomp A [phi -> tube, ...] base)
+        Term::THFill(a_ty, sys, base) => {
             type_level_dt(dts, ctx, a_ty)?;
             let a_ty_ = nbe_eval(a_ty);
-            check_interval_dt(dts, ctx, phi)?;
             check_dt(dts, ctx, base, &a_ty_)?;
-            let phi_ = nbe_eval(phi);
-            match nbe_eval(tube) {
-                Term::PLam(i, body) => {
-                    let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
-                    let a_ty_s = shift(1, 0, &a_ty_);
-                    check_dt(dts, &ctx2, &body, &a_ty_s)?;
-                    let tube_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
-                    check_faces(ctx, &phi_, &tube_at0, &nbe_eval(base))?;
-                }
-                tube_ => {
-                    let tube_ty = infer_dt(dts, ctx, &tube_)?;
-                    match nbe_eval(&tube_ty) {
-                        Term::TPath(a, u, v) => {
-                            if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_).is_equal() {
-                                return Err(TypeError::TypeMismatch(
-                                    Box::new(nbe_eval(&a_ty_)),
-                                    Box::new(nbe_eval(&a)),
-                                ));
+            for (phi, tube) in sys {
+                check_interval_dt(dts, ctx, &phi)?;
+                match nbe_eval(&tube) {
+                    Term::PLam(i, body) => {
+                        let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
+                        let a_ty_s = shift(1, 0, &a_ty_);
+                        check_dt(dts, &ctx2, &body, &a_ty_s)?;
+                        let tube_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
+                        let phi_ = nbe_eval(&phi);
+                        check_faces(ctx, &phi_, &tube_at0, &nbe_eval(&base))?;
+                    }
+                    tube_ => {
+                        let tube_ty = infer_dt(dts, ctx, &tube_)?;
+                        match nbe_eval(&tube_ty) {
+                            Term::TPath(a, u, v) => {
+                                if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_).is_equal() {
+                                    return Err(TypeError::TypeMismatch(
+                                        Box::new(nbe_eval(&a_ty_)),
+                                        Box::new(nbe_eval(&a)),
+                                    ));
+                                }
+                                check_dt(dts, ctx, &nbe_eval(&u), &a_ty_)?;
+                                check_dt(dts, ctx, &nbe_eval(&v), &a_ty_)?;
+                                let phi_ = nbe_eval(&phi);
+                                check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            check_dt(dts, ctx, &nbe_eval(&u), &a_ty_)?;
-                            check_dt(dts, ctx, &nbe_eval(&v), &a_ty_)?;
-                            check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(base))?;
+                            other => return Err(TypeError::ExpectedPath(other)),
                         }
-                        other => return Err(TypeError::ExpectedPath(other)),
                     }
                 }
             }
-            // Result: Path A base (hcomp A phi tube base)
             let hcomp_result = Term::THComp(
                 a_ty.clone(),
-                phi.clone(),
-                tube.clone(),
+                sys.clone(),
                 base.clone(),
             );
             Ok(Term::TPath(

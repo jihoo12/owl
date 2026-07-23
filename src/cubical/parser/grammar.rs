@@ -18,6 +18,8 @@ pub(super) struct Parser {
     stop_at_with: bool,
     /// When true, `starts_atom` treats the keyword `in` as a stop token.
     stop_at_in: bool,
+    /// When true, `parse_pair` does not consume commas (used inside system entries).
+    stop_at_comma: bool,
 }
 
 impl Parser {
@@ -31,6 +33,7 @@ impl Parser {
             datatypes: Vec::new(),
             stop_at_with: false,
             stop_at_in: false,
+            stop_at_comma: false,
         }
     }
 
@@ -329,7 +332,7 @@ impl Parser {
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {
         let left = self.parse_arrow()?;
-        if self.consume(&TokenKind::Comma) {
+        if !self.stop_at_comma && self.consume(&TokenKind::Comma) {
             let right = self.parse_term()?;
             Ok(Term::TPair(Box::new(left), Box::new(right)))
         } else {
@@ -469,49 +472,65 @@ impl Parser {
         }
         if self.consume_ident("hcomp") {
             let a = self.parse_prefix_or_atom()?;
-            let phi = self.parse_prefix_or_atom()?;
-            let u = self.parse_prefix_or_atom()?;
+            let system = if self.at(&TokenKind::LBracket) {
+                self.parse_system()?
+            } else {
+                let phi = self.parse_prefix_or_atom()?;
+                let u = self.parse_prefix_or_atom()?;
+                vec![(phi, u)]
+            };
             let u0 = self.parse_prefix_or_atom()?;
             return Ok(Term::THComp(
                 Box::new(a),
-                Box::new(phi),
-                Box::new(u),
+                system,
                 Box::new(u0),
             ));
         }
         if self.consume_ident("comp") {
             let a = self.parse_prefix_or_atom()?;
-            let phi = self.parse_prefix_or_atom()?;
-            let u = self.parse_prefix_or_atom()?;
+            let system = if self.at(&TokenKind::LBracket) {
+                self.parse_system()?
+            } else {
+                let phi = self.parse_prefix_or_atom()?;
+                let u = self.parse_prefix_or_atom()?;
+                vec![(phi, u)]
+            };
             let u0 = self.parse_prefix_or_atom()?;
             return Ok(Term::TComp(
                 Box::new(a),
-                Box::new(phi),
-                Box::new(u),
+                system,
                 Box::new(u0),
             ));
         }
         if self.consume_ident("fill") {
             let a = self.parse_prefix_or_atom()?;
-            let phi = self.parse_prefix_or_atom()?;
-            let u = self.parse_prefix_or_atom()?;
+            let system = if self.at(&TokenKind::LBracket) {
+                self.parse_system()?
+            } else {
+                let phi = self.parse_prefix_or_atom()?;
+                let u = self.parse_prefix_or_atom()?;
+                vec![(phi, u)]
+            };
             let u0 = self.parse_prefix_or_atom()?;
             return Ok(Term::TFill(
                 Box::new(a),
-                Box::new(phi),
-                Box::new(u),
+                system,
                 Box::new(u0),
             ));
         }
         if self.consume_ident("hfill") {
             let a = self.parse_prefix_or_atom()?;
-            let phi = self.parse_prefix_or_atom()?;
-            let u = self.parse_prefix_or_atom()?;
+            let system = if self.at(&TokenKind::LBracket) {
+                self.parse_system()?
+            } else {
+                let phi = self.parse_prefix_or_atom()?;
+                let u = self.parse_prefix_or_atom()?;
+                vec![(phi, u)]
+            };
             let u0 = self.parse_prefix_or_atom()?;
             return Ok(Term::THFill(
                 Box::new(a),
-                Box::new(phi),
-                Box::new(u),
+                system,
                 Box::new(u0),
             ));
         }
@@ -576,9 +595,32 @@ impl Parser {
         }
     }
 
+    /// Parse a system: `[phi1 -> tube1, phi2 -> tube2, ...]`
+    /// Returns a System (Vec<(Term, Term)>).
+    fn parse_system(&mut self) -> Result<crate::cubical::syntax::System, ParseError> {
+        self.expect(TokenKind::LBracket, "expected '[' to start system")?;
+        let mut system = Vec::new();
+        self.stop_at_comma = true;
+        loop {
+            if self.at(&TokenKind::RBracket) {
+                break;
+            }
+            let phi = self.parse_join()?;
+            self.expect(TokenKind::FatArrow, "expected '=>' in system entry")?;
+            let tube = self.parse_term()?;
+            system.push((phi, tube));
+            if !self.consume(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.stop_at_comma = false;
+        self.expect(TokenKind::RBracket, "expected ']' after system")?;
+        Ok(system)
+    }
+
     fn parse_paren(&mut self) -> Result<Term, ParseError> {
         self.expect(TokenKind::LParen, "expected '('")?;
-        if let Some((names, ty)) = self.try_parse_binder_header()? {
+        if let Some((names, _ty)) = self.try_parse_binder_header()? {
             self.expect(TokenKind::RParen, "unmatched '('")?;
             if names.len() == 1 {
                 return self.resolve_ident(names[0].clone());
