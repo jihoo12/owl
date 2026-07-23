@@ -49,6 +49,18 @@ pub fn term_size(t: &Term) -> usize {
             1 + term_size(a) + term_size(ph) + term_size(u) + term_size(u0)
         }
 
+        Term::TComp(a, ph, u, u0) => {
+            1 + term_size(a) + term_size(ph) + term_size(u) + term_size(u0)
+        }
+
+        Term::TFill(a, ph, u, u0) => {
+            1 + term_size(a) + term_size(ph) + term_size(u) + term_size(u0)
+        }
+
+        Term::THFill(a, ph, u, u0) => {
+            1 + term_size(a) + term_size(ph) + term_size(u) + term_size(u0)
+        }
+
         Term::TMkEquiv(a, b, f, g, e, s) => {
             1 + term_size(a)
                 + term_size(b)
@@ -546,6 +558,42 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
     // Cubical form congruence (structural: no fuel consumed)
     // ------------------------------------------------------------------
     if let (Term::THComp(a1, phi1, u1, u01), Term::THComp(a2, phi2, u2, u02)) = (t1, t2) {
+        return and_result(
+            and_result(
+                eta_eq_memo(fuel, ctx, a1, a2, memo),
+                eta_eq_memo(fuel, ctx, phi1, phi2, memo),
+            ),
+            and_result(
+                eta_eq_memo(fuel, ctx, u1, u2, memo),
+                eta_eq_memo(fuel, ctx, u01, u02, memo),
+            ),
+        );
+    }
+    if let (Term::TComp(a1, phi1, u1, u01), Term::TComp(a2, phi2, u2, u02)) = (t1, t2) {
+        return and_result(
+            and_result(
+                eta_eq_memo(fuel, ctx, a1, a2, memo),
+                eta_eq_memo(fuel, ctx, phi1, phi2, memo),
+            ),
+            and_result(
+                eta_eq_memo(fuel, ctx, u1, u2, memo),
+                eta_eq_memo(fuel, ctx, u01, u02, memo),
+            ),
+        );
+    }
+    if let (Term::TFill(a1, phi1, u1, u01), Term::TFill(a2, phi2, u2, u02)) = (t1, t2) {
+        return and_result(
+            and_result(
+                eta_eq_memo(fuel, ctx, a1, a2, memo),
+                eta_eq_memo(fuel, ctx, phi1, phi2, memo),
+            ),
+            and_result(
+                eta_eq_memo(fuel, ctx, u1, u2, memo),
+                eta_eq_memo(fuel, ctx, u01, u02, memo),
+            ),
+        );
+    }
+    if let (Term::THFill(a1, phi1, u1, u01), Term::THFill(a2, phi2, u2, u02)) = (t1, t2) {
         return and_result(
             and_result(
                 eta_eq_memo(fuel, ctx, a1, a2, memo),

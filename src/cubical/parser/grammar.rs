@@ -473,6 +473,42 @@ impl Parser {
                 Box::new(u0),
             ));
         }
+        if self.consume_ident("comp") {
+            let a = self.parse_prefix_or_atom()?;
+            let phi = self.parse_prefix_or_atom()?;
+            let u = self.parse_prefix_or_atom()?;
+            let u0 = self.parse_prefix_or_atom()?;
+            return Ok(Term::TComp(
+                Box::new(a),
+                Box::new(phi),
+                Box::new(u),
+                Box::new(u0),
+            ));
+        }
+        if self.consume_ident("fill") {
+            let a = self.parse_prefix_or_atom()?;
+            let phi = self.parse_prefix_or_atom()?;
+            let u = self.parse_prefix_or_atom()?;
+            let u0 = self.parse_prefix_or_atom()?;
+            return Ok(Term::TFill(
+                Box::new(a),
+                Box::new(phi),
+                Box::new(u),
+                Box::new(u0),
+            ));
+        }
+        if self.consume_ident("hfill") {
+            let a = self.parse_prefix_or_atom()?;
+            let phi = self.parse_prefix_or_atom()?;
+            let u = self.parse_prefix_or_atom()?;
+            let u0 = self.parse_prefix_or_atom()?;
+            return Ok(Term::THFill(
+                Box::new(a),
+                Box::new(phi),
+                Box::new(u),
+                Box::new(u0),
+            ));
+        }
         if self.consume_ident("Equiv") {
             let a = self.parse_prefix_or_atom()?;
             let b = self.parse_prefix_or_atom()?;
@@ -985,5 +1021,9 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "in"
             | "by"
             | "where"
+            | "comp"
+            | "fill"
+            | "hfill"
+            | "hcomp"
     )
 }

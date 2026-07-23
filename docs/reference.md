@@ -58,6 +58,9 @@ The following words are reserved and cannot be used as variable names:
 | `Type`        | Alias for universe `U0`                    |
 | `Path`        | Path type former                           |
 | `hcomp`       | Homogeneous composition                    |
+| `comp`        | Heterogeneous composition                  |
+| `fill`        | Dependent fill (heterogeneous)             |
+| `hfill`       | Homogeneous fill                           |
 | `Equiv`       | Equivalence type                           |
 | `mkEquiv`     | Construct an equivalence                   |
 | `Glue`        | Glue type                                  |
@@ -486,7 +489,120 @@ The tube must satisfy `tube @ 0 = base` on every face of `phi`.
 
 ---
 
-## 10. Glue Types and Univalence
+## 10. Kan Operations (comp, fill, hfill)
+
+Owl implements the three core Kan operations for cubical type theory: `comp`
+(heterogeneous composition), `fill` (dependent fill), and `hfill` (homogeneous
+fill). These operations generalize `hcomp` to work with type families and
+provide canonical path constructors.
+
+### Heterogeneous Composition (`comp`)
+
+```
+comp A phi tube base
+```
+
+Heterogeneous composition composes a family of paths along a face `phi`:
+
+- `A : I -> Type` — a type family over the interval
+- `phi : I -> Bool` — a face formula (cube/DNF)
+- `tube : (i : I) -> A i` — a function providing paths along each face
+- `base : A 0` — the base element
+
+**Type**: `A 1`
+
+**Boundary Reductions**:
+
+```
+comp A phi tube base @ i0  =  base
+comp A phi tube base @ i1  =  tube @ i1
+```
+
+When `phi = 1` (always true), `comp` reduces to `tube @ 1`.
+When `phi = 0` (always false), `comp` reduces to `base`.
+
+**Decomposition**: `comp` decomposes through Pi and Sigma types:
+- Pi: `comp (fun x -> B x) phi tube base = fun x -> comp (B x) phi (fun i -> tube i x) (base x)`
+- Sigma: `comp (A * B) phi tube base = (comp A phi (fun i -> fst (tube i)) (fst base), comp B phi (fun i -> snd (tube i)) (snd base))`
+
+### Dependent Fill (`fill`)
+
+```
+fill A phi tube base
+```
+
+Dependent fill constructs a path from `base` to `comp A phi tube base`:
+
+- `A : I -> Type` — a type family over the interval
+- `phi : I -> Bool` — a face formula (cube/DNF)
+- `tube : (i : I) -> A i` — a function providing paths along each face
+- `base : A 0` — the base element
+
+**Type**: `Path (fun j -> A j) base (comp A phi tube base)`
+
+**Endpoint Reductions**:
+
+```
+fill A phi tube base @ i0  =  base
+fill A phi tube base @ i1  =  comp A phi tube base
+```
+
+When `phi = 1` (always true), `fill` reduces to `tube`.
+When `phi = 0` (always false), `fill` reduces to `fun j -> base`.
+
+### Homogeneous Fill (`hfill`)
+
+```
+hfill A phi tube base
+```
+
+Homogeneous fill constructs a path from `base` to `hcomp A phi tube base`:
+
+- `A : Type` — a constant type (not a family)
+- `phi : I -> Bool` — a face formula (cube/DNF)
+- `tube : I -> A` — a function providing paths along each face
+- `base : A` — the base element
+
+**Type**: `Path A base (hcomp A phi tube base)`
+
+**Endpoint Reductions**:
+
+```
+hfill A phi tube base @ i0  =  base
+hfill A phi tube base @ i1  =  hcomp A phi tube base
+```
+
+When `phi = 1` (always true), `hfill` reduces to `tube`.
+When `phi = 0` (always false), `hfill` reduces to `fun j -> base`.
+
+### Examples
+
+```
+-- Heterogeneous composition: constant family
+def comp_example : Nat :=
+  comp Nat 1 (<i> suc zero) (suc zero)
+
+-- Dependent fill: constructs a path
+def fill_example : Nat :=
+  fill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+-- Homogeneous fill: constructs a path to hcomp
+def hfill_example : Nat :=
+  hfill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+-- Fill in a function: variable tube
+def fill_fn : Nat -> Nat :=
+  fun n => fill Nat 1 (<i> n) n @ i1
+
+-- Transport over comp
+def transport_comp : Nat :=
+  transport (<i> Nat)
+    (comp Nat 1 (<i> suc zero) (suc (suc zero)))
+```
+
+---
+
+## 11. Glue Types and Univalence
 
 ### Glue Types
 
@@ -585,7 +701,7 @@ Transport moves `x` from type `A` to type `B` along the path `p`.
 
 ---
 
-## 11. Tactic Mode
+## 12. Tactic Mode
 
 Tactic mode provides an interactive way to construct proof terms. A tactic
 block appears in a definition body where a term is expected, and **requires
@@ -837,7 +953,7 @@ fun A B a b => a
 
 ---
 
-## 12. Imports and Modules
+## 13. Imports and Modules
 
 ### Import Syntax
 
@@ -885,7 +1001,7 @@ different paths (deduplication by canonical path).
 
 ---
 
-## 13. Evaluation and Normalization
+## 14. Evaluation and Normalization
 
 Owl uses **Normalisation by Evaluation (NbE)** to compute with terms.
 
@@ -931,6 +1047,21 @@ the constructor's arguments are substituted for the binders.
 | `transport p x` (Path type) | Path lambda over transported body |
 | `transport p x` (Sigma type) | Pair of transported components |
 
+### Kan Operation Reductions
+
+| Form | Condition | Reduction |
+| ----- | --------- | --------- |
+| `comp A phi tube base` | `phi = 1` | `tube @ 1` |
+| `comp A phi tube base` | `phi = 0` | `base` |
+| `fill A phi tube base @ i0` | always | `base` |
+| `fill A phi tube base @ i1` | always | `comp A phi tube base` |
+| `fill A phi tube base` | `phi = 1` | `tube` |
+| `fill A phi tube base` | `phi = 0` | `fun j -> base` |
+| `hfill A phi tube base @ i0` | always | `base` |
+| `hfill A phi tube base @ i1` | always | `hcomp A phi tube base` |
+| `hfill A phi tube base` | `phi = 1` | `tube` |
+| `hfill A phi tube base` | `phi = 0` | `fun j -> base` |
+
 ### Nat Display
 
 Natural number values (`TCon("Nat", "suc", [TCon("Nat", "suc", [...])])`)
@@ -942,7 +1073,7 @@ suc (suc (suc zero))   displays as   3
 
 ---
 
-## 14. Complete Grammar
+## 15. Complete Grammar
 
 Here is a simplified BNF-style grammar for the Owl surface syntax:
 
@@ -973,6 +1104,9 @@ Here is a simplified BNF-style grammar for the Owl surface syntax:
                | "fst" <atom> | "snd" <atom>
                | "match" <term> "return" <term> "with" <cases>
                | "hcomp" <atom> <atom> <atom> <atom>
+               | "comp" <atom> <atom> <atom> <atom>
+               | "fill" <atom> <atom> <atom> <atom>
+               | "hfill" <atom> <atom> <atom> <atom>
                | "Equiv" <atom> <atom>
                | "mkEquiv" <atom> <atom> <atom> <atom> <atom> <atom>
                | "equivFwd" <atom> <atom>
@@ -1004,7 +1138,7 @@ Here is a simplified BNF-style grammar for the Owl surface syntax:
 
 ---
 
-## 15. Worked Examples
+## 16. Worked Examples
 
 ### Example 1: Identity Function
 
@@ -1052,7 +1186,32 @@ def transportExample :
 This constructs a function that converts `A` to `B` given an equivalence,
 using transport along the univalence path.
 
-### Example 5: Tactic Proofs
+### Example 5: Kan Operations (comp, fill, hfill)
+
+```
+-- Heterogeneous composition: composes a family of paths
+def comp_example : Nat :=
+  comp Nat 1 (<i> suc zero) (suc zero)
+
+-- Dependent fill: constructs a path from base to comp
+def fill_example : Nat :=
+  fill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+-- Homogeneous fill: constructs a path from base to hcomp
+def hfill_example : Nat :=
+  hfill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+-- Fill in a function: variable tube
+def fill_fn : Nat -> Nat :=
+  fun n => fill Nat 1 (<i> n) n @ i1
+
+-- Transport over comp
+def transport_comp : Nat :=
+  transport (<i> Nat)
+    (comp Nat 1 (<i> suc zero) (suc (suc zero)))
+```
+
+### Example 6: Tactic Proofs
 
 ```
 def id : ∀ (A : U0), A -> A := by intro A x; exact x
@@ -1087,7 +1246,7 @@ def neg : Bool -> Bool :=
   by intro b; destruct b; exact false; exact true
 ```
 
-### Example 6: Mutual Dependencies via Match
+### Example 7: Mutual Dependencies via Match
 
 ```
 inductive Nat where
@@ -1102,7 +1261,7 @@ def isZero : Nat -> Bool :=
 
 ---
 
-## 16. Error Types
+## 17. Error Types
 
 The typechecker produces the following error categories:
 
@@ -1124,7 +1283,7 @@ The typechecker produces the following error categories:
 
 ---
 
-## 17. Running Owl
+## 18. Running Owl
 
 ### Check Mode
 

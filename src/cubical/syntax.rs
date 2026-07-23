@@ -27,6 +27,9 @@ pub enum Term {
     PLam(Name, Box<Term>),
     PApp(Box<Term>, Box<Term>),
     THComp(Box<Term>, Box<Term>, Box<Term>, Box<Term>),
+    TComp(Box<Term>, Box<Term>, Box<Term>, Box<Term>),
+    TFill(Box<Term>, Box<Term>, Box<Term>, Box<Term>),
+    THFill(Box<Term>, Box<Term>, Box<Term>, Box<Term>),
     TEquiv(Box<Term>, Box<Term>),
     TMkEquiv(
         Box<Term>,
@@ -281,6 +284,27 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             show_term(env, u),
             show_term(env, u0)
         ),
+        Term::TComp(a, phi, u, u0) => format!(
+            "comp {} [{}] ({}) {}",
+            show_term(env, a),
+            show_term(env, phi),
+            show_term(env, u),
+            show_term(env, u0)
+        ),
+        Term::TFill(a, phi, u, u0) => format!(
+            "fill {} [{}] ({}) {}",
+            show_term(env, a),
+            show_term(env, phi),
+            show_term(env, u),
+            show_term(env, u0)
+        ),
+        Term::THFill(a, phi, u, u0) => format!(
+            "hfill {} [{}] ({}) {}",
+            show_term(env, a),
+            show_term(env, phi),
+            show_term(env, u),
+            show_term(env, u0)
+        ),
         Term::TEquiv(a, b) => format!("Equiv {} {}", show_term(env, a), show_term(env, b)),
         Term::TMkEquiv(a, b, f, g, eta, eps) => format!(
             "mkEquiv {} {} {} {} {} {}",
@@ -424,6 +448,24 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
             b(shift(d, c, u)),
             b(shift(d, c, u0)),
         ),
+        Term::TComp(a, phi, u, u0) => Term::TComp(
+            b(shift(d, c, a)),
+            b(shift(d, c, phi)),
+            b(shift(d, c, u)),
+            b(shift(d, c, u0)),
+        ),
+        Term::TFill(a, phi, u, u0) => Term::TFill(
+            b(shift(d, c, a)),
+            b(shift(d, c, phi)),
+            b(shift(d, c, u)),
+            b(shift(d, c, u0)),
+        ),
+        Term::THFill(a, phi, u, u0) => Term::THFill(
+            b(shift(d, c, a)),
+            b(shift(d, c, phi)),
+            b(shift(d, c, u)),
+            b(shift(d, c, u0)),
+        ),
         Term::TEquiv(a, bx) => Term::TEquiv(b(shift(d, c, a)), b(shift(d, c, bx))),
         Term::TMkEquiv(a, bx, f, g, eta, eps) => Term::TMkEquiv(
             b(shift(d, c, a)),
@@ -543,6 +585,24 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
             b(subst(j, s, u)),
             b(subst(j, s, u0)),
         ),
+        Term::TComp(a, phi, u, u0) => Term::TComp(
+            b(subst(j, s, a)),
+            b(subst(j, s, phi)),
+            b(subst(j, s, u)),
+            b(subst(j, s, u0)),
+        ),
+        Term::TFill(a, phi, u, u0) => Term::TFill(
+            b(subst(j, s, a)),
+            b(subst(j, s, phi)),
+            b(subst(j, s, u)),
+            b(subst(j, s, u0)),
+        ),
+        Term::THFill(a, phi, u, u0) => Term::THFill(
+            b(subst(j, s, a)),
+            b(subst(j, s, phi)),
+            b(subst(j, s, u)),
+            b(subst(j, s, u0)),
+        ),
         Term::TEquiv(a, bx) => Term::TEquiv(b(subst(j, s, a)), b(subst(j, s, bx))),
         Term::TMkEquiv(a, bx, f, g, eta, eps) => Term::TMkEquiv(
             b(subst(j, s, a)),
@@ -654,6 +714,9 @@ pub fn max_var(t: &Term) -> i32 {
         Term::PLam(_, b) => (max_var(b) - 1).max(-1),
         Term::PApp(p, r) => max_var(p).max(max_var(r)),
         Term::THComp(a, phi, u, u0) => max_var(a).max(max_var(phi)).max(max_var(u)).max(max_var(u0)),
+        Term::TComp(a, phi, u, u0) => max_var(a).max(max_var(phi)).max(max_var(u)).max(max_var(u0)),
+        Term::TFill(a, phi, u, u0) => max_var(a).max(max_var(phi)).max(max_var(u)).max(max_var(u0)),
+        Term::THFill(a, phi, u, u0) => max_var(a).max(max_var(phi)).max(max_var(u)).max(max_var(u0)),
         Term::TEquiv(a, b) => max_var(a).max(max_var(b)),
         Term::TMkEquiv(a, b, f, g, eta, eps) => max_var(a)
             .max(max_var(b))
@@ -782,7 +845,10 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             check_positivity_in(target, u, negative)?;
             check_positivity_in(target, v, negative)
         }
-        Term::THComp(a, phi, u, u0) => {
+        Term::THComp(a, phi, u, u0)
+        | Term::TComp(a, phi, u, u0)
+        | Term::TFill(a, phi, u, u0)
+        | Term::THFill(a, phi, u, u0) => {
             check_positivity_in(target, a, negative)?;
             check_positivity_in(target, phi, negative)?;
             check_positivity_in(target, u, negative)?;

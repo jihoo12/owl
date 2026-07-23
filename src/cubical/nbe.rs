@@ -90,6 +90,9 @@ pub enum Value {
     VUa(Box<Value>),
     VTransport(Box<Value>, Box<Value>),
     VHComp(Box<Value>, DNF, Box<Value>, Box<Value>),
+    VComp(Box<Value>, DNF, Box<Value>, Box<Value>),
+    VFill(Box<Value>, DNF, Box<Value>, Box<Value>),
+    VHFill(Box<Value>, DNF, Box<Value>, Box<Value>),
     VFst(Box<Value>),
     VSnd(Box<Value>),
 }
@@ -120,6 +123,9 @@ pub enum Neutral {
     NElim(Box<Value>, Vec<ElimCase>, Box<Neutral>),
     NTransport(Box<Value>, Box<Value>),
     NHComp(Box<Value>, DNF, Box<Value>, Box<Value>),
+    NComp(Box<Value>, DNF, Box<Value>, Box<Value>),
+    NFill(Box<Value>, DNF, Box<Value>, Box<Value>),
+    NHFill(Box<Value>, DNF, Box<Value>, Box<Value>),
     NMeta(i32),
 }
 
@@ -218,6 +224,27 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
             eval_nbe(env, globals, global_offset, r),
         ),
         Term::THComp(a, phi, tube, base) => do_hcomp(
+            globals, global_offset,
+            eval_nbe(env, globals, global_offset, a),
+            value_to_dnf(eval_nbe(env, globals, global_offset, phi)),
+            eval_nbe(env, globals, global_offset, tube),
+            eval_nbe(env, globals, global_offset, base),
+        ),
+        Term::TComp(a, phi, tube, base) => do_comp(
+            globals, global_offset,
+            eval_nbe(env, globals, global_offset, a),
+            value_to_dnf(eval_nbe(env, globals, global_offset, phi)),
+            eval_nbe(env, globals, global_offset, tube),
+            eval_nbe(env, globals, global_offset, base),
+        ),
+        Term::TFill(a, phi, tube, base) => do_fill(
+            globals, global_offset,
+            eval_nbe(env, globals, global_offset, a),
+            value_to_dnf(eval_nbe(env, globals, global_offset, phi)),
+            eval_nbe(env, globals, global_offset, tube),
+            eval_nbe(env, globals, global_offset, base),
+        ),
+        Term::THFill(a, phi, tube, base) => do_hfill(
             globals, global_offset,
             eval_nbe(env, globals, global_offset, a),
             value_to_dnf(eval_nbe(env, globals, global_offset, phi)),
@@ -400,6 +427,46 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
                 Value::VPApp(Box::new(Value::VHComp(a, phi, tube, base)), Box::new(r))
             }
         },
+        // fill boundary reduction: (fill A φ tube base) @ 0 = base
+        //                          (fill A φ tube base) @ 1 = comp A φ tube base
+        Value::VFill(a, phi, tube, base) => {
+            if let Some(endpoint) = value_to_endpoint(&r) {
+                match endpoint {
+                    I::I0 => {
+                        record_step("fill-papp-0".into(), "fill _ _ _ _ @ 0".into(), value_str(globals, global_offset, &base));
+                        *base
+                    }
+                    I::I1 => {
+                        let result = do_comp(globals, global_offset, *a, phi, *tube, *base);
+                        record_step("fill-papp-1".into(), "fill _ _ _ _ @ 1".into(), value_str(globals, global_offset, &result));
+                        result
+                    }
+                    _ => Value::VPApp(Box::new(Value::VFill(a, phi, tube, base)), Box::new(r)),
+                }
+            } else {
+                Value::VPApp(Box::new(Value::VFill(a, phi, tube, base)), Box::new(r))
+            }
+        },
+        // hfill boundary reduction: (hfill A φ tube base) @ 0 = base
+        //                           (hfill A φ tube base) @ 1 = hcomp A φ tube base
+        Value::VHFill(a, phi, tube, base) => {
+            if let Some(endpoint) = value_to_endpoint(&r) {
+                match endpoint {
+                    I::I0 => {
+                        record_step("hfill-papp-0".into(), "hfill _ _ _ _ @ 0".into(), value_str(globals, global_offset, &base));
+                        *base
+                    }
+                    I::I1 => {
+                        let result = do_hcomp(globals, global_offset, *a, phi, *tube, *base);
+                        record_step("hfill-papp-1".into(), "hfill _ _ _ _ @ 1".into(), value_str(globals, global_offset, &result));
+                        result
+                    }
+                    _ => Value::VPApp(Box::new(Value::VHFill(a, phi, tube, base)), Box::new(r)),
+                }
+            } else {
+                Value::VPApp(Box::new(Value::VHFill(a, phi, tube, base)), Box::new(r))
+            }
+        },
         other => Value::VPApp(Box::new(other), Box::new(r)),
     }
 }
@@ -556,6 +623,9 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::PLam(_, b) => uses_var_at_level(b, level + 1),
         Term::PApp(p, r) => uses_var_at_level(p, level) || uses_var_at_level(r, level),
         Term::THComp(a, phi, u, u0) => uses_var_at_level(a, level) || uses_var_at_level(phi, level) || uses_var_at_level(u, level) || uses_var_at_level(u0, level),
+        Term::TComp(a, phi, u, u0) => uses_var_at_level(a, level) || uses_var_at_level(phi, level) || uses_var_at_level(u, level) || uses_var_at_level(u0, level),
+        Term::TFill(a, phi, u, u0) => uses_var_at_level(a, level) || uses_var_at_level(phi, level) || uses_var_at_level(u, level) || uses_var_at_level(u0, level),
+        Term::THFill(a, phi, u, u0) => uses_var_at_level(a, level) || uses_var_at_level(phi, level) || uses_var_at_level(u, level) || uses_var_at_level(u0, level),
         Term::TEquiv(a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level),
         Term::TMkEquiv(a, b, f, g, eta, eps) => {
             uses_var_at_level(a, level) || uses_var_at_level(b, level) || uses_var_at_level(f, level) || uses_var_at_level(g, level) || uses_var_at_level(eta, level) || uses_var_at_level(eps, level)
@@ -1143,6 +1213,139 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, phi: DNF, 
     }
 }
 
+pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, phi: DNF, tube: Value, base: Value) -> Value {
+    if phi == dnf_top() {
+        let result = do_papp(globals, global_offset, tube, Value::VInterval(I::I1));
+        record_step("comp-top".into(), "comp _ ⊤ tube base".into(), value_str(globals, global_offset, &result));
+        result
+    } else if phi == dnf_bot() {
+        record_step("comp-bot".into(), "comp _ ⊥ tube base".into(), value_str(globals, global_offset, &base));
+        base
+    } else {
+        match (&a_fam, &base) {
+            // ── Pi decomposition ──
+            (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
+                let arg_var = Value::VNeutral(Neutral::NVar(0));
+                let tube_at_arg = match &tube {
+                    Value::VPLam(_, iclos) => {
+                        let formal_i = Value::VIntervalVar(0);
+                        let tube_at_i = iclos.apply_interval_value(formal_i);
+                        do_apply(globals, global_offset, tube_at_i, arg_var.clone())
+                    }
+                    _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
+                };
+                let base_at_arg = base_clos.apply(arg_var.clone());
+                let cod_at_arg = cod_clos.apply(arg_var);
+                let inner = do_comp(globals, global_offset, cod_at_arg, phi.clone(), tube_at_arg, base_at_arg);
+                let result = Value::VLam(arg_name.clone(), Closure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: {
+                        let inner_term = quote(1, globals, global_offset, inner);
+                        Term::TAbs(arg_name.clone(), Box::new(inner_term))
+                    },
+                });
+                record_step("comp-pi".into(), "comp (Π _ _) φ f g".into(), value_str(globals, global_offset, &result));
+                result
+            }
+
+            // ── Sigma decomposition ──
+            (Value::VSigma(_, fst_ty, snd_clos), Value::VPair(fst_base, snd_base)) => {
+                let fst_tube = match &tube {
+                    Value::VPLam(_, iclos) => {
+                        let formal_i = Value::VIntervalVar(0);
+                        let tube_at_i = iclos.apply_interval_value(formal_i);
+                        do_fst(globals, global_offset, tube_at_i)
+                    }
+                    _ => Value::VPApp(Box::new(tube.clone()), Box::new(Value::VIntervalVar(0))),
+                };
+                let fst_tube_plam = Value::VPLam("_".to_string(), IClosure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: quote(1, globals, global_offset, fst_tube),
+                });
+                let fst_result = do_comp(globals, global_offset, *fst_ty.clone(), phi.clone(), fst_tube_plam, (**fst_base).clone());
+
+                let snd_tube = match &tube {
+                    Value::VPLam(_, iclos) => {
+                        let formal_i = Value::VIntervalVar(0);
+                        let tube_at_i = iclos.apply_interval_value(formal_i);
+                        do_snd(globals, global_offset, tube_at_i)
+                    }
+                    _ => Value::VPApp(Box::new(tube.clone()), Box::new(Value::VIntervalVar(0))),
+                };
+                let snd_tube_plam = Value::VPLam("_".to_string(), IClosure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: quote(1, globals, global_offset, snd_tube),
+                });
+                let snd_result = do_comp(globals, global_offset,
+                    snd_clos.apply((**fst_base).clone()), phi.clone(), snd_tube_plam, (**snd_base).clone());
+
+                let result = Value::VPair(Box::new(fst_result), Box::new(snd_result));
+                record_step("comp-sigma".into(), "comp (Σ _ _) φ p q".into(), value_str(globals, global_offset, &result));
+                result
+            }
+
+            _ => {
+                let result = Value::VComp(Box::new(a_fam), phi, Box::new(tube), Box::new(base));
+                record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                result
+            }
+        }
+    }
+}
+
+pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, phi: DNF, tube: Value, base: Value) -> Value {
+    if phi == dnf_top() {
+        record_step("fill-top".into(), "fill _ ⊤ tube base".into(), value_str(globals, global_offset, &tube));
+        tube
+    } else if phi == dnf_bot() {
+        // Constant path: λj. base
+        let result = Value::VPLam("j".to_string(), IClosure {
+            env: vec![],
+            globals: globals.clone(),
+            global_offset,
+            body: quote(1, globals, global_offset, base.clone()),
+        });
+        record_step("fill-bot".into(), "fill _ ⊥ tube base".into(), value_str(globals, global_offset, &result));
+        result
+    } else {
+        // Return VFill; do_papp handles endpoint reductions:
+        //   fill _ _ _ _ @ 0 → base
+        //   fill _ _ _ _ @ 1 → comp
+        let result = Value::VFill(Box::new(a_fam), phi, Box::new(tube), Box::new(base));
+        record_step("fill-stuck".into(), "fill _ _ _ _".into(), value_str(globals, global_offset, &result));
+        result
+    }
+}
+
+pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, phi: DNF, tube: Value, base: Value) -> Value {
+    if phi == dnf_top() {
+        record_step("hfill-top".into(), "hfill _ ⊤ tube base".into(), value_str(globals, global_offset, &tube));
+        tube
+    } else if phi == dnf_bot() {
+        let result = Value::VPLam("j".to_string(), IClosure {
+            env: vec![],
+            globals: globals.clone(),
+            global_offset,
+            body: quote(1, globals, global_offset, base.clone()),
+        });
+        record_step("hfill-bot".into(), "hfill _ ⊥ tube base".into(), value_str(globals, global_offset, &result));
+        result
+    } else {
+        // Return VHFill; do_papp handles endpoint reductions:
+        //   hfill _ _ _ _ @ 0 → base
+        //   hfill _ _ _ _ @ 1 → hcomp
+        let result = Value::VHFill(Box::new(a_ty), phi, Box::new(tube), Box::new(base));
+        record_step("hfill-stuck".into(), "hfill _ _ _ _".into(), value_str(globals, global_offset, &result));
+        result
+    }
+}
+
 pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {
     match v {
         Value::VNeutral(n) => quote_neutral(size, globals, global_offset, n),
@@ -1243,6 +1446,24 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
             Box::new(quote(size, globals, global_offset, *tube)),
             Box::new(quote(size, globals, global_offset, *base)),
         ),
+        Value::VComp(a, phi, tube, base) => Term::TComp(
+            Box::new(quote(size, globals, global_offset, *a)),
+            Box::new(Term::TCube(phi)),
+            Box::new(quote(size, globals, global_offset, *tube)),
+            Box::new(quote(size, globals, global_offset, *base)),
+        ),
+        Value::VFill(a, phi, tube, base) => Term::TFill(
+            Box::new(quote(size, globals, global_offset, *a)),
+            Box::new(Term::TCube(phi)),
+            Box::new(quote(size, globals, global_offset, *tube)),
+            Box::new(quote(size, globals, global_offset, *base)),
+        ),
+        Value::VHFill(a, phi, tube, base) => Term::THFill(
+            Box::new(quote(size, globals, global_offset, *a)),
+            Box::new(Term::TCube(phi)),
+            Box::new(quote(size, globals, global_offset, *tube)),
+            Box::new(quote(size, globals, global_offset, *base)),
+        ),
     }
 }
 
@@ -1266,6 +1487,24 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             Term::TTransport(Box::new(quote(size, globals, global_offset, *p)), Box::new(quote(size, globals, global_offset, *x)))
         }
         Neutral::NHComp(a, phi, tube, base) => Term::THComp(
+            Box::new(quote(size, globals, global_offset, *a)),
+            Box::new(Term::TCube(phi)),
+            Box::new(quote(size, globals, global_offset, *tube)),
+            Box::new(quote(size, globals, global_offset, *base)),
+        ),
+        Neutral::NComp(a, phi, tube, base) => Term::TComp(
+            Box::new(quote(size, globals, global_offset, *a)),
+            Box::new(Term::TCube(phi)),
+            Box::new(quote(size, globals, global_offset, *tube)),
+            Box::new(quote(size, globals, global_offset, *base)),
+        ),
+        Neutral::NFill(a, phi, tube, base) => Term::TFill(
+            Box::new(quote(size, globals, global_offset, *a)),
+            Box::new(Term::TCube(phi)),
+            Box::new(quote(size, globals, global_offset, *tube)),
+            Box::new(quote(size, globals, global_offset, *base)),
+        ),
+        Neutral::NHFill(a, phi, tube, base) => Term::THFill(
             Box::new(quote(size, globals, global_offset, *a)),
             Box::new(Term::TCube(phi)),
             Box::new(quote(size, globals, global_offset, *tube)),
