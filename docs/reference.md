@@ -72,6 +72,9 @@ The following words are reserved and cannot be used as variable names:
 | `ua`          | Univalence axiom                           |
 | `transport`   | Transport along a path                     |
 | `equivFwd`    | Apply forward map of an equivalence        |
+| `forall` / `∀` | Dependent function type former          |
+| `Σ`           | Dependent pair type former (Unicode only)  |
+| `I` / `𝕀`     | Cubical interval type                      |
 
 ### Symbols and Operators
 
@@ -97,7 +100,8 @@ The following words are reserved and cannot be used as variable names:
 | ------- | ------------------ |
 | `i0`    | Left endpoint (0)  |
 | `i1`    | Right endpoint (1) |
-| `in`    | Interval variable n (de Bruijn) |
+| `0`     | Literal integer 0, also parsed as `i0` |
+| `1`     | Literal integer 1, also parsed as `i1` |
 
 ---
 
@@ -135,9 +139,12 @@ types are sugar for `forall (_ : A), B`.
 ### Sigma Types (Dependent Pairs)
 
 ```
-Sigma (x : A), B         -- dependent
-A * B                    -- non-dependent (shorthand)
+Σ (x : A), B         -- dependent (use Unicode Σ)
+A * B                -- non-dependent (shorthand)
 ```
+
+Note: The Sigma type former requires the Unicode character `Σ`, not the ASCII
+string `Sigma`.
 
 Pairs are written `(a , b)`. Projections use `fst` and `snd`.
 
@@ -447,20 +454,6 @@ This requirement applies to both ordinary and parameterized datatypes. For
 parameterized types, the positivity check examines constructor types after
 the parameters are in scope.
 
-### Positivity Requirement
-
-A datatype `D` may only appear **strictly positively** in its own constructor
-argument types. This means `D` cannot appear to the left of an arrow in any
-constructor's argument type:
-
-```
--- Allowed:
-data Nat where | zero : Nat | suc : Nat -> Nat
-
--- Rejected (D appears as domain):
-data Bad where | mk : Bad -> Bad
-```
-
 ---
 
 ## 7. Pattern Matching and Elimination
@@ -474,6 +467,7 @@ match scrutinee return ReturnType with
   | con3 arg1 arg2 arg3 => body3
 ```
 
+The scrutinee can be a bare name (resolved from scope) or an arbitrary term.
 The `return` clause specifies the **motive** (dependent return type). The
 motive is a function from the matched type to a type family.
 
@@ -601,7 +595,6 @@ Interval expressions support:
 | --------- | ------ | ------- |
 | Left endpoint | `i0` | 0 |
 | Right endpoint | `i1` | 1 |
-| Variable | `in` | Interval variable at de Bruijn index n |
 | Meet | `i /\ j` | Conjunction (min) |
 | Join | `i \/ j` | Disjunction (max) |
 | Negation | `~i` | Complement (1 - i) |
@@ -786,29 +779,30 @@ def transport_comp : Nat :=
 ### Glue Types
 
 ```
-Glue A [phi] (te)
+Glue A phi te
 ```
 
 Glue type construction: `A` is the base type, `phi` is a face restriction,
 and `te` provides equivalences on the face where `phi` is true.
 
-When `phi` is false, `Glue A [phi] (te)` reduces to `A`.
+When `phi` is false, `Glue A phi te` reduces to `A`.
 When `phi` is true, it reduces to the domain of the equivalence.
 
 ### Glue Element Introduction
 
 ```
-glue [phi] t a
+glue phi t a
 ```
 
 Constructs a value of Glue type from:
+- `phi` : a face restriction
 - `t` : the cap (in the equivalence domain, when `phi` is true)
 - `a` : the base (in `A`)
 
 ### Glue Element Elimination
 
 ```
-unglue [phi] te g
+unglue phi te g
 ```
 
 Extracts the underlying `A`-component from a Glue-typed value `g`.
@@ -1254,68 +1248,108 @@ suc (suc (suc zero))   displays as   3
 
 ## 15. Complete Grammar
 
-Here is a simplified BNF-style grammar for the Owl surface syntax:
+Here is a BNF-style grammar for the Owl surface syntax. The parser is a
+recursive-descent parser; precedence is encoded in the call hierarchy.
 
 ```
-<file>       ::= <decl>*
-<decl>       ::= "import" STRING
-               | "inductive" NAME [":" ULEVEL] "where" <con_list>
-               | "def" NAME ":" <term> ":=" <term>
+<file>        ::= <decl>*
+<decl>        ::= "import" STRING
+                | "inductive" NAME [<params>] [":" UNIV] "where" <con_list>
+                | "def" NAME ":" <term> ":=" <term>
 
-<con_list>   ::= <con> ("|" <con>)*
-<con>        ::= NAME [":" <con_type>] ["[" <face> "," <face> "]"]
-<con_type>   ::= <type_atom> ("->" <type_atom>)*
+<params>      ::= ("(" NAME ":" <term> ")")*
+<con_list>    ::= <con> ("|" <con>)*
+<con>         ::= NAME ":" <con_type> ["[" <face> "," <face> "]"]
+<con_type>    ::= <atom> ("->" <atom>)*
+<UNIV>        ::= "U0" | "U1" | "U2" | ...
 
-<term>       ::= "let" NAME [":" <term>] ":=" <term> "in" <term>
-               | "by" <tactic> (";" <tactic>)*
-               | "fun" <binders> "=>" <term>
-               | "<" NAME ">" <term>
-               | "forall" "(" NAME ":" <term> ")" "," <term>
-               | "Sigma" "(" NAME ":" <term> ")" "," <term>
-               | <pair_term>
+<term>        ::= <lambda>
+<lambda>      ::= "let" NAME [":" <term>] ":=" <term> "in" <term>
+                | "by" <tactic> (";" <tactic>)*
+                | "fun" <lam_binders> "=>" <term>
+                | "<" NAME ">" <term>            -- path lambda
+                | "forall" "(" NAME ":" <term> ")" "," <term>
+                | "∀" "(" NAME ":" <term> ")" "," <term>
+                | "Σ" "(" NAME ":" <term> ")" "," <term>
+                | <pair>
 
-<pair_term>  ::= <arrow> ("," <term>)?
-<arrow>      ::= <sigma> ("->" <term>)?
-<sigma>      ::= <app> ("*" <app>)?
-<app>        ::= <app> <atom> | <atom>
-<atom>       ::= NAME | INT | "(" <term> ")"
-               | <term> "@" <atom>
-               | "fst" <atom> | "snd" <atom>
-               | "match" <term> "return" <term> "with" <cases>
-               | "hcomp" <atom> ("[" <system> "]" | <atom> <atom>) <atom>
-               | "comp" <atom> ("[" <system> "]" | <atom> <atom>) <atom>
-               | "fill" <atom> ("[" <system> "]" | <atom> <atom>) <atom>
-               | "hfill" <atom> ("[" <system> "]" | <atom> <atom>) <atom>
+<pair>        ::= <arrow> ("," <term>)?            -- pair or comma
+<arrow>       ::= <sigma> ("->" <term>)?
+<sigma>       ::= <join> ("*" <join>)*             -- right-associative
+<join>        ::= <meet> ("\/" <meet>)*
+<meet>        ::= <tilde> ("/\ " <tilde>)*
+<tilde>       ::= "~" <tilde> | <papp>
+<papp>        ::= <app> ("@" <tilde>)*             -- path application
+<app>         ::= <prefix_or_atom>+
 
-<system>     ::= <term> "=>" <term> ("," <term> "=>" <term>)*
-               | "Equiv" <atom> <atom>
-               | "mkEquiv" <atom> <atom> <atom> <atom> <atom> <atom>
-               | "equivFwd" <atom> <atom>
-               | "ua" <atom>
-               | "transport" <atom> <atom>
-               | "Glue" <atom> "[" <face> "]" "(" <atom> ")"
-               | "glue" "[" <face> "]" <atom> <atom>
-               | "unglue" "[" <face> "]" <atom> <atom>
+<prefix_or_atom>
+              ::= "fst" <prefix_or_atom>           -- first projection
+                | "snd" <prefix_or_atom>           -- second projection
+                | "ua" <prefix_or_atom>            -- univalence
+                | "transport" <prefix_or_atom> <prefix_or_atom>
+                | "equivFwd" <prefix_or_atom> <prefix_or_atom>
+                | <atom>
 
-<cases>      ::= ("|" NAME <binders> "=>" <term>)*
-<binders>    ::= NAME*
-<tactic>     ::= "exact" <term>
-               | "intro" NAME+
-               | "apply" <term>
-               | "assumption"
-               | "reflexivity"
-               | "symmetry"
-               | "split"
-               | "constructor" NAME?
-               | "destruct" NAME
-               | "transitivity"
-               | "compute"
-               | "trivial"
+<atom>        ::= NAME                             -- variable, constructor, i0, i1
+                | INT                              -- 0 = i0, 1 = i1, other = error
+                | "(" <term> ")"                   -- parenthesized
+                | "Path" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
+                | "PathP" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
+                | "hcomp" <prefix_or_atom> (<system> | <prefix_or_atom> <prefix_or_atom>) <prefix_or_atom>
+                | "comp" <prefix_or_atom> (<system> | <prefix_or_atom> <prefix_or_atom>) <prefix_or_atom>
+                | "fill" <prefix_or_atom> (<system> | <prefix_or_atom> <prefix_or_atom>) <prefix_or_atom>
+                | "hfill" <prefix_or_atom> (<system> | <prefix_or_atom> <prefix_or_atom>) <prefix_or_atom>
+                | "Equiv" <prefix_or_atom> <prefix_or_atom>
+                | "mkEquiv" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom> <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
+                | "Glue" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
+                | "glue" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
+                | "unglue" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
+                | <match>
 
-<face>       ::= <face_atom> ("\/" <face_atom>)*
-<face_atom>  ::= <face_lit> ("/\ " <face_lit>)*
-<face_lit>   ::= "i" INT | "~" "i" INT
+<system>      ::= "[" <system_entry> ("," <system_entry>)* "]"
+<system_entry>::= <join> "=>" <term>
+
+<match>       ::= "match" NAME "return" <term> "with" <cases>
+                | "match" <term> "return" <term> "with" <cases>
+<cases>       ::= ("|" NAME <binders> "=>" <term>)+
+<binders>     ::= NAME*
+
+<lam_binders> ::= NAME+ | ("(" NAME+ ":" <term> ")")+
+
+<tactic>      ::= "exact" <term>
+                | "intro" NAME+
+                | "apply" <term>
+                | "assumption"
+                | "reflexivity"
+                | "symmetry"
+                | "split"
+                | "constructor" NAME?
+                | "destruct" NAME
+                | "transitivity"
+                | "compute"
+                | "trivial"
+
+<face>        ::= <face_atom> ("\/" <face_atom>)*
+<face_atom>   ::= <face_lit> ("/\ " <face_lit>)*
+<face_lit>    ::= "~" <name> | <name>
 ```
+
+### Notes on the Grammar
+
+**Interval variables**: Any identifier can serve as an interval variable when
+bound by path lambda (`<i> ...`). The parser tracks bound interval variables
+separately from term variables. The special names `i0` and `i1` are always
+resolved as interval endpoints, not as regular variables.
+
+**Integer literals**: The integers `0` and `1` are parsed as interval endpoints
+(`i0` and `i1`). Other integers are not valid in the surface syntax.
+
+**Match scrutinee**: The `match` form accepts either a bare name (resolved
+from scope) or an arbitrary term as the scrutinee.
+
+**System syntax**: hcomp, comp, fill, and hfill accept either a
+multi-face system `[phi1 => tube1, phi2 => tube2]` or a legacy
+single-face form `phi tube`.
 
 ---
 
@@ -1374,7 +1408,7 @@ def trunc_ind :
   (forall (a : A), P (inc a)) ->
   forall (x : Trunc A), P x :=
   fun A P h x =>
-    match x return Trunc A, P x with
+    match x return P x with
     | trunc_id a b => <i> h a
     | inc a => h a
 ```
@@ -1401,7 +1435,7 @@ def pushout_elim :
   (forall (c : C), Path (P (glue c))) ->
   forall (x : Pushout A B C), P x :=
   fun A B C P f g h x =>
-    match x return Pushout A B C, P x with
+    match x return P x with
     | glue c => <i> f c
     | left a => f a
     | right b => g b
@@ -1504,14 +1538,25 @@ The typechecker produces the following error categories:
 | `ExpectedPi(ty)` | Expected a function type, got `ty` |
 | `ExpectedPath(ty)` | Expected a path type, got `ty` |
 | `ExpectedSigma(ty)` | Expected a pair type, got `ty` |
+| `ExpectedEquiv(ty)` | Expected an equivalence type, got `ty` |
 | `ExpectedUniverse(ty)` | Expected a universe type, got `ty` |
+| `NotAnInterval(t)` | Expected an interval expression, got `t` |
 | `CannotInfer(ty)` | Cannot infer type of `ty` without annotation |
+| `Other(msg)` | Other error message |
 | `UnknownDatatype(d)` | Unknown datatype name `d` |
 | `UnknownConstructor(d, c)` | Constructor `c` not found in datatype `d` |
 | `WrongNumberOfArgs{..}` | Constructor got wrong number of arguments |
+| `BadElimCase{..}` | Eliminator case has invalid boundary conditions |
 | `MissingCase(c)` | Eliminator is missing a case for constructor `c` |
-| `PositivityError{..}` | Datatype appears in negative position |
+| `ExpectedData(ty)` | Expected a datatype, got `ty` |
+| `PathPNotTypeFamily(ty)` | First argument of PathP must be a type family |
 | `EtaFuelExhausted(..)` | Eta-equality check ran out of fuel |
+
+Additionally, a separate positivity check runs during datatype declaration:
+
+| Error | Meaning |
+| ----- | ------- |
+| `PositivityError` | Datatype appears in non-positive position in a constructor |
 
 ---
 
