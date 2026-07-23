@@ -1,0 +1,103 @@
+-- stress_transport.owl — transport, ua, equivFwd, mkEquiv
+--
+-- Exercises: transport over path families, ua (univalence), equivFwd,
+-- mkEquiv with full proof data, and nested transport.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Basic transport over constant path family
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transport_const : ∀ (A : U0), A -> A :=
+  fun A a => transport (<i> A) a
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Transport over ua (univalence axiom)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Identity equivalence: A ≃ A
+def id_eta : ∀ (a : Nat), Path Nat a a :=
+  fun a => <i> a
+
+def id_eps : ∀ (b : Nat), Path Nat b b :=
+  fun b => <i> b
+
+def id_equiv : Equiv Nat Nat :=
+  mkEquiv Nat Nat (fun x => x) (fun x => x) id_eta id_eps
+
+def transport_via_ua : ∀ (A : U0), ∀ (B : U0), Equiv A B -> A -> B :=
+  fun A B e a => transport (<i> ua e @ i) a
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Transport over a non-trivial path family
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transport_path_family : Nat -> Nat :=
+  fun n => transport (<i> Nat) n
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. equivFwd: apply equivalence forward map
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def equiv_fwd : ∀ (A : U0), ∀ (B : U0), Equiv A B -> A -> B :=
+  fun A B e a => equivFwd e a
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Equiv type is well-formed
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def equiv_type : U1 := Equiv Nat Nat
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. ua produces a path in the universe
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def ua_path : Path U0 Nat Nat :=
+  ua id_equiv
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Transport + path application: apply the transported value
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transported_and_applied : Nat :=
+  transport (<i> Nat) (suc zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. Transport of a function type
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transport_fn : (Nat -> Nat) -> (Nat -> Nat) :=
+  fun f => transport (<i> (Nat -> Nat)) f
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. Transport of a pair type (Sigma)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transport_pair : Nat * Nat -> Nat * Nat :=
+  fun p => transport (<i> (Nat * Nat)) p
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. Nested transport: transport twice
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def double_transport : Nat -> Nat :=
+  fun n => transport (<i> Nat) (transport (<i> Nat) n)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 11. Transport in a sigma type family
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transport_sigma : Nat * Nat -> Nat * Nat :=
+  fun p => transport (<i> (Nat * Nat)) p
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 12. ua then transport: end-to-end univalence round trip
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def round_trip : Equiv Nat Nat -> Nat -> Nat :=
+  fun e n => transport (<i> ua e @ i) n
+
+def main : Nat := transported_and_applied

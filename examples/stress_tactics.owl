@@ -1,0 +1,118 @@
+-- stress_tactics.owl — advanced tactic combinations and edge cases
+--
+-- Exercises: chained tactics, tactic + term hybrid, constructor chains,
+-- nested destruct, multiple intro, and more.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+inductive Unit where
+  | tt : Unit
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Chained constructor tactics
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def five : Nat :=
+  by constructor suc; exact (suc (suc (suc (suc zero))))
+
+def ten : Nat :=
+  by constructor suc;
+     exact (suc (suc (suc (suc (suc (suc (suc (suc (suc zero)))))))))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Intro + exact in one block
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def id_fn : ∀ (A : U0), A -> A :=
+  by intro A x; exact x
+
+def const_fn : ∀ (A : U0), ∀ (B : U0), A -> B -> A :=
+  by intro A B a b; exact a
+
+def fst_snd : ∀ (A : U0), ∀ (B : U0), A * B -> A :=
+  by intro A B p; exact (fst p)
+
+def snd_fst : ∀ (A : U0), ∀ (B : U0), A * B -> B :=
+  by intro A B p; exact (snd p)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Apply chains
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def add_one : Nat -> Nat := fun n => suc n
+
+def add_three : Nat -> Nat :=
+  by intro x; apply add_one; apply add_one; apply add_one; exact x
+
+def double_then_triple : Nat -> Nat :=
+  by intro x; apply add_three; apply add_three; exact x
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. Split tactics
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def mk_pair : Nat * Bool :=
+  by split; exact (suc zero); exact true
+
+def mk_pair_nat_bool : Nat * Bool :=
+  by split; exact (suc (suc zero)); exact true
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Assumption after intro
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def identity_assumption : Nat -> Nat :=
+  by intro x; assumption
+
+def identity_multi : ∀ (A : U0), A -> A :=
+  by intro A x; assumption
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. Trivial on various types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def trivial_unit : Unit := by trivial
+
+def trivial_nat_zero : Nat := by trivial
+
+def trivial_bool : Bool := by constructor
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Destruct on Bool (multi-constructor case split)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def neg : Bool -> Bool :=
+  by intro b; destruct b; exact false; exact true
+
+def and_bool : Bool -> Bool -> Bool :=
+  by intro a b; destruct a; exact false; destruct b; exact true; exact false
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. Compute tactic
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def compute_id : Nat -> Nat :=
+  by intro x; compute; exact x
+
+def compute_complex : Nat :=
+  by compute; exact (suc (suc zero))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. Hybrid: tactic block + term definition
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+def add_via_tactic : Nat -> Nat -> Nat :=
+  by intro m n; exact (add m n)
+
+def main : Nat := add_via_tactic five ten

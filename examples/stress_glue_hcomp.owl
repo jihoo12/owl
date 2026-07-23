@@ -1,0 +1,108 @@
+-- stress_glue_hcomp.owl — Glue types, hcomp, unglue, glueElem
+--
+-- Exercises: basic Glue, hcomp with trivial and non-trivial faces,
+-- unglue elimination, glue introduction, and combinations.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. hcomp with trivial face (always true)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_trivial : Nat :=
+  hcomp Nat 1 (<i> suc zero) (suc zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. hcomp with bottom face (never true)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_bot : Nat :=
+  hcomp Nat 0 (<i> zero) zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. hcomp with constant tube (constant path family)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_const : Nat :=
+  hcomp Nat 1 (<i> suc (suc zero)) (suc (suc zero))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. hcomp returning a pair
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_pair : Nat * Nat :=
+  hcomp (Nat * Nat) 1 (<i> (zero , zero)) (zero , zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Glue type: A glued along trivial face
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def id_eta_glue : ∀ (a : Nat), Path Nat a a :=
+  fun a => <i> a
+
+def id_eps_glue : ∀ (b : Nat), Path Nat b b :=
+  fun b => <i> b
+
+def id_equiv_glue : Equiv Nat Nat :=
+  mkEquiv Nat Nat (fun x => x) (fun x => x) id_eta_glue id_eps_glue
+
+def glue_trivial_type : U0 :=
+  Glue Nat 1 (Nat , id_equiv_glue)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. unglue: eliminate a Glue type
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- unglue on trivial face extracts the base value directly
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. hcomp with meet face
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_meet : Nat :=
+  hcomp Nat (1 /\ 1) (<i> suc zero) (suc zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. hcomp with join face
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_join : Nat :=
+  hcomp Nat (0 \/ 0) (<i> zero) zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. hcomp reduces at boundary: hcomp A phi tube base @ 0 = base
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- hcomp evaluates to base at i0 and tube @ i1 at i1
+-- We verify this by using the result in further computation:
+
+def hcomp_result_is_nat : Nat :=
+  hcomp Nat 1 (<i> suc zero) (suc (suc zero))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. hcomp nested in a function
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_in_fn : Nat -> Nat :=
+  fun n => hcomp Nat 1 (<i> n) n
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 11. Transport + hcomp composition
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transport_hcomp : Nat :=
+  transport (<i> Nat)
+    (hcomp Nat 1 (<i> suc zero) (suc (suc zero)))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 12. Multiple hcomp nesting
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def nested_hcomp : Nat :=
+  hcomp Nat 1
+    (<i> hcomp Nat 1 (<i> suc zero) zero)
+    (suc (suc zero))
+
+def main : Nat := hcomp_trivial

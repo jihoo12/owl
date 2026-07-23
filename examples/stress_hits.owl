@@ -1,0 +1,153 @@
+-- stress_hits.owl — higher inductive types, path constructors, and elimination
+--
+-- Exercises: S1 (circle), suspension, join, pushout-like types,
+-- multiple path constructors, and eliminator patterns.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Circle S1 with base and loop
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive S1 where
+  | base : S1
+  | loop : S1 [ base , base ]
+
+-- loop @ 0 = base  and  loop @ 1 = base  by boundary
+
+def loop_path : Path S1 base base := loop
+
+def loop_at_zero : S1 := loop @ i0
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Suspension: two points + a path between them
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Susp where
+  | north : Susp
+  | south : Susp
+  | merid : Susp [ north , south ]
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Interval as a HIT (unit interval with two endpoints)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive MyInterval where
+  | my0 : MyInterval
+  | my1 : MyInterval
+  | myseg : MyInterval [ my0 , my1 ]
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. A type with multiple path constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Torus where
+  | pt : Torus
+  | p : Torus [ pt , pt ]
+  | q : Torus [ pt , pt ]
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Join of two types (A * B with path constructors)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+inductive MyBool where
+  | btrue : MyBool
+  | bfalse : MyBool
+
+-- A path from btrue to bfalse
+inductive JoinBool where
+  | jtrue : JoinBool
+  | jfalse : JoinBool
+  | jpath : JoinBool [ jtrue , jfalse ]
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. Elimination / match on S1
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def elim_s1_base : S1 -> Nat :=
+  fun s => match s return Nat with
+  | base => zero
+  | loop i => <j> zero
+
+-- elim_s1_path: constant motive, path-valued
+def elim_s1_path : S1 -> S1 :=
+  fun s => match s return S1 with
+  | base => base
+  | loop i => <j> loop @ j
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Elimination on the suspension
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def elim_susp : Susp -> Nat :=
+  fun s => match s return Nat with
+  | north => zero
+  | south => zero
+  | merid i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. Elimination on Torus (multi path-constructor HIT)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def elim_torus : Torus -> Nat :=
+  fun t => match t return Nat with
+  | pt => zero
+  | p i => <j> zero
+  | q i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. Nested path application: loop composed with itself
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def loop_loop : Path S1 base base :=
+  match base return Path S1 base base with
+  | base => loop
+  | loop i => <j> loop @ j
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. Path constructor with interval variable in body
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def susp_merid_at_0 : Susp := merid @ i0
+
+def susp_merid_at_1 : Susp := merid @ i1
+
+def interval_path : MyInterval := myseg @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 11. Identity function on S1
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def s1_id : S1 -> S1 :=
+  fun s => match s return S1 with
+  | base => base
+  | loop i => <j> loop @ j
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 12. Path on JoinBool: connecting the endpoints
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def join_path : Path JoinBool jtrue jfalse := jpath
+
+def elim_joinbool : JoinBool -> Nat :=
+  fun j => match j return Nat with
+  | jtrue => zero
+  | jfalse => zero
+  | jpath i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 13. Combine: path application inside eliminator
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def combined_elim : S1 -> S1 :=
+  fun s => match s return S1 with
+  | base => base
+  | loop i => <j> loop @ j
+
+def main : Nat := elim_susp north
