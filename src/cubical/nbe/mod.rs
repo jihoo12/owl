@@ -1,11 +1,14 @@
-#![allow(dead_code)]
 #![allow(clippy::enum_variant_names)]
+
+pub mod trace;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top, eval_interval};
 use crate::cubical::syntax::{ElimCase, Level, Name, System, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, show_term, subst};
+
+use trace::{TRACE_ACTIVE, record_step};
 
 pub type Env = Vec<Value>;
 
@@ -16,38 +19,6 @@ pub type DNFSystem = Vec<(DNF, Value)>;
 /// All closures created during evaluation share the same `Globals` so that
 /// recursive self-references resolve correctly after placeholder replacement.
 pub type Globals = Rc<RefCell<Vec<Value>>>;
-
-// ── Reduction trace infrastructure ──
-
-/// A single reduction step recorded during normalization.
-#[derive(Debug, Clone)]
-pub struct ReductionStep {
-    pub rule: String,
-    pub input: String,
-    pub output: String,
-}
-
-thread_local! {
-    static REDUCTION_TRACE: std::cell::RefCell<Vec<ReductionStep>> = std::cell::RefCell::new(Vec::new());
-}
-
-pub static TRACE_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-pub fn start_trace() {
-    TRACE_ACTIVE.store(true, std::sync::atomic::Ordering::Release);
-    REDUCTION_TRACE.with(|t| t.borrow_mut().clear());
-}
-
-pub fn stop_trace() -> Vec<ReductionStep> {
-    TRACE_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
-    REDUCTION_TRACE.with(|t| t.borrow_mut().split_off(0))
-}
-
-fn record_step(rule: String, input: String, output: String) {
-    if TRACE_ACTIVE.load(std::sync::atomic::Ordering::Acquire) {
-        REDUCTION_TRACE.with(|t| t.borrow_mut().push(ReductionStep { rule, input, output }));
-    }
-}
 
 fn value_str(globals: &Globals, global_offset: usize, v: &Value) -> String {
     if !TRACE_ACTIVE.load(std::sync::atomic::Ordering::Acquire) {

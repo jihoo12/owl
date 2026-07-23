@@ -508,12 +508,6 @@ fn check_faces(ctx: &Ctx, phi: &Term, tube_at0: &Term, base: &Term) -> Result<()
     }
 }
 
-fn instantiate_telescope(args: &[Term], body: &Term) -> Term {
-    args.iter()
-        .rev()
-        .fold(body.clone(), |acc, arg| beta(&acc, arg))
-}
-
 fn shift_cases(cases: &[ElimCase], d: i32) -> Vec<ElimCase> {
     cases
         .iter()

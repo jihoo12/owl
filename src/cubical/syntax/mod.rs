@@ -3,8 +3,13 @@
 // Depends on types from interval.rs:
 //   use crate::interval::{I, DNF};
 
+pub mod pretty;
+pub mod positivity;
+
+pub use pretty::show_term;
+pub use positivity::check_datatype_positivity;
+
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top};
-use std::fmt;
 
 pub type Name = String;
 pub type Level = i32;
@@ -233,211 +238,7 @@ impl Datatype {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Pretty-printing
-// ---------------------------------------------------------------------------
 
-/// If the term is a Nat literal in normal form (chains of `suc` ending in
-/// `zero`), return the integer value. Otherwise return None.
-pub fn nat_to_int(t: &Term) -> Option<i64> {
-    match t {
-        Term::TCon(d, c, args) if d == "Nat" => match (c.as_str(), args.as_slice()) {
-            ("zero", []) => Some(0),
-            ("suc", [arg]) => nat_to_int(arg).map(|n| n + 1),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-pub fn show_term(env: &[Name], t: &Term) -> String {
-    match t {
-        Term::TVar(i) => {
-            let i = *i as usize;
-            if i < env.len() {
-                env[i].clone()
-            } else {
-                format!("#{}", i)
-            }
-        }
-        Term::TApp(f, a) => format!("({} {})", show_term(env, f), show_term(env, a)),
-        Term::TAbs(x, b) => {
-            let mut env2 = vec![x.clone()];
-            env2.extend_from_slice(env);
-            format!("fun {} => {}", x, show_term(&env2, b))
-        }
-        Term::TUniv(n) => format!("U{}", n),
-        Term::TIntervalTy => "𝕀".to_string(),
-        Term::TPi(x, a, b) => {
-            let mut env2 = vec![x.clone()];
-            env2.extend_from_slice(env);
-            format!("∀ ({} : {}), {}", x, show_term(env, a), show_term(&env2, b))
-        }
-        Term::TInterval(i) => format!("{}", i),
-        Term::TCube(c) => format!("{}", c),
-        Term::TPath(a, u, v) => format!(
-            "Path {} {} {}",
-            show_term(env, a),
-            show_term(env, u),
-            show_term(env, v)
-        ),
-        Term::PLam(i, b) => {
-            let mut env2 = vec![i.clone()];
-            env2.extend_from_slice(env);
-            format!("⟨{}⟩ {}", i, show_term(&env2, b))
-        }
-        Term::PApp(p, r) => format!("{} @ {}", show_term(env, p), show_term(env, r)),
-        Term::THComp(a, sys, u0) => {
-            let sys_str: Vec<String> = sys
-                .iter()
-                .map(|(phi, t)| format!("{} -> {}", show_term(env, phi), show_term(env, t)))
-                .collect();
-            format!("hcomp {} [{}] {}", show_term(env, a), sys_str.join(", "), show_term(env, u0))
-        }
-        Term::TComp(a, sys, u0) => {
-            let sys_str: Vec<String> = sys
-                .iter()
-                .map(|(phi, t)| format!("{} -> {}", show_term(env, phi), show_term(env, t)))
-                .collect();
-            format!("comp {} [{}] {}", show_term(env, a), sys_str.join(", "), show_term(env, u0))
-        }
-        Term::TFill(a, sys, u0) => {
-            let sys_str: Vec<String> = sys
-                .iter()
-                .map(|(phi, t)| format!("{} -> {}", show_term(env, phi), show_term(env, t)))
-                .collect();
-            format!("fill {} [{}] {}", show_term(env, a), sys_str.join(", "), show_term(env, u0))
-        }
-        Term::THFill(a, sys, u0) => {
-            let sys_str: Vec<String> = sys
-                .iter()
-                .map(|(phi, t)| format!("{} -> {}", show_term(env, phi), show_term(env, t)))
-                .collect();
-            format!("hfill {} [{}] {}", show_term(env, a), sys_str.join(", "), show_term(env, u0))
-        }
-        Term::TEquiv(a, b) => format!("Equiv {} {}", show_term(env, a), show_term(env, b)),
-        Term::TMkEquiv(a, b, f, g, eta, eps) => format!(
-            "mkEquiv {} {} {} {} {} {}",
-            show_term(env, a),
-            show_term(env, b),
-            show_term(env, f),
-            show_term(env, g),
-            show_term(env, eta),
-            show_term(env, eps)
-        ),
-        Term::TEquivFwd(e, x) => format!("equivFwd ({}) {}", show_term(env, e), show_term(env, x)),
-        Term::TUa(e) => format!("ua ({})", show_term(env, e)),
-        Term::TTransport(p, x) => {
-            format!("transport ({}) {}", show_term(env, p), show_term(env, x))
-        }
-        Term::TGlue(a, phi, te) => format!(
-            "Glue {} [{}] ({})",
-            show_term(env, a),
-            show_term(env, phi),
-            show_term(env, te)
-        ),
-        Term::TGlueElem(phi, t, a) => format!(
-            "glue [{}] ({}) {}",
-            show_term(env, phi),
-            show_term(env, t),
-            show_term(env, a)
-        ),
-        Term::TUnglue(phi, te, g) => format!(
-            "unglue [{}] ({}) {}",
-            show_term(env, phi),
-            show_term(env, te),
-            show_term(env, g)
-        ),
-        Term::TSigma(x, a, b) => {
-            let mut env2 = vec![x.clone()];
-            env2.extend_from_slice(env);
-            format!("Σ ({} : {}), {}", x, show_term(env, a), show_term(&env2, b))
-        }
-        Term::TPair(a, b) => format!("({} , {})", show_term(env, a), show_term(env, b)),
-        Term::TFst(p) => format!("fst {}", show_term(env, p)),
-        Term::TSnd(p) => format!("snd {}", show_term(env, p)),
-        Term::TData(d, params) => {
-            if params.is_empty() {
-                d.clone()
-            } else {
-                let parts: Vec<String> = params.iter().map(|p| show_term(env, p)).collect();
-                format!("({} {})", d, parts.join(" "))
-            }
-        }
-        t @ Term::TCon(_, c, args) => {
-            if let Some(n) = nat_to_int(t) {
-                return format!("{}", n);
-            }
-            if args.is_empty() {
-                c.clone()
-            } else {
-                let parts: Vec<String> = args.iter().map(|a| show_term(env, a)).collect();
-                format!("({} {})", c, parts.join(" "))
-            }
-        }
-        Term::TPCon(_, c, args, r) => {
-            let mut parts: Vec<String> = args.iter().map(|a| show_term(env, a)).collect();
-            parts.push(format!("@ {}", show_term(env, r)));
-            format!("({} {})", c, parts.join(" "))
-        }
-        Term::TElim(motive, cases, scrut) => {
-            let case_strs: Vec<String> = cases
-                .iter()
-                .map(|case| {
-                    // binders are outermost-first in declaration; extend the
-                    // pretty-printing env the same way, outermost-first, so
-                    // nested show_term calls see innermost-first as usual.
-                    let mut env2 = case.binders.clone();
-                    env2.reverse();
-                    env2.extend_from_slice(env);
-                    format!(
-                        "{} {} -> {}",
-                        case.con,
-                        case.binders.join(" "),
-                        show_term(&env2, &case.body)
-                    )
-                })
-                .collect();
-            format!(
-                "elim[{}] {{ {} }} {}",
-                show_term(env, motive),
-                case_strs.join(" | "),
-                show_term(env, scrut)
-            )
-        }
-        Term::Meta(i) => format!("?{}", i),
-        Term::TBy(tactics) => {
-            let tactic_strs: Vec<String> = tactics.iter().map(|t| show_tactic(env, t)).collect();
-            format!("by {}", tactic_strs.join("; "))
-        }
-    }
-}
-
-fn show_tactic(env: &[Name], t: &Tactic) -> String {
-    match t {
-        Tactic::Exact(term) => format!("exact {}", show_term(env, term)),
-        Tactic::Intro(names) => format!("intro {}", names.join(" ")),
-        Tactic::Apply(term) => format!("apply {}", show_term(env, term)),
-        Tactic::Assumption => "assumption".to_string(),
-        Tactic::Reflexivity => "reflexivity".to_string(),
-        Tactic::Symmetry => "symmetry".to_string(),
-        Tactic::Split => "split".to_string(),
-        Tactic::Constructor(name) => match name {
-            Some(n) => format!("constructor {}", n),
-            None => "constructor".to_string(),
-        },
-        Tactic::Destruct(name) => format!("destruct {}", name),
-        Tactic::Transitivity => "transitivity".to_string(),
-        Tactic::Compute => "compute".to_string(),
-        Tactic::Trivial => "trivial".to_string(),
-    }
-}
-
-impl fmt::Display for Term {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", show_term(&[], self))
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Shift
@@ -815,173 +616,8 @@ pub fn equiv_dom(t: &Term) -> Term {
 }
 
 // ---------------------------------------------------------------------------
-// Positivity checking for datatypes
+// Positivity checking is in syntax::positivity
 // ---------------------------------------------------------------------------
-
-/// An error returned when a datatype occurs negatively in its own definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PositivityError {
-    pub datatype: Name,
-    pub constructor: Name,
-    pub message: String,
-}
-
-impl fmt::Display for PositivityError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "positivity violation in constructor '{}' of '{}': {}",
-            self.constructor, self.datatype, self.message
-        )
-    }
-}
-
-/// Check that `target` occurs strictly positively in `ty`.
-///
-/// `negative` tracks whether we are currently under an odd number of arrow
-/// domains (i.e. a negative position). When `negative` is true and `target`
-/// appears, that is a violation.
-fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), PositivityError> {
-    match ty {
-        Term::TVar(_) => Ok(()),
-        Term::TUniv(_) | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => Ok(()),
-        Term::TData(name, params) => {
-            if name == target && negative {
-                Err(PositivityError {
-                    datatype: target.to_string(),
-                    constructor: String::new(),
-                    message: format!(
-                        "datatype '{}' appears on the left side of an arrow",
-                        target
-                    ),
-                })
-            } else {
-                for p in params {
-                    check_positivity_in(target, p, negative)?;
-                }
-                Ok(())
-            }
-        }
-        Term::TApp(f, a) | Term::PApp(f, a) | Term::TEquiv(f, a) | Term::TEquivFwd(f, a)
-        | Term::TTransport(f, a) | Term::TPair(f, a) => {
-            check_positivity_in(target, f, negative)?;
-            check_positivity_in(target, a, negative)
-        }
-        Term::TFst(p) | Term::TSnd(p) => check_positivity_in(target, p, negative),
-        Term::TAbs(_, body) | Term::PLam(_, body) | Term::TUa(body) => {
-            check_positivity_in(target, body, negative)
-        }
-        Term::TPi(_, a, b) => {
-            // Domain A is in a negative position (argument position).
-            check_positivity_in(target, a, true)?;
-            // Codomain B is in a positive position (result position).
-            check_positivity_in(target, b, false)
-        }
-        Term::TSigma(_, a, b) => {
-            check_positivity_in(target, a, negative)?;
-            check_positivity_in(target, b, negative)
-        }
-        Term::TPath(a, u, v) | Term::TGlue(a, u, v) | Term::TGlueElem(a, u, v)
-        | Term::TUnglue(a, u, v) => {
-            check_positivity_in(target, a, negative)?;
-            check_positivity_in(target, u, negative)?;
-            check_positivity_in(target, v, negative)
-        }
-        Term::THComp(a, sys, u0)
-        | Term::TComp(a, sys, u0)
-        | Term::TFill(a, sys, u0)
-        | Term::THFill(a, sys, u0) => {
-            check_positivity_in(target, a, negative)?;
-            for (phi, t) in sys {
-                check_positivity_in(target, phi, negative)?;
-                check_positivity_in(target, t, negative)?;
-            }
-            check_positivity_in(target, u0, negative)
-        }
-        Term::TMkEquiv(a, b, f, g, eta, eps) => {
-            check_positivity_in(target, a, negative)?;
-            check_positivity_in(target, b, negative)?;
-            check_positivity_in(target, f, negative)?;
-            check_positivity_in(target, g, negative)?;
-            check_positivity_in(target, eta, negative)?;
-            check_positivity_in(target, eps, negative)
-        }
-        Term::TCon(_, _, args) => {
-            for arg in args {
-                check_positivity_in(target, arg, negative)?;
-            }
-            Ok(())
-        }
-        Term::TPCon(_, _, args, r) => {
-            for arg in args {
-                check_positivity_in(target, arg, negative)?;
-            }
-            check_positivity_in(target, r, negative)
-        }
-        Term::TElim(motive, cases, scrut) => {
-            check_positivity_in(target, motive, negative)?;
-            for case in cases {
-                check_positivity_in(target, &case.body, negative)?;
-            }
-            check_positivity_in(target, scrut, negative)
-        }
-        Term::Meta(_) => Ok(()),
-        Term::TBy(_) => Ok(()),
-    }
-}
-
-/// Check that a constructor's argument types are strictly positive with respect
-/// to the given datatype.
-fn check_con_positivity(
-    dt_name: &str,
-    con_name: &str,
-    arg_tys: &[Term],
-) -> Result<(), PositivityError> {
-    for (i, ty) in arg_tys.iter().enumerate() {
-        check_positivity_in(dt_name, ty, false).map_err(|mut e| {
-            e.constructor = con_name.to_string();
-            e.message = format!(
-                "argument {} of constructor '{}': {}",
-                i, con_name, e.message
-            );
-            e
-        })?;
-    }
-    Ok(())
-}
-
-/// Check that a datatype declaration is strictly positive.
-///
-/// Returns `Ok(())` if all constructors are positive, or the first
-/// `PositivityError` found.
-pub fn check_datatype_positivity(dt: &Datatype) -> Result<(), PositivityError> {
-    for con in &dt.cons {
-        check_con_positivity(&dt.name, &con.name, &con.arg_tys)?;
-    }
-    for pcon in &dt.pcons {
-        check_con_positivity(&dt.name, &pcon.name, &pcon.arg_tys)?;
-        // Also check face terms — they use the constructor's ordinary args
-        // in scope, so TData(dt.name) in face0/face1 would be positive
-        // (face terms are results, not arguments).
-        check_positivity_in(&dt.name, &pcon.face0, false).map_err(|mut e| {
-            e.constructor = pcon.name.clone();
-            e.message = format!(
-                "face0 of path constructor '{}': {}",
-                pcon.name, e.message
-            );
-            e
-        })?;
-        check_positivity_in(&dt.name, &pcon.face1, false).map_err(|mut e| {
-            e.constructor = pcon.name.clone();
-            e.message = format!(
-                "face1 of path constructor '{}': {}",
-                pcon.name, e.message
-            );
-            e
-        })?;
-    }
-    Ok(())
-}
 
 // ---------------------------------------------------------------------------
 // Helper: box a value
@@ -995,13 +631,72 @@ fn b<T>(v: T) -> Box<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::pretty::show_term;
+    use super::positivity::check_datatype_positivity;
 
     fn b(t: Term) -> Box<Term> {
         Box::new(t)
     }
 
     #[test]
-    fn positive_nat_is_ok() {
+    fn shift_increments_free() {
+        let t = Term::TVar(0);
+        let s = shift(1, 0, &t);
+        assert_eq!(s, Term::TVar(1));
+    }
+
+    #[test]
+    fn shift_preserves_bound() {
+        let t = Term::TAbs("x".into(), b(Term::TVar(0)));
+        let s = shift(1, 0, &t);
+        assert_eq!(s, Term::TAbs("x".into(), b(Term::TVar(0))));
+    }
+
+    #[test]
+    fn subst_identity() {
+        let t = Term::TVar(0);
+        let s = subst(0, &Term::TVar(42), &t);
+        assert_eq!(s, Term::TVar(42));
+    }
+
+    #[test]
+    fn beta_reduces() {
+        let body = Term::TVar(0);
+        let arg = Term::TUniv(0);
+        let r = beta(&body, &arg);
+        assert_eq!(r, Term::TUniv(0));
+    }
+
+    #[test]
+    fn show_nat_zero() {
+        let t = Term::TCon("Nat".into(), "zero".into(), vec![]);
+        assert_eq!(show_term(&[], &t), "0");
+    }
+
+    #[test]
+    fn show_nat_two() {
+        let t = Term::TCon(
+            "Nat".into(),
+            "suc".into(),
+            vec![Term::TCon("Nat".into(), "suc".into(), vec![
+                Term::TCon("Nat".into(), "zero".into(), vec![]),
+            ])],
+        );
+        assert_eq!(show_term(&[], &t), "2");
+    }
+
+    #[test]
+    fn max_var_free() {
+        assert_eq!(max_var(&Term::TVar(5)), 5);
+    }
+
+    #[test]
+    fn max_var_abs() {
+        assert_eq!(max_var(&Term::TAbs("x".into(), b(Term::TVar(0)))), -1);
+    }
+
+    #[test]
+    fn nat_positivity_ok() {
         let dt = Datatype {
             name: "Nat".into(),
             params: vec![],
@@ -1010,163 +705,6 @@ mod tests {
                 ConSig { name: "suc".into(), arg_tys: vec![Term::TData("Nat".into(), vec![])] },
             ],
             pcons: vec![],
-            universe_level: None,
-        };
-        assert!(check_datatype_positivity(&dt).is_ok());
-    }
-
-    #[test]
-    fn positive_list_is_ok() {
-        let dt = Datatype {
-            name: "List".into(),
-            params: vec![],
-            cons: vec![
-                ConSig { name: "nil".into(), arg_tys: vec![] },
-                ConSig {
-                    name: "cons".into(),
-                    arg_tys: vec![
-                        Term::TUniv(0),
-                        Term::TData("List".into(), vec![]),
-                    ],
-                },
-            ],
-            pcons: vec![],
-            universe_level: None,
-        };
-        assert!(check_datatype_positivity(&dt).is_ok());
-    }
-
-    #[test]
-    fn positive_nested_pi_is_ok() {
-        // data Bad = mk ((Nat -> Nat) -> Nat)
-        // The Nat in (Nat -> Nat) is in the domain of the outer arrow,
-        // which is a negative position — but it's not the recursive type.
-        let dt = Datatype {
-            name: "Bad".into(),
-            params: vec![],
-            cons: vec![ConSig {
-                name: "mk".into(),
-                arg_tys: vec![Term::TPi(
-                    "_".into(),
-                    b(Term::TPi("_".into(), b(Term::TData("Nat".into(), vec![])), b(Term::TData("Nat".into(), vec![])))),
-                    b(Term::TData("Nat".into(), vec![])),
-                )],
-            }],
-            pcons: vec![],
-            universe_level: None,
-        };
-        assert!(check_datatype_positivity(&dt).is_ok());
-    }
-
-    #[test]
-    fn negative_recursive_type_is_rejected() {
-        // data Bad = cons (Bad -> Bad)
-        // Bad appears as the domain of an arrow — negative occurrence.
-        let dt = Datatype {
-            name: "Bad".into(),
-            params: vec![],
-            cons: vec![ConSig {
-                name: "cons".into(),
-                arg_tys: vec![Term::TPi(
-                    "_".into(),
-                    b(Term::TData("Bad".into(), vec![])),
-                    b(Term::TData("Bad".into(), vec![])),
-                )],
-            }],
-            pcons: vec![],
-            universe_level: None,
-        };
-        let err = check_datatype_positivity(&dt).unwrap_err();
-        assert_eq!(err.datatype, "Bad");
-        assert_eq!(err.constructor, "cons");
-    }
-
-    #[test]
-    fn positive_deeply_nested_pi_is_ok() {
-        // data Bad = cons ((Nat -> Bad) -> Bad)
-        // Bad appears as the codomain of the inner arrow (positive) and
-        // as the return type (positive). This IS strictly positive.
-        let dt = Datatype {
-            name: "Bad".into(),
-            params: vec![],
-            cons: vec![ConSig {
-                name: "cons".into(),
-                arg_tys: vec![Term::TPi(
-                    "_".into(),
-                    b(Term::TPi(
-                        "_".into(),
-                        b(Term::TData("Nat".into(), vec![])),
-                        b(Term::TData("Bad".into(), vec![])),
-                    )),
-                    b(Term::TData("Bad".into(), vec![])),
-                )],
-            }],
-            pcons: vec![],
-            universe_level: None,
-        };
-        assert!(check_datatype_positivity(&dt).is_ok());
-    }
-
-    #[test]
-    fn negative_domain_in_pi_is_rejected() {
-        // data Bad = cons ((Bad -> Nat) -> Bad)
-        // Bad appears as the domain of the inner arrow — negative.
-        let dt = Datatype {
-            name: "Bad".into(),
-            params: vec![],
-            cons: vec![ConSig {
-                name: "cons".into(),
-                arg_tys: vec![Term::TPi(
-                    "_".into(),
-                    b(Term::TPi(
-                        "_".into(),
-                        b(Term::TData("Bad".into(), vec![])),
-                        b(Term::TData("Nat".into(), vec![])),
-                    )),
-                    b(Term::TData("Bad".into(), vec![])),
-                )],
-            }],
-            pcons: vec![],
-            universe_level: None,
-        };
-        let err = check_datatype_positivity(&dt).unwrap_err();
-        assert_eq!(err.datatype, "Bad");
-    }
-
-    #[test]
-    fn positive_sigma_is_ok() {
-        // data Pair = mk (Σ(_ : Nat). Nat)
-        let dt = Datatype {
-            name: "Pair".into(),
-            params: vec![],
-            cons: vec![ConSig {
-                name: "mk".into(),
-                arg_tys: vec![Term::TSigma(
-                    "_".into(),
-                    b(Term::TData("Nat".into(), vec![])),
-                    b(Term::TData("Nat".into(), vec![])),
-                )],
-            }],
-            pcons: vec![],
-            universe_level: None,
-        };
-        assert!(check_datatype_positivity(&dt).is_ok());
-    }
-
-    #[test]
-    fn positive_path_type_is_ok() {
-        // data S1 = | base : S1 | loop : Path S1 base base
-        // Path type is always positive.
-        let dt = Datatype {
-            name: "S1".into(),
-            params: vec![],
-            cons: vec![ConSig { name: "base".into(), arg_tys: vec![] }],
-            pcons: vec![PConSig {
-                name: "loop".into(),
-                arg_tys: vec![],
-                face0: Term::TCon("S1".into(), "base".into(), vec![]),
-                face1: Term::TCon("S1".into(), "base".into(), vec![]),
-            }],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
