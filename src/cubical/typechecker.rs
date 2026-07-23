@@ -87,6 +87,8 @@ pub enum TypeError {
     },
     MissingCase(Name),
     ExpectedData(Term),
+    // PathP: first argument must be a type family
+    PathPNotTypeFamily(Term),
 }
 
 impl fmt::Display for TypeError {
@@ -148,6 +150,9 @@ impl fmt::Display for TypeError {
             ),
             TypeError::ExpectedData(ty) => {
                 write!(f, "  Expected a datatype (TData), but found:\n    {}", ty)
+            }
+            TypeError::PathPNotTypeFamily(ty) => {
+                write!(f, "  PathP requires a type family (e.g., <i> A i), but found:\n    {}", ty)
             }
         }
     }
@@ -221,7 +226,20 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
             Ok(i.max(j))
         }
         Term::TPath(a, u, v) => {
-            let n = type_level_dt(dts, ctx, a)?;
+            // For PathP-style dependent paths, a may be a PLam (type family).
+            // In that case, check that the body of the PLam is well-typed,
+            // and verify endpoints against the instantiated family.
+            let n = match nbe_eval(a) {
+                Term::PLam(_, body) => {
+                    // The type family body should be well-typed in a context
+                    // with an interval variable. We check that the family
+                    // returns values in some universe by checking at i0.
+                    let ctx2 = extend_ctx("_i".to_string(), interval_ty(), ctx);
+                    let a_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
+                    type_level_dt(dts, &ctx2, &a_at0)?
+                }
+                _ => type_level_dt(dts, ctx, a)?,
+            };
             let a_ = nbe_eval(a);
             let u_ty = match &a_ {
                 Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I0))),
@@ -568,7 +586,14 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
 
         // Path type: Path A u v : U n
         Term::TPath(a_ty, u, v) => {
-            let n = type_level_dt(dts, ctx, a_ty)?;
+            let n = match nbe_eval(a_ty) {
+                Term::PLam(_, body) => {
+                    let ctx2 = extend_ctx("_i".to_string(), interval_ty(), ctx);
+                    let a_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
+                    type_level_dt(dts, &ctx2, &a_at0)?
+                }
+                _ => type_level_dt(dts, ctx, a_ty)?,
+            };
             let a_ty_ = nbe_eval(a_ty);
             let u_ty = match &a_ty_ {
                 Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I0))),

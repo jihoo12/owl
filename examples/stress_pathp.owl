@@ -1,0 +1,89 @@
+-- stress_pathp.owl — PathP (dependent path types) and related features
+--
+-- Exercises: PathP syntax, dependent paths, and interaction with
+-- comp/fill/hfill.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. PathP with constant type family (same as Path)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_constant : PathP (<i> Nat) zero zero := <i> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. PathP with non-zero endpoints
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_suc : PathP (<i> Nat) (suc zero) (suc zero) := <i> suc zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. PathP path application
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_apply_at0 : Nat := pathp_constant @ i0
+def pathp_apply_at1 : Nat := pathp_constant @ i1
+def pathp_suc_at1 : Nat := pathp_suc @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. PathP with sigma types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_pair : PathP (<i> Nat * Nat) (zero , zero) (zero , zero) :=
+  <i> (zero , zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. PathP with transport
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_transport : Nat :=
+  transport (<i> Nat) (pathp_suc @ i0)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. PathP with hcomp, comp, fill, hfill
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_hcomp : Nat :=
+  hcomp Nat 1 (<i> suc zero) (suc zero)
+
+def pathp_comp : Nat :=
+  comp Nat 1 (<i> suc zero) (suc zero)
+
+def pathp_fill : Nat :=
+  fill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+def pathp_hfill : Nat :=
+  hfill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. PathP with reflexivity tactic
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_refl : PathP (<i> Nat) zero zero := by reflexivity
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. PathP with nested path types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_nested : PathP (<i> Nat) zero zero :=
+  pathp_constant
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. PathP used in definitions
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_def : Nat := pathp_fill
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. PathP with identity
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def pathp_id : PathP (<i> Nat) zero zero := <i> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Main entry point
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def main : Nat := pathp_apply_at1

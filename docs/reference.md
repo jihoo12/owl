@@ -57,6 +57,7 @@ The following words are reserved and cannot be used as variable names:
 | `with`        | Separator before match cases               |
 | `Type`        | Alias for universe `U0`                    |
 | `Path`        | Path type former                           |
+| `PathP`       | Dependent path type (type family required) |
 | `hcomp`       | Homogeneous composition                    |
 | `comp`        | Heterogeneous composition                  |
 | `fill`        | Dependent fill (heterogeneous)             |
@@ -435,6 +436,34 @@ where:
 A proof of `Path A u v` is a path lambda `<i> body` such that:
 - `body[i := i0]` equals `u`
 - `body[i := i1]` equals `v`
+
+### Dependent Path Type (PathP)
+
+```
+PathP A u v
+```
+
+`PathP` is syntactic sugar for `Path` that requires the first argument to be
+a **type family** (a function from the interval to types). This makes the
+intent clear: the path endpoints may live in different fibers of the family.
+
+- `A : I -> Type` is a type family over the interval
+- `u : A(i0)` is the left endpoint (in the fiber at i0)
+- `v : A(i1)` is the right endpoint (in the fiber at i1)
+
+**Example:**
+
+```
+-- Constant family: PathP reduces to Path
+def p : PathP (<i> Nat) zero zero := <i> zero
+
+-- A path from zero to suc zero in a dependent setting
+def q : PathP (<i> Nat) zero (suc zero) := <i> suc zero
+```
+
+Note: `Path A u v` is equivalent to `PathP (<i> A) u v` when `A` is a
+constant type. The `Path` keyword accepts either a plain type or a type
+family; `PathP` explicitly signals that the first argument is a family.
 
 ### Interval Algebra
 

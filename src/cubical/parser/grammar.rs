@@ -461,6 +461,12 @@ impl Parser {
             let v = self.parse_prefix_or_atom()?;
             return Ok(Term::TPath(Box::new(a), Box::new(u), Box::new(v)));
         }
+        if self.consume_ident("PathP") {
+            let a = self.parse_prefix_or_atom()?;
+            let u = self.parse_prefix_or_atom()?;
+            let v = self.parse_prefix_or_atom()?;
+            return Ok(Term::TPath(Box::new(a), Box::new(u), Box::new(v)));
+        }
         if self.consume_ident("hcomp") {
             let a = self.parse_prefix_or_atom()?;
             let phi = self.parse_prefix_or_atom()?;
@@ -1025,5 +1031,6 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "fill"
             | "hfill"
             | "hcomp"
+            | "PathP"
     )
 }
