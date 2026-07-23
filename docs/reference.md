@@ -311,13 +311,141 @@ inductive Nat where
 
 ### Parameterized Datatypes
 
-Constructors may take arguments of any type:
+A datatype can be **parameterized** by declaring binders between the name and
+`where`. Parameters appear in the return type of every constructor and are
+applied when the datatype is used:
 
 ```
 inductive List (A : U0) where
   | nil : List A
   | cons : A -> List A -> List A
 ```
+
+Parameters are written as `(A : Type)` after the datatype name. Inside
+constructor types, the parameter `A` is available by name. When the datatype
+is referenced elsewhere, parameters are passed as arguments:
+
+```
+List Nat          -- parameterized with A = Nat
+TData "List" [Nat]   -- internal representation
+```
+
+#### Multi-Parameter Datatypes
+
+```
+inductive Pair (A : U0) (B : U0) where
+  | mkPair : A -> B -> Pair A B
+```
+
+#### Parameterized Recursive Types
+
+Parameters can be used alongside recursion:
+
+```
+inductive List (A : U0) where
+  | nil : List A
+  | cons : A -> List A -> List A
+
+inductive Tree (A : U0) where
+  | leaf : Tree A
+  | node : Tree A -> A -> Tree A -> Tree A
+```
+
+### Higher Inductive Types (HITs)
+
+Higher inductive types extend ordinary inductive types with **path
+constructors** — constructors that produce paths rather than points. Path
+constructors specify boundary conditions (face terms) for `i0` and `i1`.
+
+#### Syntax
+
+```
+inductive Name where
+  | con : ... [ face0 , face1 ]
+```
+
+The `[ face0 , face1 ]` after a constructor declares it as a path
+constructor. `face0` is the value at `i0` and `face1` is the value at `i1`.
+Both are terms that may reference the constructor's ordinary arguments.
+
+#### Example: Circle
+
+```
+inductive S1 where
+  | base : S1
+  | loop : S1 [ base , base ]
+```
+
+`loop` has no ordinary arguments and produces a path from `base` to `base`.
+
+#### Example: Truncation
+
+Truncation is a parameterized HIT that collapses all paths:
+
+```
+inductive Trunc (A : U0) where
+  | inc : A -> Trunc A
+  | trunc_id : forall (a b : Trunc A), Path (Trunc A) a b
+```
+
+`trunc_id` is a path constructor: it takes two points and produces a path
+between them, asserting that all points in `Trunc A` are equal.
+
+#### Example: Pushout (Double Pushout)
+
+```
+inductive Pushout (A : U0) (B : U0) (C : U0) where
+  | left : A -> Pushout A B C
+  | right : B -> Pushout A B C
+  | glue : forall (c : C), Path (Pushout A B C) (left c) (right c)
+```
+
+`glue` is a path constructor connecting `left c` to `right c` for each
+`c : C`.
+
+#### Example: Suspension
+
+```
+inductive Susp (A : U0) where
+  | north : Susp A
+  | south : Susp A
+  | merid : forall (a : A), Path (Susp A) north south
+```
+
+#### Path Constructor Face Terms
+
+Face terms reference constructor arguments via de Bruijn-like scoping.
+Ordinary arguments are bound in order (first argument at highest index),
+and face terms can use these arguments:
+
+```
+inductive S2 where
+  | base2 : S2
+  | loop2 : S2 [ base2 , base2 ]
+```
+
+Face terms are point-level terms — they can be:
+- Simple references: `base`, `north`, `left c`
+- Path applications: `inc (f a)` 
+- Complex expressions: `suc zero`
+
+### Positivity Requirement
+
+A datatype `D` may only appear **strictly positively** in its own constructor
+argument types. This means `D` cannot appear to the left of an arrow in any
+constructor's argument type:
+
+```
+-- Allowed:
+data Nat where | zero : Nat | suc : Nat -> Nat
+
+-- Rejected (D appears as domain):
+data Bad where | mk : Bad -> Bad
+```
+
+This requirement applies to both ordinary and parameterized datatypes. For
+parameterized types, the positivity check examines constructor types after
+the parameters are in scope.
 
 ### Positivity Requirement
 
@@ -1228,7 +1356,58 @@ Here `loop` is a path constructor with:
 - `face0 = base` (loop at i0 is base)
 - `face1 = base` (loop at i1 is base)
 
-### Example 4: Transport over Univalence
+### Example 4: Parameterized Truncation
+
+```
+inductive Trunc (A : U0) where
+  | inc : A -> Trunc A
+  | trunc_id : forall (a b : Trunc A), Path (Trunc A) a b
+```
+
+The eliminator for `Trunc` proves a property by handling:
+1. The `inc` case: prove `P (inc a)` for an arbitrary `a : A`
+2. The `trunc_id` case: prove `Path (P (trunc_id a b))` for arbitrary `a, b`
+
+```
+def trunc_ind :
+  forall (A : U0) (P : Trunc A -> U0),
+  (forall (a : A), P (inc a)) ->
+  forall (x : Trunc A), P x :=
+  fun A P h x =>
+    match x return Trunc A, P x with
+    | trunc_id a b => <i> h a
+    | inc a => h a
+```
+
+### Example 5: Parameterized Pushout
+
+```
+inductive Pushout (A : U0) (B : U0) (C : U0) where
+  | left : A -> Pushout A B C
+  | right : B -> Pushout A B C
+  | glue : forall (c : C), Path (Pushout A B C) (left c) (right c)
+```
+
+The eliminator handles three cases:
+1. `left a`: prove `P (left a)` for arbitrary `a : A`
+2. `right b`: prove `P (right b)` for arbitrary `b : B`
+3. `glue c`: prove `Path (P (glue c))` connecting the `left` and `right` cases
+
+```
+def pushout_elim :
+  forall (A B C : U0) (P : Pushout A B C -> U0),
+  (forall (a : A), P (left a)) ->
+  (forall (b : B), P (right b)) ->
+  (forall (c : C), Path (P (glue c))) ->
+  forall (x : Pushout A B C), P x :=
+  fun A B C P f g h x =>
+    match x return Pushout A B C, P x with
+    | glue c => <i> f c
+    | left a => f a
+    | right b => g b
+```
+
+### Example 6: Transport over Univalence
 
 ```
 def transportExample :
@@ -1239,7 +1418,7 @@ def transportExample :
 This constructs a function that converts `A` to `B` given an equivalence,
 using transport along the univalence path.
 
-### Example 5: Kan Operations (comp, fill, hfill)
+### Example 7: Kan Operations (comp, fill, hfill)
 
 ```
 -- Heterogeneous composition: composes a family of paths
@@ -1264,7 +1443,7 @@ def transport_comp : Nat :=
     (comp Nat 1 (<i> suc zero) (suc (suc zero)))
 ```
 
-### Example 6: Tactic Proofs
+### Example 8: Tactic Proofs
 
 ```
 def id : ∀ (A : U0), A -> A := by intro A x; exact x
@@ -1299,7 +1478,7 @@ def neg : Bool -> Bool :=
   by intro b; destruct b; exact false; exact true
 ```
 
-### Example 7: Mutual Dependencies via Match
+### Example 9: Mutual Dependencies via Match
 
 ```
 inductive Nat where

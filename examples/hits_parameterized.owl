@@ -1,0 +1,103 @@
+-- Higher Inductive Types (HITs) with parameters
+--
+-- Demonstrates parameterized inductive types including
+-- path constructors (HITs).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | tt : Bool
+  | ff : Bool
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Parameterized Suspension (with path constructor)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Susp (A : Type) where
+  | north : Susp A
+  | south : Susp A
+  | merid : A -> Susp A [ north , south ]
+
+def susp_north : Susp Nat := north
+def susp_south : Susp Nat := south
+
+-- Both endpoints must agree (zero), since there is no Path Nat zero (suc zero).
+def elim_susp_const : Susp Nat -> Nat :=
+  fun s => match s return Nat with
+  | north => zero
+  | south => zero
+  | merid _ i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Truncation (parameterized HIT, path between any two elements)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Trunc (A : Type) where
+  | inc : A -> Trunc A
+  | trunc : A -> A -> Trunc A [ inc trunc_0 , inc trunc_1 ]
+
+def trunc_test : Trunc Nat := inc (suc zero)
+
+-- Eliminator: Trunc Nat -> Nat (both endpoints must map to same value)
+def trunc_elim_const : Trunc Nat -> Nat :=
+  fun t => match t return Nat with
+  | inc x => zero
+  | trunc a b i => <j> zero
+
+-- Identity on inc: Trunc Nat -> Trunc Nat
+def trunc_inc_id : Trunc Nat -> Trunc Nat :=
+  fun t => match t return Trunc Nat with
+  | inc x => inc x
+  | trunc a b i => <j> trunc a b @ j
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Pushout-like type (two base types, two point constructors, one path)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Pushout (A : Type) (B : Type) where
+  | inl : A -> Pushout A B
+  | inr : B -> Pushout A B
+  | glue : Pushout A B -> Pushout A B [ inl glue_0 , inr glue_0 ]
+
+-- Constant eliminator: maps everything to zero
+def elim_pushout_const : Pushout Nat Bool -> Nat :=
+  fun p => match p return Nat with
+  | inl x => zero
+  | inr _ => zero
+  | glue x i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. Maybe (simple parameterized type, no path constructors)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Maybe (A : Type) where
+  | nothing : Maybe A
+  | just : A -> Maybe A
+
+def m1 : Maybe Nat := nothing
+def m2 : Maybe Nat := just (suc (suc zero))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Pair (multi-parameter)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive MyPair (A : Type) (B : Type) where
+  | mypair : A -> B -> MyPair A B
+
+def p : MyPair Nat Bool := mypair (suc zero) tt
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. List (parameterized, recursive)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive List (A : Type) where
+  | nil : List A
+  | cons : A -> List A -> List A
+
+def l1 : List Nat := nil
+def l2 : List Nat := cons (suc zero) nil
+def l3 : List Bool := cons tt (cons ff nil)
+
+def main : Nat := elim_susp_const north

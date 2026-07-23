@@ -1,0 +1,33 @@
+-- Test parameterized inductive types
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | tt : Bool
+  | ff : Bool
+
+-- Simple wrapper
+inductive Wrapper (A : Type) where
+  | mk : A -> Wrapper A
+
+def test1 : Wrapper Nat := mk (suc zero)
+def test2 : Wrapper Bool := mk tt
+def test3 : Wrapper Nat := mk zero
+
+-- Maybe
+inductive Maybe (A : Type) where
+  | nothing : Maybe A
+  | just : A -> Maybe A
+
+def m1 : Maybe Nat := nothing
+def m2 : Maybe Nat := just (suc (suc zero))
+
+-- Pair type (two parameters)
+inductive MyPair (A : Type) (B : Type) where
+  | mypair : A -> B -> MyPair A B
+
+def p : MyPair Nat Bool := mypair (suc zero) tt
+
+def main : Nat := suc zero

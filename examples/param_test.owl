@@ -1,0 +1,18 @@
+-- Test parameterized inductive types
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | tt : Bool
+  | ff : Bool
+
+-- Simple wrapper
+inductive Wrapper (A : Type) where
+  | mk : A -> Wrapper A
+
+def test1 : Wrapper Nat := mk (suc zero)
+def test2 : Wrapper Bool := mk tt
+
+def main : Nat := suc zero

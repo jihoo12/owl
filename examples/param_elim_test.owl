@@ -1,0 +1,15 @@
+-- Test eliminator for parameterized inductive types
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Simple wrapper
+inductive Wrapper (A : Type) where
+  | mk : A -> Wrapper A
+
+def unwrap : Wrapper Nat -> Nat :=
+  fun w => match w return Nat with
+  | mk x => x
+
+def main : Nat := unwrap (mk (suc zero))
