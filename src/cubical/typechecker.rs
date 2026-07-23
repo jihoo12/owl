@@ -1743,6 +1743,75 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             check_dt(dts, ctx, &proof, ty)
         }
 
+        // ------------------------------------------------------------------
+        // Kan operations — check expected type first, then delegate to
+        // infer_dt for sub-term checking.  On infer_dt failure, retry
+        // with nbe_eval (the comp/hcomp may reduce and become well-typed).
+        // ------------------------------------------------------------------
+
+        // hcomp A [phi -> tube, ...] base : A
+        Term::THComp(a_ty, _sys, _base) => {
+            type_level_dt(dts, ctx, a_ty)?;
+            let a_ty_ = nbe_eval(a_ty);
+            let expected_nf = nbe_eval(ty);
+            if !cumulativity_check(&expected_nf, &a_ty_) {
+                require_equal(ctx, &expected_nf, &a_ty_)?;
+            }
+            match infer_dt(dts, ctx, t) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let reduced = nbe_eval(t);
+                    if reduced == *t { Err(e) }
+                    else { check_dt(dts, ctx, &reduced, ty) }
+                }
+            }
+        }
+
+        // comp A [phi -> tube, ...] base : A 1
+        Term::TComp(a_fam, _sys, _base) => {
+            let ctx_i = extend_ctx("i".to_string(), interval_ty(), ctx);
+            type_level_dt(dts, &ctx_i, a_fam)?;
+            let a_fam_ = nbe_eval(a_fam);
+            let a_at1 = match &a_fam_ {
+                Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I1))),
+                _ => a_fam_.clone(),
+            };
+            let expected_nf = nbe_eval(ty);
+            if !cumulativity_check(&expected_nf, &a_at1) {
+                require_equal(ctx, &expected_nf, &a_at1)?;
+            }
+            match infer_dt(dts, ctx, t) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let reduced = nbe_eval(t);
+                    if reduced == *t { Err(e) }
+                    else { check_dt(dts, ctx, &reduced, ty) }
+                }
+            }
+        }
+
+        // fill A [phi -> tube, ...] base : (j : I) -> A j
+        // Inferred type is TPath(PLam j (A j), base, TComp A sys base), so
+        // delegate to infer_dt for the full type, then check cumulativity.
+        Term::TFill(_, _, _) | Term::THFill(_, _, _) => {
+            match infer_dt(dts, ctx, t) {
+                Ok(inferred) => {
+                    let expected_nf = nbe_eval(ty);
+                    let inferred_nf = nbe_eval(&inferred);
+                    if cumulativity_check(&expected_nf, &inferred_nf) {
+                        Ok(())
+                    } else {
+                        require_equal(ctx, &expected_nf, &inferred_nf)
+                    }
+                }
+                Err(e) => {
+                    let reduced = nbe_eval(t);
+                    if reduced == *t { Err(e) }
+                    else { check_dt(dts, ctx, &reduced, ty) }
+                }
+            }
+        }
+
         // Fall through to inference + cumulativity.
         t => match infer_dt(dts, ctx, t) {
             Ok(ty_) => {
