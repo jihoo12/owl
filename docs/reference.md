@@ -64,6 +64,7 @@ The following words are reserved and cannot be used as variable names:
 | `hfill`       | Homogeneous fill                           |
 | `Equiv`       | Equivalence type                           |
 | `mkEquiv`     | Construct an equivalence                   |
+| `Partial`     | Partial element type (keyword syntax)      |
 | `Glue`        | Glue type                                  |
 | `glue`        | Glue element introduction                  |
 | `unglue`      | Glue element elimination                   |
@@ -89,6 +90,7 @@ The following words are reserved and cannot be used as variable names:
 | `\/`      | Interval join (disjunction)        | right         |
 | `~`       | Interval negation                  | prefix        |
 | `<i>`     | Path lambda (binds interval var)   | --            |
+| `[_ \| _]`   | Partial element type (bracket)     | --            |
 | `,`       | Pair separator / tactic separator  | --            |
 | `:`       | Type annotation                    | --            |
 | `;`       | Tactic separator                   | --            |
@@ -156,6 +158,31 @@ Path A u v
 
 A path from `u` to `v` in type `A`. Path types are the cubical core
 of equality: `Path A u v` is the type of proofs that `u` equals `v` in `A`.
+
+### Partial Elements (Cubical Subtypes)
+
+```
+[_ | phi] A          -- bracket syntax
+Partial phi A        -- keyword syntax
+```
+
+Partial elements restrict a type to a face. `[_ | phi] A` is the type of
+elements of `A` that are defined when `phi` is true. This is fundamental
+for constructing Glue types and defining cubical subtyping.
+
+- `phi` is an interval expression (face restriction)
+- `A` is the base type
+- When `phi` is always true (i1), `[_ | i1] A` reduces to `A`
+- When `phi` is always false (i0), `[_ | i0] A` has no inhabitants
+
+**Type inference**: `[_ | phi] A : U_n` when `A : U_n`.
+
+**Example:**
+
+```
+-- A partial element defined on face i1
+def partial_one : [_ | i1] Nat := suc zero
+```
 
 ### Equivalence Type
 
@@ -392,11 +419,13 @@ Truncation is a parameterized HIT that collapses all paths:
 ```
 inductive Trunc (A : U0) where
   | inc : A -> Trunc A
-  | trunc_id : forall (a b : Trunc A), Path (Trunc A) a b
+  | trunc : A -> A -> Trunc A [ inc trunc_0 , inc trunc_1 ]
 ```
 
-`trunc_id` is a path constructor: it takes two points and produces a path
-between them, asserting that all points in `Trunc A` are equal.
+`trunc` is a path constructor: it takes two arguments and produces a path
+between `inc trunc_0` and `inc trunc_1`, asserting that all points in
+`Trunc A` are equal. The face terms `inc trunc_0` and `inc trunc_1` reference
+the constructor's arguments (the first and second `A` values).
 
 #### Example: Pushout (Double Pushout)
 
@@ -404,11 +433,12 @@ between them, asserting that all points in `Trunc A` are equal.
 inductive Pushout (A : U0) (B : U0) (C : U0) where
   | left : A -> Pushout A B C
   | right : B -> Pushout A B C
-  | glue : forall (c : C), Path (Pushout A B C) (left c) (right c)
+  | glue : C -> Pushout A B C [ left glue_0 , right glue_0 ]
 ```
 
 `glue` is a path constructor connecting `left c` to `right c` for each
-`c : C`.
+`c : C`. The face terms `left glue_0` and `right glue_0` reference the
+constructor's first argument.
 
 #### Example: Suspension
 
@@ -416,8 +446,11 @@ inductive Pushout (A : U0) (B : U0) (C : U0) where
 inductive Susp (A : U0) where
   | north : Susp A
   | south : Susp A
-  | merid : forall (a : A), Path (Susp A) north south
+  | merid : A -> Susp A [ north , south ]
 ```
+
+`merid` is a path constructor connecting `north` to `south` for each
+element `a : A`.
 
 #### Square Constructors (2D HIT Cells)
 
@@ -1381,8 +1414,10 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "Equiv" <prefix_or_atom> <prefix_or_atom>
                 | "mkEquiv" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom> <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
                 | "Glue" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
+                | "Partial" <prefix_or_atom> <prefix_or_atom>
                 | "glue" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
                 | "unglue" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
+                | "[" "_" "|" <join> "]" <prefix_or_atom>   -- partial element type (bracket)
                 | <match>
 
 <system>      ::= "[" <system_entry> ("," <system_entry>)* "]"
@@ -1474,12 +1509,12 @@ Here `loop` is a path constructor with:
 ```
 inductive Trunc (A : U0) where
   | inc : A -> Trunc A
-  | trunc_id : forall (a b : Trunc A), Path (Trunc A) a b
+  | trunc : A -> A -> Trunc A [ inc trunc_0 , inc trunc_1 ]
 ```
 
 The eliminator for `Trunc` proves a property by handling:
 1. The `inc` case: prove `P (inc a)` for an arbitrary `a : A`
-2. The `trunc_id` case: prove `Path (P (trunc_id a b))` for arbitrary `a, b`
+2. The `trunc` case: prove `Path (P (trunc a b))` for arbitrary `a, b`
 
 ```
 def trunc_ind :
@@ -1488,7 +1523,7 @@ def trunc_ind :
   forall (x : Trunc A), P x :=
   fun A P h x =>
     match x return P x with
-    | trunc_id a b => <i> h a
+    | trunc a b i => <j> h a
     | inc a => h a
 ```
 
@@ -1498,7 +1533,7 @@ def trunc_ind :
 inductive Pushout (A : U0) (B : U0) (C : U0) where
   | left : A -> Pushout A B C
   | right : B -> Pushout A B C
-  | glue : forall (c : C), Path (Pushout A B C) (left c) (right c)
+  | glue : C -> Pushout A B C [ left glue_0 , right glue_0 ]
 ```
 
 The eliminator handles three cases:
@@ -1515,7 +1550,7 @@ def pushout_elim :
   forall (x : Pushout A B C), P x :=
   fun A B C P f g h x =>
     match x return P x with
-    | glue c => <i> f c
+    | glue c i => <j> f c
     | left a => f a
     | right b => g b
 ```
@@ -1630,6 +1665,16 @@ def isZero : Nat -> Bool :=
   | suc _ => false
 ```
 
+### Example 11: Partial Elements
+
+```
+-- Partial elements restrict a type to a face
+def partial_nat : [_ | i1] Nat := suc zero
+
+-- Partial elements are used in Glue type construction
+-- and cubical subtyping
+```
+
 ---
 
 ## 17. Error Types
@@ -1662,6 +1707,14 @@ Additionally, a separate positivity check runs during datatype declaration:
 | Error | Meaning |
 | ----- | ------- |
 | `PositivityError` | Datatype appears in non-positive position in a constructor |
+
+### Debug Output
+
+When the `--debug` or `-d` flag is used, errors include additional context:
+
+- **Definition context**: Errors show which definition failed (e.g., "in definition 'myFunc':")
+- **Debug scope**: The typechecker logs the term being checked, the expected type, and the context depth
+- **NbE trace**: All normalization-by-evaluation reduction steps are printed on both success and error
 
 ---
 
