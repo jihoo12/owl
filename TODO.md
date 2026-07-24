@@ -18,11 +18,163 @@
 
 - [x] Square constructors (2D HIT cells) — `[[ face_i0, face_i1, face_j0, face_j1 ]]` syntax for square constructors in HITs. Parser creates `TSqCon(d, con, args, r, s)` terms. `infer_dt` builds nested PathP type `PathP (<r> PathP (<s> TData(d)) fi0 fi1) fj0 fj1`. `check_dt` handles TSqCon against TData by verifying data type match and interval arg validity. `SKIP_PLAM_ENDPT` flag skips boundary checks for HIT case bodies. Applied `apply_literal` for IVar-based endpoint checks. Identity function on Torus typechecks correctly.
 
-## Remaining
+---
 
-- **Universe polymorphism** — Already has a stratified U0, U1, U2... cumulative hierarchy. Could be extended with:
-  - Impredicative universe (Prop)
-  - Universe of small types
+## Remaining — Cubical Type Theory Completeness
+
+### 1. Core Cubical Features
+
+- **Partial elements / Cubical Subtypes** — `[_ | phi] A` syntax for partial elements. Needed for proper Glue type construction and cubical subtyping. Currently Glue is partially implemented but lacks full partial element support.
+
+- **System types** — `[phi => a, psi => b]` as a type (not just in comp/hfill). System types represent partial functions and are fundamental to cubical type theory.
+
+- **Glue type reduction rules** — Complete computation rules for Glue:
+  - `Glue A [phi -> (B, f)]` reduces to `A` when `phi = 0`
+  - `Glue A [phi -> (B, f)]` reduces to `B` when `phi = 1`
+  - `unglue [phi, te] (glue [phi, t, a])` reduces to `t`
+  - `glue [phi, (unglue [phi, te] b), b]` reduces to `b` when `phi = 1`
+
+- **Comp/fill computation for data types** — Kan operations should compute through inductive types (transport/fill along constructors). Currently comp/hcomp work but don't reduce through data type structure.
+
+- **Regularity** — `comp A [ ] base` (empty system) should reduce to `base`. Currently may not compute.
+
+- **Cofibration subtyping** — `[_ | phi] A <= [_ | psi] A` when `phi <= psi`. Needed for partial element subtyping.
+
+### 2. Type Theory Features
+
+- **Universe polymorphism** — Already has stratified U0, U1, U2... Could add:
+  - Impredicative universe (Prop) for proof-irrelevant types
+  - Universe of small types (sSet)
   - Cumulativity constraints beyond simple level comparison
+  - Universe lifting/lowering operations
 
-- **Partial types / cubical Satisfies** — Support for partial elements and subtyping into types, needed for Glue and more advanced cubical constructions.
+- **Cumulativity** — `A : U_n` and `U_n : U_m` when `n <= m`. Currently basic, could be extended with:
+  - Cumulativity for Sigma/Pi types
+  - Cumulativity for record types
+  - Cumulativity for inductive types
+
+- **Induction-induction** — Mutual definition of a type family and a type indexed by it. Needed for:
+  - Well-founded recursion
+  - Custom induction principles
+  - Complex algebraic structures
+
+- **Induction-recursion** — Definition of a type simultaneously with a function on it. Needed for:
+  - Universe definitions
+  - Modal type theory
+  - Custom elimination principles
+
+- **Termination / Guard checking** — Currently no termination checking. Add:
+  - Structural recursion checking
+  - Well-founded recursion support
+  - Coinduction for infinite data types
+
+### 3. HIT Improvements
+
+- **Higher-dimensional HIT cells** — Currently support path (1D) and square (2D) constructors. Add:
+  - Cube constructors (3D cells)
+  - n-dimensional cell constructors
+  - General boundary specification syntax
+
+- **HIT computation rules** — Transport/fill through HITs should compute:
+  - Transport along path constructors
+  - Transport along square constructors
+  - Fill operations for HIT constructors
+
+- **HIT elimination improvements** — Better support for:
+  - Nested pattern matching on HITs
+  - Dependent elimination with complex motives
+  - Higher-dimensional pattern matching
+
+### 4. Proof Assistant Features
+
+- **Interactive mode / Hole-driven development** — `?hole` syntax for incomplete proofs. Tactic mode fills holes.
+
+- **Better error messages** — More detailed type mismatch errors:
+  - Show normalized expected/got types
+  - Point to exact location of mismatch
+  - Suggest possible fixes
+
+- **Decision procedures** — Automated proving for:
+  - Propositional equality (reflexivity, symmetry, transitivity)
+  - Arithmetic (for Nat/Int types)
+  - Ring/field solver
+
+- **Omega / Linear arithmetic** — Decision procedure for linear arithmetic over Nat/Int.
+
+- **Ring solver** — Decision procedure for ring identities.
+
+- **Import system improvements** —
+  - Qualified imports (`import M as mod`)
+  - Selective imports (`import M only [x, y]`)
+  - Unification of same-name imports
+
+- **Module system** — Namespaces for organizing definitions:
+  - `module M where ...`
+  - Module parameters
+  - Module instantiation
+
+- **Record types** — Named sigma types with projections:
+  - `record R where field x : A; field y : B`
+  - Automatic projection functions
+  - Record update syntax
+
+- **Pattern matching improvements** —
+  - Nested patterns
+  - Or-patterns
+  - As-patterns
+  - Record patterns
+
+### 5. Cubical-Specific Improvements
+
+- **Face lattice operations** — Better support for:
+  - Face conjunction/disjunction
+  - Face implication
+  - Face negation
+  - Face equivalence checking
+
+- **Comp/hfill system types** — Full support for:
+  - Multi-face systems in all Kan operations
+  - System compatibility checking
+  - System reduction rules
+
+- **Transport computation** — Transport should reduce:
+  - Along constant paths (already done)
+  - Along ua (already done)
+  - Through Pi types (partially done)
+  - Through Sigma types (partially done)
+  - Through Path types (partially done)
+  - Through inductive types (not done)
+  - Through record types (not done)
+
+### 6. Performance and Metaprogramming
+
+- **Normalization improvements** —
+  - Sharing in NbE
+  - Incremental normalization
+  - Memoization
+
+- **Type checking improvements** —
+  - Constraint-based type inference
+  - Bidirectional type checking
+  - Pattern unification
+
+- **Metaprogramming** —
+  - Reflection API
+  - Tactic language
+  - Custom tactics
+  - Proof automation
+
+### 7. Library and Ecosystem
+
+- **Standard library** — Cubical equivalents of:
+  - Data types (Nat, Int, List, Vector, etc.)
+  - Algebra (groups, rings, fields, modules)
+  - Order theory (posets, lattices)
+  - Topology (continuous maps, homotopy)
+  - Category theory (functors, natural transformations)
+
+- **Documentation** —
+  - Tutorial / Getting started guide
+  - API reference
+  - Example gallery
+  - Comparison with other cubical systems (Agda cubical, cubicaltt)
