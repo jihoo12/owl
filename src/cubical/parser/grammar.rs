@@ -527,15 +527,6 @@ impl Parser {
             args.push(self.parse_prefix_or_atom()?);
         }
         if let Term::TCon(dt, con, mut con_args) = first {
-            // For path/square constructors, space-application should produce TApp,
-            // not extend the TCon args. They use `@` for interval application.
-            if !args.is_empty() && (self.is_path_constructor(&dt, &con) || self.is_square_constructor(&dt, &con)) {
-                let mut term = Term::TCon(dt, con, con_args);
-                for arg in args {
-                    term = Term::TApp(Box::new(term), Box::new(arg));
-                }
-                return Ok(term);
-            }
             con_args.extend(args);
             return Ok(Term::TCon(dt, con, con_args));
         }
@@ -719,6 +710,11 @@ impl Parser {
             let te = self.parse_prefix_or_atom()?;
             return Ok(Term::TGlue(Box::new(a), Box::new(phi), Box::new(te)));
         }
+        if self.consume_ident("Partial") {
+            let phi = self.parse_prefix_or_atom()?;
+            let a = self.parse_prefix_or_atom()?;
+            return Ok(Term::TPartial(Box::new(phi), Box::new(a)));
+        }
         if self.consume_ident("glueElem") || self.consume_ident("glue") {
             let phi = self.parse_prefix_or_atom()?;
             let t = self.parse_prefix_or_atom()?;
@@ -733,6 +729,21 @@ impl Parser {
         }
         if self.consume_ident("match") {
             return self.parse_match();
+        }
+
+        // [_ | phi] A — partial element type (bracket syntax)
+        if self.peek().kind == TokenKind::LBracket {
+            if let Some(TokenKind::Ident(name)) = self.tokens.get(self.pos + 1).map(|t| &t.kind) {
+                if name == "_" {
+                    if let Some(TokenKind::Pipe) = self.tokens.get(self.pos + 2).map(|t| &t.kind) {
+                        self.pos += 3; // consume [ _ |
+                        let phi = self.parse_join()?;
+                        self.expect(TokenKind::RBracket, "expected ']' after phi in partial type")?;
+                        let a = self.parse_prefix_or_atom()?;
+                        return Ok(Term::TPartial(Box::new(phi), Box::new(a)));
+                    }
+                }
+            }
         }
 
         match self.peek().kind.clone() {

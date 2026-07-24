@@ -78,6 +78,7 @@ pub enum Value {
     VSqCon(Name, Name, Vec<Value>, Box<Value>, Box<Value>),
     VElim(Box<Value>, Vec<ElimCase>, Box<Value>),
     VGlue(Box<Value>, DNF, Box<Value>),
+    VPartial(Box<Value>, Box<Value>),
     VGlueElem(DNF, Box<Value>, Box<Value>),
     VUnglue(DNF, Box<Value>, Box<Value>),
     VEquiv(Box<Value>, Box<Value>),
@@ -301,6 +302,16 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
                 eval_nbe(env, globals, global_offset, a)
             } else {
                 Value::VGlue(Box::new(eval_nbe(env, globals, global_offset, a)), phi, Box::new(te))
+            }
+        }
+        Term::TPartial(phi, a) => {
+            let phi_val = eval_nbe(env, globals, global_offset, phi);
+            let a_val = eval_nbe(env, globals, global_offset, a);
+            let phi_dnf = value_to_dnf(phi_val);
+            if phi_dnf == dnf_top() {
+                a_val
+            } else {
+                Value::VPartial(Box::new(a_val), Box::new(Value::VCube(phi_dnf)))
             }
         }
         Term::TGlueElem(phi, t, a) => {
@@ -732,6 +743,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TGlue(a, phi, te) => uses_var_at_level(a, level) || uses_var_at_level(phi, level) || uses_var_at_level(te, level),
         Term::TGlueElem(phi, t, a) => uses_var_at_level(phi, level) || uses_var_at_level(t, level) || uses_var_at_level(a, level),
         Term::TUnglue(phi, te, g) => uses_var_at_level(phi, level) || uses_var_at_level(te, level) || uses_var_at_level(g, level),
+        Term::TPartial(phi, a) => uses_var_at_level(phi, level) || uses_var_at_level(a, level),
         Term::TSigma(_, a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level + 1),
         Term::TPair(a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level),
         Term::TFst(p) => uses_var_at_level(p, level),
@@ -1580,6 +1592,10 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
             Box::new(quote(size, globals, global_offset, *a)),
             Box::new(Term::TCube(phi)),
             Box::new(quote(size, globals, global_offset, *te)),
+        ),
+        Value::VPartial(a, phi) => Term::TPartial(
+            Box::new(quote(size, globals, global_offset, *phi)),
+            Box::new(quote(size, globals, global_offset, *a)),
         ),
         Value::VGlueElem(phi, t, a) => Term::TGlueElem(
             Box::new(Term::TCube(phi)),

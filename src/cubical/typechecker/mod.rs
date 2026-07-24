@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 
-mod errors;
+pub mod errors;
 pub use errors::TypeError;
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
@@ -343,6 +343,10 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
                 Box::new(go(ph, n, val)),
                 Box::new(go(te, n, val)),
                 Box::new(go(g, n, val)),
+            )),
+            Term::TPartial(ph, a) => nbe_eval(&Term::TPartial(
+                Box::new(go(ph, n, val)),
+                Box::new(go(a, n, val)),
             )),
             Term::TSigma(x, a, b) => {
                 Term::TSigma(x.clone(), Box::new(go(a, n, val)), Box::new(go(b, n, val)))
@@ -895,6 +899,14 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 }
             };
             Ok(Term::TUniv(n.max(m)))
+        }
+
+        // Partial type: [_ | phi] A — partial elements of A on face phi
+        // Inference: TPartial(phi, A) : U_n where A : U_n
+        Term::TPartial(phi, a) => {
+            check_interval_dt(dts, ctx, phi)?;
+            let n = type_level_dt(dts, ctx, a)?;
+            Ok(Term::TUniv(n))
         }
 
         // unglue phi te g
@@ -1976,14 +1988,20 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             // equality can't be verified. The expected body type already
             // encodes the correct faces from the constructor declaration.
             if !SKIP_PLAM_ENDPT.with(|c| c.get()) {
-                let body_at0 = reduce_pcon_endpoints_dt(
-                    dts,
-                    &apply_literal(&Literal::NegVar(0), body),
-                );
-                let body_at1 = reduce_pcon_endpoints_dt(
-                    dts,
-                    &apply_literal(&Literal::Pos(0), body),
-                );
+                let body_at0 = {
+                    let reduced = reduce_pcon_endpoints_dt(
+                        dts,
+                        &apply_literal(&Literal::NegVar(0), body),
+                    );
+                    nbe_eval(&shift(-1, 0, &reduced))
+                };
+                let body_at1 = {
+                    let reduced = reduce_pcon_endpoints_dt(
+                        dts,
+                        &apply_literal(&Literal::Pos(0), body),
+                    );
+                    nbe_eval(&shift(-1, 0, &reduced))
+                };
                 require_equal_endpt(ctx, &nbe_eval(&u), &body_at0)?;
                 require_equal_endpt(ctx, &nbe_eval(&v), &body_at1)?;
             }

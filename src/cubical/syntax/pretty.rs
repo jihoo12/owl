@@ -128,6 +128,11 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             show_term(env, phi),
             show_term(env, te)
         ),
+        Term::TPartial(phi, a) => format!(
+            "[_ | {}] {}",
+            show_term(env, phi),
+            show_term(env, a)
+        ),
         Term::TGlueElem(phi, t, a) => format!(
             "glue [{}] ({}) {}",
             show_term(env, phi),

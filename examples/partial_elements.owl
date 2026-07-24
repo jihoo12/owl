@@ -1,0 +1,22 @@
+-- Partial Elements and Cubical Subtypes
+-- Demonstrates the [_ | phi] A syntax for partial elements.
+
+-- Partial type on i1 (full face) reduces to A.
+def TestPartialTop : U0
+  := [_ | i1] U0
+
+-- Partial type on i0 (empty face) is trivially satisfied.
+def TestPartialBot : U0
+  := [_ | i0] U0
+
+-- Partial types work with interval variables (as Pi type).
+def PartialOnVar : I -> U0
+  := fun i => [_ | i] U0
+
+-- Using the keyword syntax: Partial phi A
+def TestPartialKeyword : U0
+  := Partial i0 U0
+
+-- Nested partial types
+def NestedPartial : I -> I -> U0
+  := fun i j => [_ | i] [_ | j] U0

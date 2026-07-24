@@ -43,6 +43,8 @@ pub fn term_size(t: &Term) -> usize {
         | Term::TGlueElem(a, u, v)
         | Term::TUnglue(a, u, v) => 1 + term_size(a) + term_size(u) + term_size(v),
 
+        Term::TPartial(a, u) => 1 + term_size(a) + term_size(u),
+
         Term::THComp(a, sys, u0) => {
             let mut s = 1 + term_size(a) + term_size(u0);
             for (phi, t) in sys {
@@ -684,6 +686,12 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
                 eta_eq_memo(fuel, ctx, te1, te2, memo),
             ),
             eta_eq_memo(fuel, ctx, g1, g2, memo),
+        );
+    }
+    if let (Term::TPartial(phi1, a1), Term::TPartial(phi2, a2)) = (t1, t2) {
+        return and_result(
+            eta_eq_memo(fuel, ctx, phi1, phi2, memo),
+            eta_eq_memo(fuel, ctx, a1, a2, memo),
         );
     }
     if let (Term::TTransport(p1, x1), Term::TTransport(p2, x2)) = (t1, t2) {

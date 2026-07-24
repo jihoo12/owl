@@ -32,6 +32,38 @@ pub enum TypeError {
     PathPNotTypeFamily(Term),
 }
 
+/// Wrapper that attaches definition context to a TypeError.
+#[derive(Debug, Clone)]
+pub struct ContextualError {
+    pub def_name: Name,
+    pub inner: TypeError,
+}
+
+impl fmt::Display for ContextualError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "  in definition '{}':", self.def_name)?;
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl From<TypeError> for ContextualError {
+    fn from(e: TypeError) -> Self {
+        ContextualError {
+            def_name: "<unknown>".into(),
+            inner: e,
+        }
+    }
+}
+
+impl ContextualError {
+    pub fn with_def(name: impl Into<Name>, e: TypeError) -> Self {
+        ContextualError {
+            def_name: name.into(),
+            inner: e,
+        }
+    }
+}
+
 impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

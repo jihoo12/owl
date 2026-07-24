@@ -18,13 +18,20 @@
 
 - [x] Square constructors (2D HIT cells) — `[[ face_i0, face_i1, face_j0, face_j1 ]]` syntax for square constructors in HITs. Parser creates `TSqCon(d, con, args, r, s)` terms. `infer_dt` builds nested PathP type `PathP (<r> PathP (<s> TData(d)) fi0 fi1) fj0 fj1`. `check_dt` handles TSqCon against TData by verifying data type match and interval arg validity. `SKIP_PLAM_ENDPT` flag skips boundary checks for HIT case bodies. Applied `apply_literal` for IVar-based endpoint checks. Identity function on Torus typechecks correctly.
 
+- [x] Partial elements / Cubical Subtypes — `[_ | phi] A` syntax for partial elements. Added `TPartial(phi, A)` term constructor and `VPartial` value constructor. Supports both bracket syntax `[_ | phi] A` and keyword syntax `Partial phi A`. Type inference: `TPartial(phi, A) : U_n` when `A : U_n`. NbE reduction: `TPartial(i1, A)` reduces to `A`. Parser, pretty-printer, equality, positivity checker, and apply_literal all handle the new constructor.
+
+- [x] Fix 3 pre-existing example errors — `hits_parameterized.owl`, `stress_glue_hcomp.owl`, `stress_transport.owl` now pass (112 tests, 18 examples all green):
+  - PLam boundary check shift: Added `shift(-1, 0, ...)` to `body_at0`/`body_at1` in PLam check (matching the existing shift in path constructor endpoint check).
+  - Parser: Path constructor space-application now extends TCon args instead of wrapping in TApp chains, so `@ interval` correctly creates TPCon.
+  - `reduce_pcon_endpoints_dt` TApp chain: Now walks TApp chains to find underlying TCon for path constructor endpoint reduction.
+
+- [x] Debug improvements (`-d` flag) — `process_def` logs definition name on entry. `ContextualError` wraps TypeError with definition name. Trace printing distinguishes success/error cases. Debug scope output shows term, expected type, and context depth.
+
 ---
 
 ## Remaining — Cubical Type Theory Completeness
 
 ### 1. Core Cubical Features
-
-- **Partial elements / Cubical Subtypes** — `[_ | phi] A` syntax for partial elements. Needed for proper Glue type construction and cubical subtyping. Currently Glue is partially implemented but lacks full partial element support.
 
 - **System types** — `[phi => a, psi => b]` as a type (not just in comp/hfill). System types represent partial functions and are fundamental to cubical type theory.
 
@@ -90,9 +97,9 @@
 - **Interactive mode / Hole-driven development** — `?hole` syntax for incomplete proofs. Tactic mode fills holes.
 
 - **Better error messages** — More detailed type mismatch errors:
-  - Show normalized expected/got types
-  - Point to exact location of mismatch
-  - Suggest possible fixes
+  - Show normalized expected/got types (done for TypeMismatch)
+  - ~~Point to exact location of mismatch~~ (partial: shows term + type in debug scope)
+  - Suggest possible fixes (done for CannotInfer tip)
 
 - **Decision procedures** — Automated proving for:
   - Propositional equality (reflexivity, symmetry, transitivity)

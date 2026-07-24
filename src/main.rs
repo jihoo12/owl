@@ -75,7 +75,11 @@ fn main() {
     if debug {
         let steps = cubical::nbe::trace::drain_trace();
         if !steps.is_empty() {
-            eprintln!("\n--- NbE reduction trace ({} steps) ---", steps.len());
+            if result.is_err() {
+                eprintln!("\n--- NbE reduction trace ({} steps, on error) ---", steps.len());
+            } else {
+                eprintln!("\n--- NbE reduction trace ({} steps) ---", steps.len());
+            }
             for (i, step) in steps.iter().enumerate() {
                 eprintln!("  [{:>3}] {} {} -> {}", i + 1, step.rule, step.input, step.output);
             }

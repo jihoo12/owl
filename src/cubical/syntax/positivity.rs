@@ -73,6 +73,10 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             check_positivity_in(target, u, negative)?;
             check_positivity_in(target, v, negative)
         }
+        Term::TPartial(phi, a) => {
+            check_positivity_in(target, phi, negative)?;
+            check_positivity_in(target, a, negative)
+        }
         Term::THComp(a, sys, u0)
         | Term::TComp(a, sys, u0)
         | Term::TFill(a, sys, u0)

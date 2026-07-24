@@ -9,6 +9,7 @@ use crate::cubical::nbe::{Globals, Neutral, Value, eval_nbe, nbe_eval, nbe_eval_
 use crate::cubical::parser::{Decl, ProgramParser};
 use crate::cubical::syntax::{Name, Term};
 use crate::cubical::typechecker::{Ctx, TypeError};
+use crate::cubical::typechecker::errors::ContextualError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunOutput {
@@ -286,6 +287,7 @@ fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<
 }
 
 fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env) -> Result<RunOutput, RunError> {
+    crate::debug_log!("process_def '{}':", name);
     let closed_ty_globals = apply_globals(&env.defs, ty);
     let closed_val = val.clone();
 
@@ -294,7 +296,7 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env) -> Result<RunO
     let closed_ty_nf = nbe_eval(&closed_ty_globals);
     match nbe_eval(&infer_with_full_env(env, &closed_ty_nf)?) {
         Term::TUniv(_) => {}
-        other => return Err(TypeError::ExpectedUniverse(other).into()),
+        other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse(other)))),
     }
 
     // Resolve any tactic blocks in the value before typechecking.
@@ -314,11 +316,12 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env) -> Result<RunO
         &closed_val,
         &closed_ty_globals,
         &global_ctx,
-    )?;
+    ).map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)))?;
 
     // Register before checking the body so recursive calls resolve.
     env.define(name.clone(), closed_ty_globals.clone(), resolved_val.clone());
-    check_with_full_env(env, &resolved_val, &closed_ty_globals)?;
+    check_with_full_env(env, &resolved_val, &closed_ty_globals)
+        .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)))?;
     let output = RunOutput {
         name: name.clone(),
         ty: closed_ty_globals.clone(),
