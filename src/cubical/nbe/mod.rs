@@ -9,7 +9,8 @@ use std::rc::Rc;
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top, eval_interval};
 use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, System, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, show_term, subst};
 
-use trace::{TRACE_ACTIVE, record_step};
+use crate::cubical::debug;
+use trace::record_step;
 
 // Thread-local storage for the current datatype definitions during evaluation.
 // This allows `do_papp` to look up square-constructor face terms for boundary reduction
@@ -48,7 +49,7 @@ pub type DNFSystem = Vec<(DNF, Value)>;
 pub type Globals = Rc<RefCell<Vec<Value>>>;
 
 fn value_str(globals: &Globals, global_offset: usize, v: &Value) -> String {
-    if !TRACE_ACTIVE.load(std::sync::atomic::Ordering::Acquire) {
+    if !debug::is_active() {
         return String::new();
     }
     let term = quote(0, globals, global_offset, v.clone());

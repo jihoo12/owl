@@ -9,9 +9,7 @@ use std::collections::HashMap;
 
 use crate::cubical::nbe::nbe_eval;
 use crate::cubical::syntax::{Name, Term, beta, shift};
-
-/// A context maps de Bruijn names to their types.
-pub type Ctx = Vec<(Name, Term)>;
+use crate::cubical::typechecker::Ctx;
 
 // ---------------------------------------------------------------------------
 // Term size (fuel derivation)

@@ -7,7 +7,9 @@
 //   crate::equality::{definitionally_equal_ctx, definitionally_equal_ctx_r, EtaResult}
 
 use std::collections::BTreeSet;
-use std::fmt;
+
+mod errors;
+pub use errors::TypeError;
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
@@ -67,113 +69,12 @@ fn infer_via_reduction(dts: &[Datatype], ctx: &Ctx, t: &Term, original_err: Type
 }
 
 // ---------------------------------------------------------------------------
-// TypeError
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeError {
-    UnboundVariable(Name),
-    TypeMismatch(Box<Term>, Box<Term>),
-    ExpectedPi(Term),
-    ExpectedPath(Term),
-    ExpectedUniverse(Term),
-    ExpectedEquiv(Term),
-    ExpectedSigma(Term),
-    NotAnInterval(Term),
-    CannotInfer(Term),
-    EtaFuelExhausted(Box<Term>, Box<Term>),
-    Other(String),
-    // Inductive types / HITs
-    UnknownDatatype(Name),
-    UnknownConstructor(Name, Name),
-    WrongNumberOfArgs {
-        con: Name,
-        expected: usize,
-        got: usize,
-    },
-    BadElimCase {
-        con: Name,
-        msg: String,
-    },
-    MissingCase(Name),
-    ExpectedData(Term),
-    // PathP: first argument must be a type family
-    #[allow(dead_code)]
-    PathPNotTypeFamily(Term),
-}
-
-impl fmt::Display for TypeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TypeError::UnboundVariable(x) => write!(f, "  Unbound variable: '{}'", x),
-            TypeError::TypeMismatch(ex, got) => write!(
-                f,
-                "  Type mismatch\n    expected : {}\n    got      : {}",
-                ex, got
-            ),
-            TypeError::ExpectedPi(ty) => write!(f, "  Expected a Π-type, but found:\n    {}", ty),
-            TypeError::ExpectedPath(ty) => {
-                write!(f, "  Expected a Path type, but found:\n    {}", ty)
-            }
-            TypeError::ExpectedUniverse(ty) => {
-                write!(f, "  Expected a universe U_n, but found:\n    {}", ty)
-            }
-            TypeError::ExpectedEquiv(ty) => {
-                write!(f, "  Expected an Equiv type, but found:\n    {}", ty)
-            }
-            TypeError::ExpectedSigma(ty) => {
-                write!(f, "  Expected a Σ-type, but found:\n    {}", ty)
-            }
-            TypeError::NotAnInterval(t) => write!(
-                f,
-                "  Expected an interval expression (𝕀), but got:\n    {}",
-                t
-            ),
-            TypeError::CannotInfer(t) => write!(
-                f,
-                "  Cannot infer type of term without annotation:\n    {}\n  \
-                     (Tip: use 'check' instead of 'infer', or add a type annotation)",
-                t
-            ),
-            TypeError::EtaFuelExhausted(t1, t2) => write!(
-                f,
-                "  Eta-equality check ran out of fuel (terms may be equal but are too\n  \
-                     deeply nested to decide automatically).\n    lhs : {}\n    rhs : {}",
-                t1, t2
-            ),
-            TypeError::Other(msg) => write!(f, "  {}", msg),
-            TypeError::UnknownDatatype(d) => write!(f, "  Unknown datatype: '{}'", d),
-            TypeError::UnknownConstructor(d, c) => {
-                write!(f, "  Unknown constructor '{}' for datatype '{}'", c, d)
-            }
-            TypeError::WrongNumberOfArgs { con, expected, got } => write!(
-                f,
-                "  Constructor '{}' expects {} argument(s), got {}",
-                con, expected, got
-            ),
-            TypeError::BadElimCase { con, msg } => {
-                write!(f, "  Bad eliminator case for '{}': {}", con, msg)
-            }
-            TypeError::MissingCase(con) => write!(
-                f,
-                "  Eliminator is missing a case for constructor '{}'",
-                con
-            ),
-            TypeError::ExpectedData(ty) => {
-                write!(f, "  Expected a datatype (TData), but found:\n    {}", ty)
-            }
-            TypeError::PathPNotTypeFamily(ty) => {
-                write!(f, "  PathP requires a type family (e.g., <i> A i), but found:\n    {}", ty)
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Require helpers
 // ---------------------------------------------------------------------------
 
 pub fn require_equal(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(), TypeError> {
+    let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
+    crate::debug_log!("require_equal: {} == {}", show_term(&names, expected), show_term(&names, got));
     match definitionally_equal_ctx_r(ctx, expected, got) {
         EtaResult::Equal => Ok(()),
         EtaResult::NotEqual => Err(TypeError::TypeMismatch(
@@ -591,6 +492,99 @@ fn eval_elim_face(
 }
 
 // ---------------------------------------------------------------------------
+// Parameter inference + argument checking (shared by TCon/TPCon/TSqCon)
+// ---------------------------------------------------------------------------
+
+/// Two-phase helper for parameterized constructor checking:
+///
+/// 1. **Phase 1 — Infer params:** Walk the argument list; when the
+///    (partially-substituted) expected type for an argument is a bare
+///    `TVar(k)` with `k < num_params`, the argument *is* the parameter
+///    value — infer its type from the context.
+///
+/// 2. **Phase 2 — Check args:** Walk again with fully-substituted arg_tys,
+///    checking each argument against its expected type.
+///
+/// `initial_params` optionally pre-seeds some parameters (e.g. from an
+/// expected type in bidirectional checking).  Its length must equal
+/// `num_params`.
+///
+/// Returns `(param_terms, checked_args)` where `param_terms[i]` is
+/// `Some(term)` if parameter `i` was inferred, `None` otherwise.
+fn infer_and_check_params(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    sig_arg_tys: &[Term],
+    args: &[Term],
+    num_params: usize,
+) -> Result<(Vec<Option<Term>>, Vec<Term>), TypeError> {
+    infer_and_check_params_seeded(dts, ctx, sig_arg_tys, args, num_params, &[])
+}
+
+/// Like `infer_and_check_params` but accepts pre-seeded parameter values.
+fn infer_and_check_params_seeded(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    sig_arg_tys: &[Term],
+    args: &[Term],
+    num_params: usize,
+    initial_params: &[Option<Term>],
+) -> Result<(Vec<Option<Term>>, Vec<Term>), TypeError> {
+    debug_assert!(initial_params.len() <= num_params);
+    // Phase 1: Infer parameter values from argument types.
+    let mut param_terms: Vec<Option<Term>> = initial_params.to_vec();
+    param_terms.resize(num_params, None);
+    {
+        let mut prev_args: Vec<Term> = Vec::new();
+        for (k, arg) in args.iter().enumerate() {
+            let mut arg_ty = sig_arg_tys[k].clone();
+            for i in (0..num_params).rev() {
+                if let Some(ref pv) = param_terms[i] {
+                    arg_ty = beta(&arg_ty, pv);
+                }
+            }
+            for prev in prev_args.iter().rev() {
+                arg_ty = beta(&arg_ty, prev);
+            }
+            if let Term::TVar(idx) = &arg_ty {
+                let i = *idx as usize;
+                if i < num_params && param_terms[i].is_none() {
+                    param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
+                    continue;
+                }
+            }
+            prev_args.push(nbe_eval(arg));
+        }
+    }
+    // Phase 2: Check args with fully-substituted arg_tys.
+    let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
+    for (k, arg) in args.iter().enumerate() {
+        let mut arg_ty = sig_arg_tys[k].clone();
+        for i in (0..num_params).rev() {
+            if let Some(ref pv) = param_terms[i] {
+                arg_ty = beta(&arg_ty, pv);
+            }
+        }
+        for prev in checked_args.iter().rev() {
+            arg_ty = beta(&arg_ty, prev);
+        }
+        check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
+        checked_args.push(nbe_eval(arg));
+    }
+    Ok((param_terms, checked_args))
+}
+
+/// Build the parameter list for a return type from inferred param terms.
+/// Uninferred params default to `TVar(i)`.
+fn build_params(param_terms: &[Option<Term>]) -> Vec<Term> {
+    param_terms
+        .iter()
+        .enumerate()
+        .map(|(i, p)| p.clone().unwrap_or_else(|| Term::TVar(i as i32)))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // Type Inference
 // ---------------------------------------------------------------------------
 
@@ -601,6 +595,8 @@ pub fn infer(ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
 /// Like `infer` but with access to declared datatypes for checking
 /// `TData`/`TCon`/`TPCon`/`TElim`.  Pass `&[]` when no datatypes are in scope.
 pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
+    let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
+    crate::debug_scope!("infer {} : ctx[{}]", show_term(&names, t), ctx.len());
     crate::cubical::nbe::set_current_dts(dts);
     match t {
         // Variable
@@ -1278,115 +1274,19 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             // Check if this is an ordinary constructor.
             if let Some(sig) = dt.find_con(c) {
                 let num_params = dt.params.len();
-                // Phase 1: Infer parameter values from argument types.
-                // When arg_tys[k] (after substituting determined params and
-                // earlier args) is TVar(i) with i < num_params, that argument
-                // is the parameter itself — infer its type from the argument.
-                let mut param_terms: Vec<Option<Term>> = vec![None; num_params];
-                {
-                    let mut prev_args: Vec<Term> = Vec::new();
-                    for (k, arg) in args.iter().enumerate() {
-                        // Build the arg type, substituting determined params and
-                        // earlier (non-param) args.
-                        let mut arg_ty = sig.arg_tys[k].clone();
-                        for i in (0..num_params).rev() {
-                            if let Some(ref pv) = param_terms[i] {
-                                arg_ty = beta(&arg_ty, pv);
-                            }
-                        }
-                        for prev in prev_args.iter().rev() {
-                            arg_ty = beta(&arg_ty, prev);
-                        }
-                        // If arg_ty is a free variable in the parameter range,
-                        // the arg IS the parameter value — infer its type.
-                        if let Term::TVar(idx) = &arg_ty {
-                            let i = *idx as usize;
-                            if i < num_params && param_terms[i].is_none() {
-                                param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
-                                // Do NOT add to prev_args; this arg is a param.
-                                continue;
-                            }
-                        }
-                        // Otherwise it's a regular argument — record for
-                        // dependent-type substitution in later arg_tys.
-                        prev_args.push(nbe_eval(arg));
-                    }
-                }
-                // Phase 2: Build fully-substituted arg_tys and check args.
-                let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
-                for (k, arg) in args.iter().enumerate() {
-                    let mut arg_ty = sig.arg_tys[k].clone();
-                    // Substitute determined parameters (reverse order).
-                    for i in (0..num_params).rev() {
-                        if let Some(ref pv) = param_terms[i] {
-                            arg_ty = beta(&arg_ty, pv);
-                        }
-                    }
-                    // Substitute earlier regular args.
-                    for prev in checked_args.iter().rev() {
-                        arg_ty = beta(&arg_ty, prev);
-                    }
-                    check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
-                    checked_args.push(nbe_eval(arg));
-                }
-                // Build the parameter list for the return type.
-                let params: Vec<Term> = param_terms
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| {
-                        p.clone().unwrap_or_else(|| Term::TVar(i as i32))
-                    })
-                    .collect();
+                let (param_terms, _checked_args) = infer_and_check_params(
+                    dts, ctx, &sig.arg_tys, args, num_params,
+                )?;
+                let params = build_params(&param_terms);
                 Ok(Term::TData(d.clone(), params))
             // Path constructor used as a term (without explicit @).
             // Its type is Path (TData(d, params)) face0[args] face1[args].
             } else if let Some(sig) = dt.find_pcon(c) {
                 let num_params = dt.params.len();
-                // Same parameter-inference logic as above.
-                let mut param_terms: Vec<Option<Term>> = vec![None; num_params];
-                {
-                    let mut prev_args: Vec<Term> = Vec::new();
-                    for (k, arg) in args.iter().enumerate() {
-                        let mut arg_ty = sig.arg_tys[k].clone();
-                        for i in (0..num_params).rev() {
-                            if let Some(ref pv) = param_terms[i] {
-                                arg_ty = beta(&arg_ty, pv);
-                            }
-                        }
-                        for prev in prev_args.iter().rev() {
-                            arg_ty = beta(&arg_ty, prev);
-                        }
-                        if let Term::TVar(idx) = &arg_ty {
-                            let i = *idx as usize;
-                            if i < num_params && param_terms[i].is_none() {
-                                param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
-                                continue;
-                            }
-                        }
-                        prev_args.push(nbe_eval(arg));
-                    }
-                }
-                let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
-                for (k, arg) in args.iter().enumerate() {
-                    let mut arg_ty = sig.arg_tys[k].clone();
-                    for i in (0..num_params).rev() {
-                        if let Some(ref pv) = param_terms[i] {
-                            arg_ty = beta(&arg_ty, pv);
-                        }
-                    }
-                    for prev in checked_args.iter().rev() {
-                        arg_ty = beta(&arg_ty, prev);
-                    }
-                    check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
-                    checked_args.push(nbe_eval(arg));
-                }
-                let params: Vec<Term> = param_terms
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| {
-                        p.clone().unwrap_or_else(|| Term::TVar(i as i32))
-                    })
-                    .collect();
+                let (param_terms, checked_args) = infer_and_check_params(
+                    dts, ctx, &sig.arg_tys, args, num_params,
+                )?;
+                let params = build_params(&param_terms);
                 let face0 = checked_args
                     .iter()
                     .rev()
@@ -1422,52 +1322,12 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 });
             }
             let num_params = dt.params.len();
-            // Phase 1: Infer parameter values from argument types.
-            let mut param_terms: Vec<Option<Term>> = vec![None; num_params];
-            {
-                let mut prev_args: Vec<Term> = Vec::new();
-                for (k, arg) in args.iter().enumerate() {
-                    let mut arg_ty = sig.arg_tys[k].clone();
-                    for i in (0..num_params).rev() {
-                        if let Some(ref pv) = param_terms[i] {
-                            arg_ty = beta(&arg_ty, pv);
-                        }
-                    }
-                    for prev in prev_args.iter().rev() {
-                        arg_ty = beta(&arg_ty, prev);
-                    }
-                    if let Term::TVar(idx) = &arg_ty {
-                        let i = *idx as usize;
-                        if i < num_params && param_terms[i].is_none() {
-                            param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
-                            continue;
-                        }
-                    }
-                    prev_args.push(nbe_eval(arg));
-                }
-            }
-            // Phase 2: Check args with fully-substituted arg_tys.
-            let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
-            for (k, arg) in args.iter().enumerate() {
-                let mut arg_ty = sig.arg_tys[k].clone();
-                for i in (0..num_params).rev() {
-                    if let Some(ref pv) = param_terms[i] {
-                        arg_ty = beta(&arg_ty, pv);
-                    }
-                }
-                for prev in checked_args.iter().rev() {
-                    arg_ty = beta(&arg_ty, prev);
-                }
-                check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
-                checked_args.push(nbe_eval(arg));
-            }
+            let (param_terms, _checked_args) = infer_and_check_params(
+                dts, ctx, &sig.arg_tys, args, num_params,
+            )?;
             // Check interval argument.
             check_interval(ctx, r)?;
-            let params: Vec<Term> = param_terms
-                .iter()
-                .enumerate()
-                .map(|(i, p)| p.clone().unwrap_or_else(|| Term::TVar(i as i32)))
-                .collect();
+            let params = build_params(&param_terms);
             Ok(Term::TData(d.clone(), params))
         }
 
@@ -1490,50 +1350,12 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 });
             }
             let num_params = dt.params.len();
-            let mut param_terms: Vec<Option<Term>> = vec![None; num_params];
-            {
-                let mut prev_args: Vec<Term> = Vec::new();
-                for (k, arg) in args.iter().enumerate() {
-                    let mut arg_ty = sig.arg_tys[k].clone();
-                    for i in (0..num_params).rev() {
-                        if let Some(ref pv) = param_terms[i] {
-                            arg_ty = beta(&arg_ty, pv);
-                        }
-                    }
-                    for prev in prev_args.iter().rev() {
-                        arg_ty = beta(&arg_ty, prev);
-                    }
-                    if let Term::TVar(idx) = &arg_ty {
-                        let i = *idx as usize;
-                        if i < num_params && param_terms[i].is_none() {
-                            param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
-                            continue;
-                        }
-                    }
-                    prev_args.push(nbe_eval(arg));
-                }
-            }
-            let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
-            for (k, arg) in args.iter().enumerate() {
-                let mut arg_ty = sig.arg_tys[k].clone();
-                for i in (0..num_params).rev() {
-                    if let Some(ref pv) = param_terms[i] {
-                        arg_ty = beta(&arg_ty, pv);
-                    }
-                }
-                for prev in checked_args.iter().rev() {
-                    arg_ty = beta(&arg_ty, prev);
-                }
-                check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
-                checked_args.push(nbe_eval(arg));
-            }
+            let (param_terms, checked_args) = infer_and_check_params(
+                dts, ctx, &sig.arg_tys, args, num_params,
+            )?;
             check_interval(ctx, r)?;
             check_interval(ctx, s)?;
-            let params: Vec<Term> = param_terms
-                .iter()
-                .enumerate()
-                .map(|(i, p)| p.clone().unwrap_or_else(|| Term::TVar(i as i32)))
-                .collect();
+            let params = build_params(&param_terms);
             let data_ty = Term::TData(d.clone(), params.clone());
 
             // Build the proper PathP type for the square constructor.
@@ -2104,6 +1926,8 @@ pub fn check(ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), TypeError> {
 /// Like `check` but with access to declared datatypes.
 /// Pass `&[]` when no datatypes are in scope.
 pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), TypeError> {
+    let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
+    crate::debug_scope!("check {} : {} : ctx[{}]", show_term(&names, t), show_term(&names, ty), ctx.len());
     crate::cubical::nbe::set_current_dts(dts);
     match t {
         // Lambda introduction
@@ -2269,56 +2093,13 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 // parameters not provided by the expected type are inferred from
                 // the arguments.
                 let num_params = dt.params.len();
-                let mut param_terms: Vec<Option<Term>> = Vec::with_capacity(num_params);
-                for p in &expected_params {
-                    param_terms.push(Some(p.clone()));
-                }
-                while param_terms.len() < num_params {
-                    param_terms.push(None);
-                }
-                // Phase 1: infer remaining params from arguments.
-                {
-                    let mut prev_args: Vec<Term> = Vec::new();
-                    for (k, arg) in args.iter().enumerate() {
-                        let mut arg_ty = sig.arg_tys[k].clone();
-                        for i in (0..num_params).rev() {
-                            if let Some(ref pv) = param_terms[i] {
-                                arg_ty = beta(&arg_ty, pv);
-                            }
-                        }
-                        for prev in prev_args.iter().rev() {
-                            arg_ty = beta(&arg_ty, prev);
-                        }
-                        if let Term::TVar(idx) = &arg_ty {
-                            let i = *idx as usize;
-                            if i < num_params && param_terms[i].is_none() {
-                                param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
-                                continue;
-                            }
-                        }
-                        prev_args.push(nbe_eval(arg));
-                    }
-                }
-                // Phase 2: check all args with fully-substituted arg_tys.
-                let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
-                for (k, arg) in args.iter().enumerate() {
-                    let mut arg_ty = sig.arg_tys[k].clone();
-                    for i in (0..num_params).rev() {
-                        if let Some(ref pv) = param_terms[i] {
-                            arg_ty = beta(&arg_ty, pv);
-                        }
-                    }
-                    for prev in checked_args.iter().rev() {
-                        arg_ty = beta(&arg_ty, prev);
-                    }
-                    check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
-                    checked_args.push(nbe_eval(arg));
-                }
-                let params: Vec<Term> = param_terms
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| p.clone().unwrap_or_else(|| Term::TVar(i as i32)))
+                let initial: Vec<Option<Term>> = (0..num_params)
+                    .map(|i| expected_params.get(i).cloned())
                     .collect();
+                let (param_terms, _checked_args) = infer_and_check_params_seeded(
+                    dts, ctx, &sig.arg_tys, args, num_params, &initial,
+                )?;
+                let params = build_params(&param_terms);
                 require_equal(ctx, &expected_ty_nf, &Term::TData(d.clone(), params))
             } else if dt.find_pcon(c).is_some() {
                 let inferred = infer_dt(dts, ctx, &Term::TCon(d.clone(), c.clone(), args.clone()))?;

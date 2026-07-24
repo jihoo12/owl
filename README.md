@@ -25,3 +25,19 @@ def main : Nat = suc zero
 The REPL accepts one complete top-level declaration per line. Use `:load FILE`
 to add a source file to the session, `:help` for the command summary, and
 `:quit` to exit.
+
+## Debug logging
+
+Pass `--debug` (or `-d`) to any command to enable detailed trace output from
+the typechecker and NbE reduction engine. The same behaviour can be activated
+via the `OWL_DEBUG` environment variable:
+
+```text
+cargo run -- --debug eval examples/nat.owl
+OWL_DEBUG=1 cargo run -- check examples/nat.owl
+```
+
+Typechecker output shows every `infer` and `check` entry with the term being
+checked and the current context depth.  NbE output records every reduction
+step (beta, eliminator, transport, …) and prints the full trace at the end of
+execution.
