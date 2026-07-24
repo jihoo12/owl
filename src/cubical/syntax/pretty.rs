@@ -177,6 +177,11 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             parts.push(format!("@ {}", show_term(env, r)));
             format!("({} {})", c, parts.join(" "))
         }
+        Term::TSqCon(_, c, args, r, s) => {
+            let mut parts: Vec<String> = args.iter().map(|a| show_term(env, a)).collect();
+            parts.push(format!("@ {} @ {}", show_term(env, r), show_term(env, s)));
+            format!("({} {})", c, parts.join(" "))
+        }
         Term::TElim(motive, cases, scrut) => {
             let case_strs: Vec<String> = cases
                 .iter()

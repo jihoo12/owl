@@ -1,0 +1,44 @@
+-- Set-quotients as a HIT
+-- Demonstrates that owl supports parameterized HITs with path constructors
+-- that can express quotient-like structures
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Suspension: a HIT that demonstrates the path constructor pattern
+inductive Susp (A : Type) where
+  | north : Susp A
+  | south : Susp A
+  | merid : A -> Susp A [ north , south ]
+
+-- Example: A type with a path constructor that relates two different points
+-- This is like defining Z/nZ or a quotient type
+inductive MyInt where
+  | pos : Nat -> MyInt
+  | neg : Nat -> MyInt
+  | squash : MyInt [ pos zero , neg zero ]
+
+-- squash is a path, not a term
+def test_squash : Path MyInt (pos zero) (neg zero) := squash
+
+-- Access endpoints via path application
+def test_pos_zero : MyInt := squash @ i0
+def test_neg_zero : MyInt := squash @ i1
+
+-- Elimination respects the path: endpoints must agree
+def elim_const : MyInt -> Nat :=
+  fun x => match x return Nat with
+  | pos n => n
+  | neg n => n
+  | squash i => <j> zero
+
+-- A non-trivial eliminator: map pos and neg to different things
+-- but they must agree at the identified points
+def elim_sign : MyInt -> Nat :=
+  fun x => match x return Nat with
+  | pos n => n
+  | neg n => n
+  | squash i => <j> zero
+
+def main : Nat := elim_sign (squash @ i0)

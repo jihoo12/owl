@@ -1,0 +1,34 @@
+-- Square constructor test: Torus with 2D path
+-- Face convention: [[ face_i0, face_i1, face_j0, face_j1 ]]
+-- face_i0, face_i1: s-boundaries at r=0, r=1 (points of A)
+-- face_j0, face_j1: r-boundaries at s=0, s=1 (paths from face_i0 to face_i1)
+inductive Torus where
+  | base : Torus
+  | line1 : Torus [ base , base ]
+  | line2 : Torus [ base , base ]
+  | square : Torus [[ base , base , line2 , line2 ]]
+
+-- Path constructors typecheck correctly
+def test_line1 : Path Torus base base := line1
+def test_line2 : Path Torus base base := line2
+
+-- Square at concrete endpoints produces Torus values
+def test_square_00 : Torus := square @ i0 @ i0
+def test_square_01 : Torus := square @ i0 @ i1
+def test_square_10 : Torus := square @ i1 @ i0
+def test_square_11 : Torus := square @ i1 @ i1
+def test_square_neg : Torus := square @ (~ i0) @ i1
+
+-- Elimination: constant function on Torus
+-- square case body must be a double path lambda <r> <s> ...
+def elim_const : Torus -> Torus :=
+  fun x => match x return Torus with
+  | base => base
+  | line1 i => <j> base
+  | line2 j => <k> base
+  | square r s => <i> <j> base
+
+-- Test that elimination produces correct results
+def test_elim_base : Torus := elim_const base
+def test_elim_line1 : Torus := elim_const (line1 @ i0)
+def test_elim_square : Torus := elim_const (square @ i0 @ i0)

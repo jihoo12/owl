@@ -5,7 +5,7 @@
 use super::lexer::{err, Token, TokenKind};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
-use crate::cubical::syntax::{ConSig, Datatype, ElimCase, Name, PConSig, Tactic, Term, shift};
+use crate::cubical::syntax::{ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift};
 
 pub(super) struct Parser {
     tokens: Vec<Token>,
@@ -96,11 +96,13 @@ impl Parser {
             })?;
         let mut cons = Vec::new();
         let mut pcons = Vec::new();
+        let mut sqcons = Vec::new();
         let mut local_dt = Datatype {
             name: name.clone(),
             params: params.clone(),
             cons: Vec::new(),
             pcons: Vec::new(),
+            sqcons: Vec::new(),
             universe_level: None,
         };
         while self.consume(&TokenKind::Pipe) {
@@ -125,36 +127,65 @@ impl Parser {
                 }
             }
             if self.consume(&TokenKind::LBracket) {
-                // Push constructor argument binders so face terms can reference them.
-                // Face terms for path constructors use these to specify endpoints,
-                // e.g. `trunc : A -> A -> Trunc A [ inc a, inc b ]` where `a`
-                // and `b` refer to the constructor's own arguments.
-                let num_args = arg_tys.len();
-                for k in 0..num_args {
-                    self.term_env
-                        .insert(0, format!("{}_{}", con_name, k));
+                // Check for double bracket `[[` for square constructors
+                if self.consume(&TokenKind::LBracket) {
+                    // Square constructor: `sqcon : A [[ face_i0, face_i1, face_j0, face_j1 ]]`
+                    let num_args = arg_tys.len();
+                    for k in 0..num_args {
+                        self.term_env
+                            .insert(0, format!("{}_{}", con_name, k));
+                    }
+                    let face_i0 = self.parse_face_with_extra_datatype(&local_dt)?;
+                    self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                    let face_i1 = self.parse_face_with_extra_datatype(&local_dt)?;
+                    self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                    let face_j0 = self.parse_face_with_extra_datatype(&local_dt)?;
+                    self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                    let face_j1 = self.parse_face_with_extra_datatype(&local_dt)?;
+                    self.expect(TokenKind::RBracket, "expected ']' after square-constructor faces")?;
+                    self.expect(TokenKind::RBracket, "expected ']]' after square-constructor faces")?;
+                    for _ in 0..num_args {
+                        self.term_env.remove(0);
+                    }
+                    let sig = SqConSig {
+                        name: con_name,
+                        arg_tys,
+                        face_i0,
+                        face_i1,
+                        face_j0,
+                        face_j1,
+                    };
+                    local_dt.sqcons.push(sig.clone());
+                    sqcons.push(sig);
+                } else {
+                    // Path constructor: `pcon : A [ face0, face1 ]`
+                    let num_args = arg_tys.len();
+                    for k in 0..num_args {
+                        self.term_env
+                            .insert(0, format!("{}_{}", con_name, k));
+                    }
+                    let face0 = self.parse_face_with_extra_datatype(&local_dt)?;
+                    self.expect(
+                        TokenKind::Comma,
+                        "expected ',' between path-constructor faces",
+                    )?;
+                    let face1 = self.parse_face_with_extra_datatype(&local_dt)?;
+                    self.expect(
+                        TokenKind::RBracket,
+                        "expected ']' after path-constructor faces",
+                    )?;
+                    for _ in 0..num_args {
+                        self.term_env.remove(0);
+                    }
+                    let sig = PConSig {
+                        name: con_name,
+                        arg_tys,
+                        face0,
+                        face1,
+                    };
+                    local_dt.pcons.push(sig.clone());
+                    pcons.push(sig);
                 }
-                let face0 = self.parse_face_with_extra_datatype(&local_dt)?;
-                self.expect(
-                    TokenKind::Comma,
-                    "expected ',' between path-constructor faces",
-                )?;
-                let face1 = self.parse_face_with_extra_datatype(&local_dt)?;
-                self.expect(
-                    TokenKind::RBracket,
-                    "expected ']' after path-constructor faces",
-                )?;
-                for _ in 0..num_args {
-                    self.term_env.remove(0);
-                }
-                let sig = PConSig {
-                    name: con_name,
-                    arg_tys,
-                    face0,
-                    face1,
-                };
-                local_dt.pcons.push(sig.clone());
-                pcons.push(sig);
             } else {
                 let sig = ConSig {
                     name: con_name,
@@ -164,7 +195,7 @@ impl Parser {
                 cons.push(sig);
             }
         }
-        if cons.is_empty() && pcons.is_empty() {
+        if cons.is_empty() && pcons.is_empty() && sqcons.is_empty() {
             return Err(self.error_here(format!(
                 "datatype '{}' must declare at least one constructor",
                 name
@@ -174,7 +205,7 @@ impl Parser {
         for _ in &params {
             self.term_env.remove(0);
         }
-        Ok(Decl::Data(Datatype { name, params, cons, pcons, universe_level: uni_level }))
+        Ok(Decl::Data(Datatype { name, params, cons, pcons, sqcons, universe_level: uni_level }))
     }
 
     fn parse_constructor_type(
@@ -449,8 +480,31 @@ impl Parser {
         }
     }
 
+    fn parse_interval_arg(&mut self) -> Result<Term, ParseError> {
+        if self.consume(&TokenKind::Tilde) {
+            let inner = self.parse_prefix_or_atom()?;
+            let i = expect_interval(inner, self)?;
+            Ok(Term::TInterval(I::Neg(Box::new(i))))
+        } else {
+            self.parse_prefix_or_atom()
+        }
+    }
+
     fn parse_papp(&mut self) -> Result<Term, ParseError> {
         let mut term = self.parse_app()?;
+        if let Term::TCon(ref dt, ref con, _) = term {
+            if self.is_square_constructor(dt, con) && self.peek().kind == TokenKind::At {
+                // Square constructor: parse both interval args without going through
+                // parse_papp recursion (which would consume the second @)
+                self.consume(&TokenKind::At);
+                let rhs = self.parse_interval_arg()?;
+                self.expect(TokenKind::At, "expected '@' for square constructor second interval")?;
+                let rhs2 = self.parse_interval_arg()?;
+                if let Term::TCon(dt, con, args) = term {
+                    term = Term::TSqCon(dt, con, args, Box::new(rhs), Box::new(rhs2));
+                }
+            }
+        }
         while self.consume(&TokenKind::At) {
             let rhs = self.parse_tilde()?;
             if let Term::TCon(dt, con, args) = term {
@@ -473,6 +527,15 @@ impl Parser {
             args.push(self.parse_prefix_or_atom()?);
         }
         if let Term::TCon(dt, con, mut con_args) = first {
+            // For path/square constructors, space-application should produce TApp,
+            // not extend the TCon args. They use `@` for interval application.
+            if !args.is_empty() && (self.is_path_constructor(&dt, &con) || self.is_square_constructor(&dt, &con)) {
+                let mut term = Term::TCon(dt, con, con_args);
+                for arg in args {
+                    term = Term::TApp(Box::new(term), Box::new(arg));
+                }
+                return Ok(term);
+            }
             con_args.extend(args);
             return Ok(Term::TCon(dt, con, con_args));
         }
@@ -522,6 +585,48 @@ impl Parser {
             let u = self.parse_prefix_or_atom()?;
             let v = self.parse_prefix_or_atom()?;
             return Ok(Term::TPath(Box::new(a), Box::new(u), Box::new(v)));
+        }
+        if self.consume_ident("isProp") {
+            let a = self.parse_prefix_or_atom()?;
+            // isProp A = forall (_ : A), forall (_ : A), Path A x y
+            //
+            // de Bruijn layout (outermost first):
+            //   1: x : A        (context depth 2)
+            //   0: y : A        (context depth 1, type seen from depth 0)
+            //
+            // Type of y is checked at depth 1: A shifted by 1 (A[+1])
+            // Body Path A x y is checked at depth 2: A shifted by 2 (A[+2])
+            //   x = TVar(1), y = TVar(0)
+            return Ok(self.build_isprop(a));
+        }
+        if self.consume_ident("isSet") {
+            let a = self.parse_prefix_or_atom()?;
+            // isSet A = forall (_ : A), forall (_ : A), forall (_ : Path A x y), forall (_ : Path A x y), Path (Path A x y) p q
+            //
+            // de Bruijn layout (outermost first):
+            //   3: x : A                     (type checked at depth 0: A[+0] = A)
+            //   2: y : A                     (type checked at depth 1: A[+1])
+            //   1: p : Path A x y            (type checked at depth 2: A[+2], x=TVar(1), y=TVar(0))
+            //   0: q : Path A x y            (type checked at depth 3: A[+3], x=TVar(2), y=TVar(1))
+            //
+            // Body Path (Path A x y) p q is checked at depth 4:
+            //   A[+4], x=TVar(3), y=TVar(2), p=TVar(1), q=TVar(0)
+            return Ok(self.build_isset(a));
+        }
+        if self.consume_ident("isGroupoid") {
+            let a = self.parse_prefix_or_atom()?;
+            // isGroupoid A = forall (_ : A), forall (_ : A), forall (_ : Path A x y), forall (_ : Path A x y),
+            //                forall (_ : Path (Path A x y) p q), forall (_ : Path (Path A x y) p q),
+            //                Path (Path (Path A x y) p q) r s
+            //
+            // de Bruijn layout (outermost first):
+            //   5: x : A
+            //   4: y : A
+            //   3: p : Path A x y
+            //   2: q : Path A x y
+            //   1: r : Path (Path A x y) p q
+            //   0: s : Path (Path A x y) p q
+            return Ok(self.build_isgroupoid(a));
         }
         if self.consume_ident("hcomp") {
             let a = self.parse_prefix_or_atom()?;
@@ -843,21 +948,26 @@ impl Parser {
                 binders.push(name);
             }
             if self.consume(&TokenKind::FatArrow) || self.consume(&TokenKind::Arrow) {
-                                // Determine if this is a path constructor: if so, the last
-                // binder is the interval variable and should go into ivar_env.
+                // Determine if this is a path constructor or square constructor:
+                // - path constructor: last binder is the interval variable
+                // - square constructor: last TWO binders are interval variables
+                let is_sqcon = self.is_square_constructor_case(&con);
                 let is_path_con = self
                     .find_constructor(&con)
                     .is_some_and(|(_, is_path)| is_path);
-                let (ord_binders, ivar_binder) = if is_path_con && !binders.is_empty() {
+                let (ord_binders, ivar_binders) = if is_sqcon && binders.len() >= 2 {
+                    let split = binders.len() - 2;
+                    (&binders[..split], &binders[split..])
+                } else if is_path_con && !binders.is_empty() && !is_sqcon {
                     let split = binders.len() - 1;
-                    (&binders[..split], Some(&binders[split]))
+                    (&binders[..split], &binders[split..])
                 } else {
-                    (&binders[..], None)
+                    (&binders[..], &[] as &[String])
                 };
                 for binder in ord_binders.iter() {
                     self.term_env.insert(0, binder.clone());
                 }
-                if let Some(iv) = ivar_binder {
+                for iv in ivar_binders {
                     self.ivar_env.insert(0, iv.clone());
                     self.term_env.insert(0, "".to_string());
                 }
@@ -865,7 +975,7 @@ impl Parser {
                 for _ in ord_binders {
                     self.term_env.remove(0);
                 }
-                if ivar_binder.is_some() {
+                for _ in ivar_binders {
                     self.term_env.remove(0);
                     self.ivar_env.remove(0);
                 }
@@ -930,8 +1040,18 @@ impl Parser {
             if dt.pcons.iter().any(|c| c.name == name) {
                 return Some((dt.name.clone(), true));
             }
+            if dt.sqcons.iter().any(|c| c.name == name) {
+                return Some((dt.name.clone(), true)); // true = has interval binders
+            }
         }
         None
+    }
+
+    fn is_square_constructor_case(&self, con_name: &str) -> bool {
+        self.datatypes
+            .iter()
+            .rev()
+            .any(|dt| dt.sqcons.iter().any(|c| c.name == con_name))
     }
 
     fn is_path_constructor(&self, dt_name: &str, con_name: &str) -> bool {
@@ -940,6 +1060,14 @@ impl Parser {
             .rev()
             .find(|dt| dt.name == dt_name)
             .is_some_and(|dt| dt.pcons.iter().any(|c| c.name == con_name))
+    }
+
+    fn is_square_constructor(&self, dt_name: &str, con_name: &str) -> bool {
+        self.datatypes
+            .iter()
+            .rev()
+            .find(|dt| dt.name == dt_name)
+            .is_some_and(|dt| dt.sqcons.iter().any(|c| c.name == con_name))
     }
 
     fn is_decl_start(&self) -> bool {
@@ -1042,6 +1170,162 @@ impl Parser {
             false
         }
     }
+
+    /// Build `isProp A` = `forall (_ : A), forall (_ : A), Path A x y`
+    ///
+    /// Context depths:  outer A is at depth 0 (type of first binder).
+    ///                 inner A is at depth 1 (type of second binder).
+    ///                 body `Path A x y` is at depth 2.
+    ///                 x = TVar(1), y = TVar(0) at depth 2.
+    fn build_isprop(&self, a: Term) -> Term {
+        Term::TPi(
+            "_".to_string(),
+            Box::new(a.clone()),
+            Box::new(Term::TPi(
+                "_".to_string(),
+                Box::new(shift(1, 0, &a)),
+                Box::new(Term::TPath(
+                    Box::new(shift(2, 0, &a)),
+                    Box::new(Term::TVar(1)),
+                    Box::new(Term::TVar(0)),
+                )),
+            )),
+        )
+    }
+
+    /// Build `isSet A` = `forall (_ : A), forall (_ : A), forall (_ : Path A x y), forall (_ : Path A x y), Path (Path A x y) p q`
+    ///
+    /// Context depths (outermost first):
+    ///   depth 0: x : A            (type of x: A)
+    ///   depth 1: y : A            (type of y: A[+1])
+    ///   depth 2: p : Path A x y   (type of p: Path A[+2] (TVar@1) (TVar@0))
+    ///   depth 3: q : Path A x y   (type of q: Path A[+3] (TVar@2) (TVar@1))
+    ///   depth 4: body              (Path (Path A[+4] (TVar@3) (TVar@2)) (TVar@1) (TVar@0))
+    fn build_isset(&self, a: Term) -> Term {
+        // type of 3rd binder (p): Path A x y, checked at depth 2
+        //   A shifted by 2, x = TVar(1), y = TVar(0)
+        let ty_p = Term::TPath(
+            Box::new(shift(2, 0, &a)),
+            Box::new(Term::TVar(1)),
+            Box::new(Term::TVar(0)),
+        );
+        // type of 4th binder (q): Path A x y, checked at depth 3
+        //   A shifted by 3, x = TVar(2), y = TVar(1)
+        let ty_q = Term::TPath(
+            Box::new(shift(3, 0, &a)),
+            Box::new(Term::TVar(2)),
+            Box::new(Term::TVar(1)),
+        );
+        // body: Path (Path A x y) p q, checked at depth 4
+        //   inner Path A x y: A shifted by 4, x = TVar(3), y = TVar(2)
+        //   p = TVar(1), q = TVar(0)
+        let inner_path = Term::TPath(
+            Box::new(shift(4, 0, &a)),
+            Box::new(Term::TVar(3)),
+            Box::new(Term::TVar(2)),
+        );
+        let body = Term::TPath(
+            Box::new(inner_path),
+            Box::new(Term::TVar(1)),
+            Box::new(Term::TVar(0)),
+        );
+        Term::TPi(
+            "_".to_string(),
+            Box::new(a.clone()),
+            Box::new(Term::TPi(
+                "_".to_string(),
+                Box::new(shift(1, 0, &a)),
+                Box::new(Term::TPi(
+                    "_".to_string(),
+                    Box::new(ty_p),
+                    Box::new(Term::TPi(
+                        "_".to_string(),
+                        Box::new(ty_q),
+                        Box::new(body),
+                    )),
+                )),
+            )),
+        )
+    }
+
+    /// Build `isGroupoid A` = six nested foralls with body Path (Path (Path A x y) p q) r s
+    fn build_isgroupoid(&self, a: Term) -> Term {
+        // type of p: Path A x y at depth 2
+        let ty_p = Term::TPath(
+            Box::new(shift(2, 0, &a)),
+            Box::new(Term::TVar(1)),
+            Box::new(Term::TVar(0)),
+        );
+        // type of q: Path A x y at depth 3
+        let ty_q = Term::TPath(
+            Box::new(shift(3, 0, &a)),
+            Box::new(Term::TVar(2)),
+            Box::new(Term::TVar(1)),
+        );
+        // type of r: Path (Path A x y) p q at depth 4
+        let inner_path_4 = Term::TPath(
+            Box::new(shift(4, 0, &a)),
+            Box::new(Term::TVar(3)),
+            Box::new(Term::TVar(2)),
+        );
+        let ty_r = Term::TPath(
+            Box::new(inner_path_4),
+            Box::new(Term::TVar(1)),
+            Box::new(Term::TVar(0)),
+        );
+        // type of s: Path (Path A x y) p q at depth 5
+        let inner_path_5 = Term::TPath(
+            Box::new(shift(5, 0, &a)),
+            Box::new(Term::TVar(4)),
+            Box::new(Term::TVar(3)),
+        );
+        let ty_s = Term::TPath(
+            Box::new(inner_path_5),
+            Box::new(Term::TVar(2)),
+            Box::new(Term::TVar(1)),
+        );
+        // body: Path (Path (Path A x y) p q) r s at depth 6
+        let innermost_path = Term::TPath(
+            Box::new(shift(6, 0, &a)),
+            Box::new(Term::TVar(5)),
+            Box::new(Term::TVar(4)),
+        );
+        let inner_path_6 = Term::TPath(
+            Box::new(innermost_path),
+            Box::new(Term::TVar(3)),
+            Box::new(Term::TVar(2)),
+        );
+        let body = Term::TPath(
+            Box::new(inner_path_6),
+            Box::new(Term::TVar(1)),
+            Box::new(Term::TVar(0)),
+        );
+        Term::TPi(
+            "_".to_string(),
+            Box::new(a.clone()),
+            Box::new(Term::TPi(
+                "_".to_string(),
+                Box::new(shift(1, 0, &a)),
+                Box::new(Term::TPi(
+                    "_".to_string(),
+                    Box::new(ty_p),
+                    Box::new(Term::TPi(
+                        "_".to_string(),
+                        Box::new(ty_q),
+                        Box::new(Term::TPi(
+                            "_".to_string(),
+                            Box::new(ty_r),
+                            Box::new(Term::TPi(
+                                "_".to_string(),
+                                Box::new(ty_s),
+                                Box::new(body),
+                            )),
+                        )),
+                    )),
+                )),
+            )),
+        )
+    }
 }
 
 fn parse_universe(name: &str) -> Option<i32> {
@@ -1137,5 +1421,8 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "hfill"
             | "hcomp"
             | "PathP"
+            | "isProp"
+            | "isSet"
+            | "isGroupoid"
     )
 }

@@ -2,13 +2,40 @@
 
 pub mod trace;
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top, eval_interval};
-use crate::cubical::syntax::{ElimCase, Level, Name, System, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, show_term, subst};
+use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, System, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, show_term, subst};
 
 use trace::{TRACE_ACTIVE, record_step};
+
+// Thread-local storage for the current datatype definitions during evaluation.
+// This allows `do_papp` to look up square-constructor face terms for boundary reduction
+// without threading `dts` through every NbE function signature.
+thread_local! {
+    static CURRENT_DTS: Cell<Option<*const [Datatype]>> = Cell::new(None);
+}
+
+/// Set the current datatype definitions for the duration of evaluation.
+pub fn set_current_dts(dts: &[Datatype]) {
+    let ptr = dts as *const [Datatype];
+    CURRENT_DTS.with(|cell| {
+        cell.set(Some(ptr));
+    });
+}
+
+/// Get the current datatype definitions. Returns empty vec if not set.
+fn current_dts() -> Vec<Datatype> {
+    CURRENT_DTS.with(|cell| {
+        if let Some(ptr) = cell.get() {
+            unsafe { &*ptr }.to_vec()
+        } else {
+            Vec::new()
+        }
+    })
+}
 
 pub type Env = Vec<Value>;
 
@@ -47,6 +74,7 @@ pub enum Value {
     VData(Name, Vec<Value>),
     VCon(Name, Name, Vec<Value>),
     VPCon(Name, Name, Vec<Value>, Box<Value>),
+    VSqCon(Name, Name, Vec<Value>, Box<Value>, Box<Value>),
     VElim(Box<Value>, Vec<ElimCase>, Box<Value>),
     VGlue(Box<Value>, DNF, Box<Value>),
     VGlueElem(DNF, Box<Value>, Box<Value>),
@@ -92,6 +120,7 @@ pub enum Neutral {
     NVar(usize),
     NApp(Box<Neutral>, Box<Value>),
     NPApp(Box<Neutral>, Box<Value>),
+    NSqApp(Box<Neutral>, Box<Value>, Box<Value>),
     NFst(Box<Neutral>),
     NSnd(Box<Neutral>),
     NElim(Box<Value>, Vec<ElimCase>, Box<Neutral>),
@@ -329,6 +358,13 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
             args.iter().map(|a| eval_nbe(env, globals, global_offset, a)).collect(),
             Box::new(eval_nbe(env, globals, global_offset, r)),
         ),
+        Term::TSqCon(data, con, args, r, s) => Value::VSqCon(
+            data.clone(),
+            con.clone(),
+            args.iter().map(|a| eval_nbe(env, globals, global_offset, a)).collect(),
+            Box::new(eval_nbe(env, globals, global_offset, r)),
+            Box::new(eval_nbe(env, globals, global_offset, s)),
+        ),
         Term::TElim(motive, cases, scrut) => {
             do_elim(
                 eval_nbe(env, globals, global_offset, motive),
@@ -447,6 +483,66 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
                 Value::VPApp(Box::new(Value::VHFill(a, sys, base)), Box::new(r))
             }
         },
+        // Square constructor boundary reduction.
+        //
+        // A square constructor has type:
+        //   PathP (<i> PathP (<j> A) face_i0 face_i1) face_j0 face_j1
+        //
+        // When the first interval is a concrete endpoint:
+        //   sq @ 0 @ s  =  face_j0 @ s   (outer path at i=0 gives face_j0)
+        //   sq @ 1 @ s  =  face_j1 @ s   (outer path at i=1 gives face_j1)
+        Value::VSqCon(ref data, ref con, ref args, ref sq_r, ref sq_s) => {
+            if let Some(endpoint) = value_to_endpoint(&r) {
+                let dts = current_dts();
+                if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
+                    && let Some(sig) = dt.sqcons.iter().find(|c| &c.name == con) {
+                        let arity = sig.arity();
+                        let face = match endpoint {
+                            I::I0 => &sig.face_j0,
+                            I::I1 => &sig.face_j1,
+                            _ => unreachable!(),
+                        };
+                        let mut face_inst = face.clone();
+                        let arg_terms: Vec<Term> = args.iter()
+                            .map(|a| quote(0, globals, global_offset, a.clone()))
+                            .collect();
+                        for k in (0..arity).rev() {
+                            face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
+                        }
+                        let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
+                        let face_val = eval_nbe(&[], &empty_globals, 0, &face_inst);
+                        record_step("sqcon-boundary".into(),
+                            format!("{} @ {} @ _", con, if endpoint == I::I0 { "0" } else { "1" }),
+                            value_str(globals, global_offset, &face_val));
+                        return do_papp(globals, global_offset, face_val, (**sq_s).clone());
+                    }
+                Value::VPApp(Box::new(Value::VSqCon(data.clone(), con.clone(), args.clone(), sq_r.clone(), sq_s.clone())), Box::new(r))
+            } else {
+                Value::VPApp(Box::new(Value::VSqCon(data.clone(), con.clone(), args.clone(), sq_r.clone(), sq_s.clone())), Box::new(r))
+            }
+        },
+        // Zero-arg path constructor: VCon(d, c, []) applied to interval endpoint.
+        // A zero-arg path constructor like `line2` has type PathP, so PApp(line2, r)
+        // should reduce via the PConSig faces.
+        Value::VCon(ref data, ref con, ref args) if args.is_empty() => {
+            if let Some(endpoint) = value_to_endpoint(&r) {
+                let dts = current_dts();
+                if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
+                    && let Some(sig) = dt.pcons.iter().find(|c| &c.name == con) {
+                        let face = match endpoint {
+                            I::I0 => &sig.face0,
+                            I::I1 => &sig.face1,
+                            _ => unreachable!(),
+                        };
+                        let face_val = eval_nbe(&[], &Rc::new(RefCell::new(Vec::new())), 0, face);
+                        record_step("pcon-zero-arg-boundary".into(),
+                            format!("{} @ {}", con, if endpoint == I::I0 { "0" } else { "1" }),
+                            value_str(globals, global_offset, &face_val));
+                        return face_val;
+                    }
+            }
+            Value::VPApp(Box::new(Value::VCon(data.clone(), con.clone(), args.clone())), Box::new(r))
+        },
         other => Value::VPApp(Box::new(other), Box::new(r)),
     }
 }
@@ -502,6 +598,25 @@ pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &[Value], g
                 Box::new(motive),
                 cases.to_vec(),
                 Box::new(Value::VPCon("".into(), con.clone(), args.clone(), r.clone())),
+            ),
+        },
+        // Square constructor elimination: body has 2 interval binders.
+        // Evaluate body with args in scope, then apply to both interval args.
+        Value::VSqCon(ref data, ref con, ref args, ref r, ref s) => match cases.iter().find(|case| case.con == *con) {
+            Some(case) => {
+                let mut env2: Env = args.iter().rev().cloned().collect();
+                env2.extend_from_slice(env);
+                let body = eval_nbe(&env2, globals, global_offset, &case.body);
+                // Body is PLam-shaped with 2 interval binders: apply to both r and s.
+                let body_at_r = do_papp(globals, global_offset, body, (**r).clone());
+                let result = do_papp(globals, global_offset, body_at_r, (**s).clone());
+                record_step("elim-sqcon".into(), format!("elim _ [{}] ({} {})", con, data, con), value_str(globals, global_offset, &result));
+                result
+            }
+            None => Value::VElim(
+                Box::new(motive),
+                cases.to_vec(),
+                Box::new(Value::VSqCon("".into(), con.clone(), args.clone(), r.clone(), s.clone())),
             ),
         },
         Value::VNeutral(n) => stuck_elim(motive, cases, n),
@@ -624,6 +739,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TData(_, params) => params.iter().any(|p| uses_var_at_level(p, level)),
         Term::TCon(_, _, args) => args.iter().any(|a| uses_var_at_level(a, level)),
         Term::TPCon(_, _, args, r) => args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level),
+        Term::TSqCon(_, _, args, r, s) => args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level) || uses_var_at_level(s, level),
         Term::TElim(motive, cases, scrut) => {
             uses_var_at_level(motive, level) || uses_var_at_level(scrut, level) || cases.iter().any(|c| uses_var_at_level(&c.body, level + 1))
         }
@@ -1447,6 +1563,13 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
             args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect(),
             Box::new(quote(size, globals, global_offset, *r)),
         ),
+        Value::VSqCon(d, c, args, r, s) => Term::TSqCon(
+            d,
+            c,
+            args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect(),
+            Box::new(quote(size, globals, global_offset, *r)),
+            Box::new(quote(size, globals, global_offset, *s)),
+        ),
         Value::VElim(motive, cases, scrut) => Term::TElim(
             Box::new(quote(size, globals, global_offset, *motive)),
             quote_cases(size, globals, global_offset, cases),
@@ -1534,6 +1657,12 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
         }
         Neutral::NPApp(p, r) => {
             Term::PApp(Box::new(quote_neutral(size, globals, global_offset, *p)), Box::new(quote(size, globals, global_offset, *r)))
+        }
+        Neutral::NSqApp(p, r, s) => {
+            let pq = quote_neutral(size, globals, global_offset, *p);
+            let rq = quote(size, globals, global_offset, *r);
+            let sq = quote(size, globals, global_offset, *s);
+            Term::PApp(Box::new(Term::PApp(Box::new(pq), Box::new(rq))), Box::new(sq))
         }
         Neutral::NFst(p) => Term::TFst(Box::new(quote_neutral(size, globals, global_offset, *p))),
         Neutral::NSnd(p) => Term::TSnd(Box::new(quote_neutral(size, globals, global_offset, *p))),

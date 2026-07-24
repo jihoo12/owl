@@ -1,0 +1,9 @@
+-- Test all truncation types
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+def test_prop : Type := isProp Bool
+def test_set : Type := isSet Bool
+def test_groupoid : Type := isGroupoid Bool

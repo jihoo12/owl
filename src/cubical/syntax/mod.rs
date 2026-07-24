@@ -80,6 +80,10 @@ pub enum Term {
     /// matching how `PLam`/`PApp` separate interval abstraction from term
     /// abstraction).
     TPCon(Name, Name, Vec<Term>, Box<Term>),
+    /// Square-constructor application: `TSqCon(datatype, constructor, args, r, s)`.
+    /// `r` and `s` are the two interval arguments. `args` are the constructor's
+    /// ordinary arguments only.
+    TSqCon(Name, Name, Vec<Term>, Box<Term>, Box<Term>),
     /// Eliminator (dependent recursor) for a datatype.
     /// `TElim(motive, cases, scrutinee)`.
     /// `motive : (x : TData(d)) -> U_n`, given as a `TAbs`-shaped term
@@ -212,6 +216,37 @@ impl PConSig {
     }
 }
 
+/// Signature of a square constructor (2-dimensional HIT part).
+/// Represents a 2-cell with 4 faces: i0, i1, j0, j1.
+///
+/// The square constructor `sq : A [[ face_i0, face_i1, face_j0, face_j1 ]]`
+/// creates a 2-dimensional path. The type is:
+/// `PathP (<r> PathP (<s> A) face_i0 face_i1) face_j0 face_j1`
+///
+/// - face_i0, face_i1: points of A (s-boundaries at r=0 and r=1)
+/// - face_j0, face_j1: paths in A from face_i0 to face_i1 (r-boundaries at s=0 and s=1)
+///
+/// Boundary coherence: face_j0 and face_j1 must start/end at face_i0/face_i1:
+///   PApp(face_j0, I0) == face_i0
+///   PApp(face_j0, I1) == face_i1
+///   PApp(face_j1, I0) == face_i0
+///   PApp(face_j1, I1) == face_i1
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SqConSig {
+    pub name: Name,
+    pub arg_tys: Vec<Term>,
+    pub face_i0: Term,
+    pub face_i1: Term,
+    pub face_j0: Term,
+    pub face_j1: Term,
+}
+
+impl SqConSig {
+    pub fn arity(&self) -> usize {
+        self.arg_tys.len()
+    }
+}
+
 /// A full datatype declaration: `data Name = con1 ... | con2 ... | pcon1 ...`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Datatype {
@@ -222,6 +257,7 @@ pub struct Datatype {
     pub params: Vec<(Name, Term)>,
     pub cons: Vec<ConSig>,
     pub pcons: Vec<PConSig>,
+    pub sqcons: Vec<SqConSig>,
     /// Optional universe-level annotation: `data D : U_n = ...`
     /// When `Some(n)`, the datatype lives in `U_n` regardless of its
     /// constructor arguments. When `None`, the level is inferred as
@@ -235,6 +271,9 @@ impl Datatype {
     }
     pub fn find_pcon(&self, name: &str) -> Option<&PConSig> {
         self.pcons.iter().find(|c| c.name == name)
+    }
+    pub fn find_sqcon(&self, name: &str) -> Option<&SqConSig> {
+        self.sqcons.iter().find(|c| c.name == name)
     }
 }
 
@@ -321,6 +360,13 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
             con.clone(),
             args.iter().map(|a| shift(d, c, a)).collect(),
             b(shift(d, c, r)),
+        ),
+        Term::TSqCon(data, con, args, r, s) => Term::TSqCon(
+            data.clone(),
+            con.clone(),
+            args.iter().map(|a| shift(d, c, a)).collect(),
+            b(shift(d, c, r)),
+            b(shift(d, c, s)),
         ),
         Term::TElim(motive, cases, scrut) => Term::TElim(
             b(shift(d, c, motive)),
@@ -459,6 +505,13 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
             args.iter().map(|a| subst(j, s, a)).collect(),
             b(subst(j, s, r)),
         ),
+        Term::TSqCon(data, con, args, r, s) => Term::TSqCon(
+            data.clone(),
+            con.clone(),
+            args.iter().map(|a| subst(j, s, a)).collect(),
+            b(subst(j, s, r)),
+            b(subst(j, s, s)),
+        ),
         Term::TElim(motive, cases, scrut) => Term::TElim(
             b(subst(j, s, motive)),
             cases
@@ -577,6 +630,7 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TData(_, params) => params.iter().map(max_var).fold(-1, |m, x| m.max(x)),
         Term::TCon(_, _, args) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)),
         Term::TPCon(_, _, args, r) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(max_var(r)),
+        Term::TSqCon(_, _, args, r, s) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(max_var(r)).max(max_var(s)),
         Term::TElim(motive, cases, scrut) => {
             let mut m = max_var(motive).max(max_var(scrut));
             for case in cases {
@@ -705,6 +759,7 @@ mod tests {
                 ConSig { name: "suc".into(), arg_tys: vec![Term::TData("Nat".into(), vec![])] },
             ],
             pcons: vec![],
+            sqcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());

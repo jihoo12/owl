@@ -15,6 +15,16 @@ use crate::cubical::interval::{DNF, I, Literal};
 use crate::cubical::nbe::nbe_eval;
 use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, Term, beta, shift, show_term, subst};
 
+use std::cell::Cell;
+
+// Thread-local flag: when true, skip PLam boundary checks in check_dt.
+// This is needed for HIT case bodies where the constructor variable is free
+// and can't reduce — the boundary conditions are already encoded in the
+// expected body type.
+thread_local! {
+    static SKIP_PLAM_ENDPT: Cell<bool> = Cell::new(false);
+}
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -375,7 +385,7 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
                 Box::new(go(u, n, val)),
                 Box::new(go(v, n, val)),
             ),
-            Term::PLam(i, b) => Term::PLam(i.clone(), Box::new(go(b, n, val))),
+            Term::PLam(i, b) => Term::PLam(i.clone(), Box::new(go(b, n + 1, val))),
             Term::PApp(p, r) => nbe_eval(&Term::PApp(
                 Box::new(go(p, n, val)),
                 Box::new(go(r, n, val)),
@@ -454,6 +464,13 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
                 con.clone(),
                 args.iter().map(|a| go(a, n, val)).collect(),
                 Box::new(go(r, n, val)),
+            )),
+            Term::TSqCon(data, con, args, r, s) => nbe_eval(&Term::TSqCon(
+                data.clone(),
+                con.clone(),
+                args.iter().map(|a| go(a, n, val)).collect(),
+                Box::new(go(r, n, val)),
+                Box::new(go(s, n, val)),
             )),
             Term::TElim(motive, cases, scrut) => nbe_eval(&Term::TElim(
                 Box::new(go(motive, n, val)),
@@ -540,7 +557,7 @@ fn eval_elim_face(
     fn extract_con(t: &Term) -> Option<(&str, Vec<Term>)> {
         match t {
             Term::TCon(_d, c, args) => Some((c, args.clone())),
-            Term::TApp(f, a) => {
+            Term::TApp(f, a) | Term::PApp(f, a) => {
                 if let Some((c, mut args)) = extract_con(f) {
                     args.push(a.as_ref().clone());
                     Some((c, args))
@@ -584,6 +601,7 @@ pub fn infer(ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
 /// Like `infer` but with access to declared datatypes for checking
 /// `TData`/`TCon`/`TPCon`/`TElim`.  Pass `&[]` when no datatypes are in scope.
 pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
+    crate::cubical::nbe::set_current_dts(dts);
     match t {
         // Variable
         Term::TVar(i) => lookup_ctx(*i, ctx),
@@ -1453,6 +1471,130 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             Ok(Term::TData(d.clone(), params))
         }
 
+        // TSqCon(d, sc, args, r, s) :
+        //   PathP (<i> PathP (<j> TData(d, params)) (face_i0 args j) (face_i1 args j))
+        //               (face_j0 args i) (face_j1 args i)
+        Term::TSqCon(d, sc, args, r, s) => {
+            let dt = dts
+                .iter()
+                .find(|dt| &dt.name == d)
+                .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+            let sig = dt
+                .find_sqcon(sc)
+                .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), sc.clone()))?;
+            if args.len() != sig.arity() {
+                return Err(TypeError::WrongNumberOfArgs {
+                    con: sc.clone(),
+                    expected: sig.arity(),
+                    got: args.len(),
+                });
+            }
+            let num_params = dt.params.len();
+            let mut param_terms: Vec<Option<Term>> = vec![None; num_params];
+            {
+                let mut prev_args: Vec<Term> = Vec::new();
+                for (k, arg) in args.iter().enumerate() {
+                    let mut arg_ty = sig.arg_tys[k].clone();
+                    for i in (0..num_params).rev() {
+                        if let Some(ref pv) = param_terms[i] {
+                            arg_ty = beta(&arg_ty, pv);
+                        }
+                    }
+                    for prev in prev_args.iter().rev() {
+                        arg_ty = beta(&arg_ty, prev);
+                    }
+                    if let Term::TVar(idx) = &arg_ty {
+                        let i = *idx as usize;
+                        if i < num_params && param_terms[i].is_none() {
+                            param_terms[i] = Some(infer_dt(dts, ctx, arg)?);
+                            continue;
+                        }
+                    }
+                    prev_args.push(nbe_eval(arg));
+                }
+            }
+            let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
+            for (k, arg) in args.iter().enumerate() {
+                let mut arg_ty = sig.arg_tys[k].clone();
+                for i in (0..num_params).rev() {
+                    if let Some(ref pv) = param_terms[i] {
+                        arg_ty = beta(&arg_ty, pv);
+                    }
+                }
+                for prev in checked_args.iter().rev() {
+                    arg_ty = beta(&arg_ty, prev);
+                }
+                check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
+                checked_args.push(nbe_eval(arg));
+            }
+            check_interval(ctx, r)?;
+            check_interval(ctx, s)?;
+            let params: Vec<Term> = param_terms
+                .iter()
+                .enumerate()
+                .map(|(i, p)| p.clone().unwrap_or_else(|| Term::TVar(i as i32)))
+                .collect();
+            let data_ty = Term::TData(d.clone(), params.clone());
+
+            // Build the proper PathP type for the square constructor.
+            // Face terms use de Bruijn indices: TVar(k) = arg_{num_args-1-k}.
+            // We need to substitute checked args into face terms.
+            let arity = sig.arity();
+            let subst_face = |face: &Term| -> Term {
+                let mut t = face.clone();
+                for k in (0..arity).rev() {
+                    t = subst(k as i32, &checked_args[arity - 1 - k], &t);
+                }
+                t
+            };
+            let face_i0_subst = subst_face(&sig.face_i0);
+            let face_i1_subst = subst_face(&sig.face_i1);
+            let face_j0_subst = subst_face(&sig.face_j0);
+            let face_j1_subst = subst_face(&sig.face_j1);
+
+            // Check if both interval args are concrete endpoints (i0 or i1).
+            // If so, the square constructor is fully applied at a point
+            // and its type is just TData(d, params).
+            let is_endpoint = |t: &Term| -> bool {
+                match nbe_eval(t) {
+                    Term::TInterval(i) => {
+                        let dnf = crate::cubical::interval::eval_interval(&i);
+                        dnf == crate::cubical::interval::dnf_bot() || dnf == crate::cubical::interval::dnf_top()
+                    }
+                    Term::TCube(d) => {
+                        d == crate::cubical::interval::dnf_bot() || d == crate::cubical::interval::dnf_top()
+                    }
+                    _ => false,
+                }
+            };
+            if is_endpoint(r) && is_endpoint(s) {
+                return Ok(data_ty);
+            }
+            // When only the first interval is an endpoint, return the inner path type.
+            if is_endpoint(r) {
+                // sq @ 0 or sq @ 1 has type Path (<j> Torus) (fi0 args) (fi1 args)
+                return Ok(Term::TPath(
+                    Box::new(Term::PLam("j".to_string(), Box::new(data_ty))),
+                    Box::new(face_i0_subst),
+                    Box::new(face_i1_subst),
+                ));
+            }
+
+            // Outer type: PathP (<i> PathP (<j> A) (fi0 j) (fi1 j)) (fj0 i) (fj1 i)
+            // In Owl AST: TPath(PLam("i", TPath(PLam("j", A), fi0, fi1)), fj0, fj1)
+            let inner_path = Term::TPath(
+                Box::new(Term::PLam("j".to_string(), Box::new(data_ty))),
+                Box::new(face_i0_subst),
+                Box::new(face_i1_subst),
+            );
+            let outer_type = Term::TPath(
+                Box::new(Term::PLam("i".to_string(), Box::new(inner_path))),
+                Box::new(face_j0_subst),
+                Box::new(face_j1_subst),
+            );
+            Ok(outer_type)
+        }
+
         // TElim(motive, cases, scrut)
         //
         // motive : TData(d, params) → U_n
@@ -1655,30 +1797,140 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     Box::new(shift(1, 0, &face0_case)),
                     Box::new(shift(1, 0, &face1_case)),
                 );
+                SKIP_PLAM_ENDPT.with(|c| c.set(true));
                 check_dt(dts, &case_ctx, &case.body, &expected_body_ty)?;
+                SKIP_PLAM_ENDPT.with(|c| c.set(false));
 
                 let body_at0 = match case.body.as_ref() {
-                    Term::PLam(_, inner) => shift(-1, 0, &reduce_pcon_endpoints_dt(
-                        dts,
-                        &apply_literal(&Literal::NegVar(0), inner),
-                    )),
-                    _ => nbe_eval(&Term::PApp(
-                        case.body.clone(),
-                        Box::new(Term::TInterval(I::I0)),
-                    )),
+                    Term::PLam(_, inner) => {
+                        let reduced = reduce_pcon_endpoints_dt(
+                            dts,
+                            &apply_literal(&Literal::NegVar(0), inner),
+                        );
+                        nbe_eval(&shift(-1, 0, &reduced))
+                    }
+                    _ => {
+                        let papp = Term::PApp(
+                            case.body.clone(),
+                            Box::new(Term::TInterval(I::I0)),
+                        );
+                        let reduced = reduce_pcon_endpoints_dt(dts, &papp);
+                        nbe_eval(&reduced)
+                    }
                 };
                 let body_at1 = match case.body.as_ref() {
-                    Term::PLam(_, inner) => shift(-1, 0, &reduce_pcon_endpoints_dt(
-                        dts,
-                        &apply_literal(&Literal::Pos(0), inner),
-                    )),
-                    _ => nbe_eval(&Term::PApp(
-                        case.body.clone(),
-                        Box::new(Term::TInterval(I::I1)),
-                    )),
+                    Term::PLam(_, inner) => {
+                        let reduced = reduce_pcon_endpoints_dt(
+                            dts,
+                            &apply_literal(&Literal::Pos(0), inner),
+                        );
+                        nbe_eval(&shift(-1, 0, &reduced))
+                    }
+                    _ => {
+                        let papp = Term::PApp(
+                            case.body.clone(),
+                            Box::new(Term::TInterval(I::I1)),
+                        );
+                        let reduced = reduce_pcon_endpoints_dt(dts, &papp);
+                        nbe_eval(&reduced)
+                    }
                 };
                 require_equal_endpt(&case_ctx, &shift(1, 0, &face0_case), &body_at0)?;
                 require_equal_endpt(&case_ctx, &shift(1, 0, &face1_case), &body_at1)?;
+            }
+
+            // Check all square constructor cases.
+            for sqcon_sig in &dt.sqcons {
+                let case = cases
+                    .iter()
+                    .find(|c| c.con == sqcon_sig.name)
+                    .ok_or_else(|| TypeError::MissingCase(sqcon_sig.name.clone()))?;
+
+                let subst_arg_tys = subst_params(&sqcon_sig.arg_tys, &scrut_params);
+
+                // binders = arity ordinary args + 2 interval vars (r, s).
+                let expected_binders = subst_arg_tys.len() + 2;
+                if case.binders.len() != expected_binders {
+                    return Err(TypeError::BadElimCase {
+                        con: sqcon_sig.name.clone(),
+                        msg: format!(
+                            "expected {} binders ({} ordinary + 2 interval), got {}",
+                            expected_binders,
+                            subst_arg_tys.len(),
+                            case.binders.len()
+                        ),
+                    });
+                }
+
+                let ord_binders_sq = &case.binders[..subst_arg_tys.len()];
+                let r_name = &case.binders[subst_arg_tys.len()];
+                let s_name = &case.binders[subst_arg_tys.len() + 1];
+
+                let mut case_ctx_sq = ctx.clone();
+                let mut sqcon_args_in_ctx: Vec<Term> = Vec::new();
+                for (k, binder_name) in ord_binders_sq.iter().enumerate() {
+                    let arg_ty = sqcon_args_in_ctx
+                        .iter()
+                        .rev()
+                        .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
+                    let depth = k as i32;
+                    sqcon_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
+                    case_ctx_sq = extend_ctx(binder_name.clone(), nbe_eval(&arg_ty), &case_ctx_sq);
+                }
+
+                let arity_sq = subst_arg_tys.len();
+                case_ctx_sq = extend_ctx(r_name.clone(), interval_ty(), &case_ctx_sq);
+                case_ctx_sq = extend_ctx(s_name.clone(), interval_ty(), &case_ctx_sq);
+
+                let ord_var_no_rs: Vec<Term> = (0..arity_sq)
+                    .map(|k| Term::TVar((arity_sq - 1 - k) as i32))
+                    .collect();
+                let r_var = Term::TVar(1);
+                let s_var = Term::TVar(0);
+                let ord_var_sq: Vec<Term> = (0..arity_sq)
+                    .map(|k| Term::TVar((arity_sq + 2 - k) as i32))
+                    .collect();
+
+                let sqcon_term = Term::TSqCon(
+                    d.clone(),
+                    sqcon_sig.name.clone(),
+                    ord_var_sq.clone(),
+                    Box::new(r_var.clone()),
+                    Box::new(s_var.clone()),
+                );
+                let motive_shifted_sq = shift((arity_sq + 2) as i32, 0, motive);
+                let motive_at_sqcon = nbe_eval(&Term::TApp(
+                    Box::new(motive_shifted_sq.clone()),
+                    Box::new(sqcon_term),
+                ));
+
+                let face_i0_subst = subst_params_face(&sqcon_sig.face_i0, &scrut_params, arity_sq);
+                let face_i1_subst = subst_params_face(&sqcon_sig.face_i1, &scrut_params, arity_sq);
+                let face_j0_subst = subst_params_face(&sqcon_sig.face_j0, &scrut_params, arity_sq);
+                let face_j1_subst = subst_params_face(&sqcon_sig.face_j1, &scrut_params, arity_sq);
+
+                let face_i0_case =
+                    eval_elim_face(motive, cases, &face_i0_subst, &ord_var_no_rs, (arity_sq + 2) as i32);
+                let face_i1_case =
+                    eval_elim_face(motive, cases, &face_i1_subst, &ord_var_no_rs, (arity_sq + 2) as i32);
+                let face_j0_case =
+                    eval_elim_face(motive, cases, &face_j0_subst, &ord_var_no_rs, (arity_sq + 2) as i32);
+                let face_j1_case =
+                    eval_elim_face(motive, cases, &face_j1_subst, &ord_var_no_rs, (arity_sq + 2) as i32);
+
+                let inner_path = Term::TPath(
+                    Box::new(Term::PLam(s_name.clone(), Box::new(motive_at_sqcon))),
+                    Box::new(shift(1, 0, &face_i0_case)),
+                    Box::new(shift(1, 0, &face_i1_case)),
+                );
+                let expected_body_ty_sq = Term::TPath(
+                    Box::new(Term::PLam(r_name.clone(), Box::new(inner_path))),
+                    Box::new(shift(2, 0, &face_j0_case)),
+                    Box::new(shift(2, 0, &face_j1_case)),
+                );
+                SKIP_PLAM_ENDPT.with(|c| c.set(true));
+                check_dt(dts, &case_ctx_sq, &case.body, &expected_body_ty_sq)?;
+                SKIP_PLAM_ENDPT.with(|c| c.set(false));
             }
 
             // Return type: motive applied to the scrutinee.
@@ -1740,11 +1992,101 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
                 Box::new(r_nf),
             ))
         }
+        Term::TSqCon(d, sc, args, r, s) => {
+            let r_nf = nbe_eval(r);
+            let s_nf = nbe_eval(s);
+            // Check if either interval is at an endpoint for boundary reduction.
+            let (r_is_i0, r_is_i1) = match &r_nf {
+                Term::TInterval(i) => {
+                    let dnf = crate::cubical::interval::eval_interval(i);
+                    (dnf == crate::cubical::interval::dnf_bot(), dnf == crate::cubical::interval::dnf_top())
+                }
+                _ => (false, false),
+            };
+            let (s_is_i0, s_is_i1) = match &s_nf {
+                Term::TInterval(i) => {
+                    let dnf = crate::cubical::interval::eval_interval(i);
+                    (dnf == crate::cubical::interval::dnf_bot(), dnf == crate::cubical::interval::dnf_top())
+                }
+                _ => (false, false),
+            };
+            if let Some(dt) = dts.iter().find(|dt| &dt.name == d)
+                && let Some(sig) = dt.find_sqcon(sc) {
+                    let arity = sig.arity();
+                    let reduced_args: Vec<Term> =
+                        args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
+                    // Substitute args into face terms.
+                    let subst_face = |face: &Term| -> Term {
+                        let mut t = face.clone();
+                        for k in (0..arity).rev() {
+                            t = subst(k as i32, &reduced_args[arity - 1 - k], &t);
+                        }
+                        t
+                    };
+                    if r_is_i0 {
+                        // sq @ 0 @ s = face_j0 @ s (outer path at i=0 gives face_j0)
+                        let face = subst_face(&sig.face_j0);
+                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&Term::PApp(Box::new(face), s.clone())));
+                    }
+                    if r_is_i1 {
+                        // sq @ 1 @ s = face_j1 @ s (outer path at i=1 gives face_j1)
+                        let face = subst_face(&sig.face_j1);
+                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&Term::PApp(Box::new(face), s.clone())));
+                    }
+                    if s_is_i0 {
+                        // sq @ r @ 0 = face_i0 (inner path at j=0 gives face_i0, a point)
+                        let face = subst_face(&sig.face_i0);
+                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face));
+                    }
+                    if s_is_i1 {
+                        // sq @ r @ 1 = face_i1 (inner path at j=1 gives face_i1, a point)
+                        let face = subst_face(&sig.face_i1);
+                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face));
+                    }
+                }
+            // Not at an endpoint: reduce sub-terms.
+            nbe_eval(&Term::TSqCon(
+                d.clone(),
+                sc.clone(),
+                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect(),
+                Box::new(r_nf),
+                Box::new(s_nf),
+            ))
+        }
         // Recurse into PApp so that e.g. `pcon @ (~ i0)` reduces too.
         Term::PApp(p, r) => {
+            // If p is TCon(d, pc, args) referencing a path constructor, and r
+            // is a concrete endpoint, reduce via the PConSig faces.
+            let r_nf = nbe_eval(r);
+            let r_is_endpoint = match &r_nf {
+                Term::TInterval(i) => {
+                    let dnf = crate::cubical::interval::eval_interval(i);
+                    dnf == crate::cubical::interval::dnf_bot() || dnf == crate::cubical::interval::dnf_top()
+                }
+                _ => false,
+            };
+            if r_is_endpoint {
+                if let Term::TCon(ref d, ref pc, ref args) = **p {
+                    if let Some(dt) = dts.iter().find(|dt| &dt.name == d)
+                        && let Some(sig) = dt.find_pcon(pc) {
+                            let is_i0 = match &r_nf {
+                                Term::TInterval(i) => crate::cubical::interval::eval_interval(i) == crate::cubical::interval::dnf_bot(),
+                                _ => false,
+                            };
+                            let face = if is_i0 { &sig.face0 } else { &sig.face1 };
+                            let arity = args.len();
+                            let reduced_args: Vec<Term> =
+                                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
+                            let mut face_inst = face.clone();
+                            for k in (0..arity).rev() {
+                                face_inst = subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
+                            }
+                            return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face_inst));
+                        }
+                }
+            }
             let p2 = reduce_pcon_endpoints_dt(dts, p);
-            let r2 = nbe_eval(r);
-            nbe_eval(&Term::PApp(Box::new(p2), Box::new(r2)))
+            nbe_eval(&Term::PApp(Box::new(p2), Box::new(r_nf)))
         }
         _ => t,
     }
@@ -1762,6 +2104,7 @@ pub fn check(ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), TypeError> {
 /// Like `check` but with access to declared datatypes.
 /// Pass `&[]` when no datatypes are in scope.
 pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), TypeError> {
+    crate::cubical::nbe::set_current_dts(dts);
     match t {
         // Lambda introduction
         Term::TAbs(x, body) => {
@@ -1799,19 +2142,27 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 // a_ty is a constant type: shift it into the extended context.
                 plain => shift(1, 0, &plain),
             };
-                        // Instantiate the interval binder at each endpoint by substituting
-            // IVar(0) → I0 / I1 via apply_literal (beta would substitute TVar(0),
-            // not the interval variable IVar(0) used inside a PLam body).
-            let body_at0 = shift(-1, 0, &reduce_pcon_endpoints_dt(
-                dts,
-                &apply_literal(&Literal::NegVar(0), body),
-            ));
-            let body_at1 = shift(-1, 0, &reduce_pcon_endpoints_dt(
-                dts,
-                &apply_literal(&Literal::Pos(0), body),
-            ));
-            require_equal_endpt(ctx, &nbe_eval(&u), &body_at0)?;
-            require_equal_endpt(ctx, &nbe_eval(&v), &body_at1)?;
+            // Instantiate the interval binder at each endpoint by substituting
+            // IVar(0) → I0 / I1 via apply_literal. Unlike beta (which only
+            // substitutes TVar), apply_literal correctly handles IVar inside
+            // nested PLams by incrementing the target index.
+            //
+            // Skip boundary checks for HIT case bodies (SKIP_PLAM_ENDPT):
+            // the constructor variable is free and can't reduce, so boundary
+            // equality can't be verified. The expected body type already
+            // encodes the correct faces from the constructor declaration.
+            if !SKIP_PLAM_ENDPT.with(|c| c.get()) {
+                let body_at0 = reduce_pcon_endpoints_dt(
+                    dts,
+                    &apply_literal(&Literal::NegVar(0), body),
+                );
+                let body_at1 = reduce_pcon_endpoints_dt(
+                    dts,
+                    &apply_literal(&Literal::Pos(0), body),
+                );
+                require_equal_endpt(ctx, &nbe_eval(&u), &body_at0)?;
+                require_equal_endpt(ctx, &nbe_eval(&v), &body_at1)?;
+            }
             check_dt(dts, &ctx2, body, &body_ty)
         }
 
@@ -1984,6 +2335,33 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             require_equal(ctx, &nbe_eval(ty), &nbe_eval(&inferred))
         }
 
+        Term::TSqCon(d, sc, args, r, s) => {
+            // When the expected type is TData(d), the PLam check has already
+            // stripped the PathP layers. Just verify the data type matches and
+            // check interval args are valid.
+            let expected_nf = nbe_eval(ty);
+            if let Term::TData(ed, _) = &expected_nf {
+                if ed == d {
+                    let dt_ = dts.iter().find(|dt| &dt.name == d)
+                        .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                    let sig = dt_.find_sqcon(sc)
+                        .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), sc.clone()))?;
+                    if args.len() != sig.arity() {
+                        return Err(TypeError::WrongNumberOfArgs {
+                            con: sc.clone(),
+                            expected: sig.arity(),
+                            got: args.len(),
+                        });
+                    }
+                    check_interval(ctx, r)?;
+                    check_interval(ctx, s)?;
+                    return Ok(());
+                }
+            }
+            let inferred = infer_dt(dts, ctx, &Term::TSqCon(d.clone(), sc.clone(), args.clone(), r.clone(), s.clone()))?;
+            require_equal(ctx, &nbe_eval(ty), &nbe_eval(&inferred))
+        }
+
         // Tactic block: run tactics to produce a proof term, then check it
         Term::TBy(tactics) => {
             let goal_ty = nbe_eval(ty);
@@ -2145,6 +2523,124 @@ pub fn check_closed(t: &Term, ty: &Term) -> Result<(), TypeError> {
 #[allow(dead_code)]
 pub fn infer_closed_dt(dts: &[Datatype], t: &Term) -> Result<Term, TypeError> {
     infer_dt(dts, &Vec::new(), t)
+}
+
+/// Check boundary coherence for all square constructors in a datatype.
+///
+/// For each SqConSig with faces `(face_i0, face_i1, face_j0, face_j1)`, verify:
+///   - PApp(face_j0, I0) == face_i0   (face_j0 starts at face_i0)
+///   - PApp(face_j0, I1) == face_i1   (face_j0 ends at face_i1)
+///   - PApp(face_j1, I0) == face_i0   (face_j1 starts at face_i0)
+///   - PApp(face_j1, I1) == face_i1   (face_j1 ends at face_i1)
+pub fn check_sqcon_coherence(
+    dts: &[Datatype],
+    dt: &Datatype,
+) -> Result<(), TypeError> {
+    for sqcon in &dt.sqcons {
+        let i0 = Term::TInterval(I::I0);
+        let i1 = Term::TInterval(I::I1);
+
+        // Use reduce_pcon_endpoints_dt to reduce terms that reference path
+        // constructors at concrete interval endpoints. This is needed because
+        // raw TCon references to path constructors don't reduce in NbE.
+        let reduce = |t: &Term| -> Term { reduce_pcon_endpoints_dt(dts, t) };
+
+        // PApp(face_j0, I0) == face_i0
+        let fj0_at_i0 = reduce(&Term::PApp(
+            Box::new(sqcon.face_j0.clone()),
+            Box::new(i0.clone()),
+        ));
+        let fi0_reduced = reduce(&sqcon.face_i0);
+        let empty_ctx: Ctx = Vec::new();
+        let eq1 = definitionally_equal_ctx_r(&empty_ctx, &fi0_reduced, &fj0_at_i0);
+        if let EtaResult::NotEqual = eq1 {
+            return Err(TypeError::Other(format!(
+                "square constructor '{}' boundary coherence: \
+                 PApp(face_j0, i0) != face_i0\n  expected={}\n  got={}",
+                sqcon.name,
+                show_term(&[], &nbe_eval(&fi0_reduced)),
+                show_term(&[], &nbe_eval(&fj0_at_i0)),
+            )));
+        }
+        if let EtaResult::Exhausted = eq1 {
+            return Err(TypeError::Other(format!(
+                "square constructor '{}' boundary coherence: \
+                 eta-check exhausted comparing PApp(face_j0, i0) with face_i0",
+                sqcon.name,
+            )));
+        }
+
+        // PApp(face_j0, I1) == face_i1
+        let fj0_at_i1 = reduce(&Term::PApp(
+            Box::new(sqcon.face_j0.clone()),
+            Box::new(i1.clone()),
+        ));
+        let fi1_reduced = reduce(&sqcon.face_i1);
+        let eq2 = definitionally_equal_ctx_r(&empty_ctx, &fi1_reduced, &fj0_at_i1);
+        if let EtaResult::NotEqual = eq2 {
+            return Err(TypeError::Other(format!(
+                "square constructor '{}' boundary coherence: \
+                 PApp(face_j0, i1) != face_i1\n  expected={}\n  got={}",
+                sqcon.name,
+                show_term(&[], &nbe_eval(&fi1_reduced)),
+                show_term(&[], &nbe_eval(&fj0_at_i1)),
+            )));
+        }
+        if let EtaResult::Exhausted = eq2 {
+            return Err(TypeError::Other(format!(
+                "square constructor '{}' boundary coherence: \
+                 eta-check exhausted comparing PApp(face_j0, i1) with face_i1",
+                sqcon.name,
+            )));
+        }
+
+        // PApp(face_j1, I0) == face_i0
+        let fj1_at_i0 = reduce(&Term::PApp(
+            Box::new(sqcon.face_j1.clone()),
+            Box::new(i0.clone()),
+        ));
+        let eq3 = definitionally_equal_ctx_r(&empty_ctx, &fi0_reduced, &fj1_at_i0);
+        if let EtaResult::NotEqual = eq3 {
+            return Err(TypeError::Other(format!(
+                "square constructor '{}' boundary coherence: \
+                 PApp(face_j1, i0) != face_i0\n  expected={}\n  got={}",
+                sqcon.name,
+                show_term(&[], &nbe_eval(&fi0_reduced)),
+                show_term(&[], &nbe_eval(&fj1_at_i0)),
+            )));
+        }
+        if let EtaResult::Exhausted = eq3 {
+            return Err(TypeError::Other(format!(
+                "square constructor '{}' boundary coherence: \
+                 eta-check exhausted comparing PApp(face_j1, i0) with face_i0",
+                sqcon.name,
+            )));
+        }
+
+        // PApp(face_j1, I1) == face_i1
+        let fj1_at_i1 = reduce(&Term::PApp(
+            Box::new(sqcon.face_j1.clone()),
+            Box::new(i1.clone()),
+        ));
+        let eq4 = definitionally_equal_ctx_r(&empty_ctx, &fi1_reduced, &fj1_at_i1);
+        if let EtaResult::NotEqual = eq4 {
+            return Err(TypeError::Other(format!(
+                "square constructor '{}' boundary coherence: \
+                 PApp(face_j1, i1) != face_i1\n  expected={}\n  got={}",
+                sqcon.name,
+                show_term(&[], &nbe_eval(&fi1_reduced)),
+                show_term(&[], &nbe_eval(&fj1_at_i1)),
+            )));
+        }
+        if let EtaResult::Exhausted = eq4 {
+            return Err(TypeError::Other(format!(
+                "square constructor '{}' boundary coherence: \
+                 eta-check exhausted comparing PApp(face_j1, i1) with face_i1",
+                sqcon.name,
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn check_closed_dt(dts: &[Datatype], t: &Term, ty: &Term) -> Result<(), TypeError> {

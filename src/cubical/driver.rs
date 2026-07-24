@@ -279,6 +279,9 @@ fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<
             .map_err(|e| RunError::Type(Box::new(e)))?;
         }
     }
+    // Check boundary coherence for square constructors.
+    crate::cubical::typechecker::check_sqcon_coherence(&env.datatypes, dt)
+        .map_err(|e| RunError::Type(Box::new(e)))?;
     Ok(())
 }
 

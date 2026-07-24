@@ -100,6 +100,10 @@ pub fn term_size(t: &Term) -> usize {
         }
 
         Term::Meta(_) | Term::TBy(_) => 1,
+        Term::TSqCon(_, _, args, r, s) => {
+            1 + args.iter().map(|a| term_size(a)).sum::<usize>()
+                + term_size(r) + term_size(s)
+        }
     }
 }
 
@@ -429,9 +433,17 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
         );
     }
     if let (Term::TPath(ty1, u1, v1), Term::TPath(ty2, u2, v2)) = (t1, t2) {
+        // Normalize type families: if one is PLam and the other isn't,
+        // wrap the non-PLam side in a constant PLam so they structurally match.
+        let (ty1_eff, ty2_eff): (Box<Term>, Box<Term>) = match (ty1.as_ref(), ty2.as_ref()) {
+            (Term::PLam(_, _), Term::PLam(_, _)) => ((*ty1).clone(), (*ty2).clone()),
+            (Term::PLam(_, _), _) => ((*ty1).clone(), Box::new(Term::PLam("_".to_string(), Box::new((**ty2).clone())))),
+            (_, Term::PLam(_, _)) => (Box::new(Term::PLam("_".to_string(), Box::new((**ty1).clone()))), (*ty2).clone()),
+            _ => ((*ty1).clone(), (*ty2).clone()),
+        };
         return and_result(
             and_result(
-                eta_eq_memo(fuel, ctx, ty1, ty2, memo),
+                eta_eq_memo(fuel, ctx, &ty1_eff, &ty2_eff, memo),
                 eta_eq_memo(fuel, ctx, u1, u2, memo),
             ),
             eta_eq_memo(fuel, ctx, v1, v2, memo),

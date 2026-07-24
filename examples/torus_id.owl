@@ -1,0 +1,24 @@
+inductive Torus where
+  | base : Torus
+  | line1 : Torus [ base , base ]
+  | line2 : Torus [ base , base ]
+  | square : Torus [[ base , base , line2 , line2 ]]
+
+-- Identity function: constant motive, bodies reference constructors
+def id_torus : Torus -> Torus :=
+  fun x => match x return Torus with
+  | base => base
+  | line1 i => <j> line1 @ j
+  | line2 j => <k> line2 @ k
+  | square r s => <i> <j> square @ i @ j
+
+-- Verify: id_torus applied to concrete endpoints
+def test_base : Torus := id_torus base
+def test_line1_0 : Torus := id_torus (line1 @ i0)
+def test_line1_1 : Torus := id_torus (line1 @ i1)
+def test_line2_0 : Torus := id_torus (line2 @ i0)
+def test_line2_1 : Torus := id_torus (line2 @ i1)
+def test_sq_00 : Torus := id_torus (square @ i0 @ i0)
+def test_sq_01 : Torus := id_torus (square @ i0 @ i1)
+def test_sq_10 : Torus := id_torus (square @ i1 @ i0)
+def test_sq_11 : Torus := id_torus (square @ i1 @ i1)

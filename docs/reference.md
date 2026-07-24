@@ -419,6 +419,84 @@ inductive Susp (A : U0) where
   | merid : forall (a : A), Path (Susp A) north south
 ```
 
+#### Square Constructors (2D HIT Cells)
+
+Square constructors extend path constructors with **two-dimensional cells**.
+They specify a surface whose boundary is determined by four face terms.
+
+##### Syntax
+
+```
+con : T [[ face_i0 , face_i1 , face_j0 , face_j1 ]]
+```
+
+The four face terms define the boundary of a square:
+- `face_i0`, `face_i1`: the s-boundaries at r=0 and r=1 (points of the base type)
+- `face_j0`, `face_j1`: the r-boundaries at s=0 and s=1 (paths connecting face_i0 to face_i1)
+
+Face terms can reference the constructor's ordinary arguments via de Bruijn
+indices, and the two interval variables r, s are implicitly bound.
+
+##### Example: Torus
+
+The torus is the canonical example of a square constructor:
+
+```
+inductive Torus where
+  | base : Torus
+  | line1 : Torus [ base , base ]
+  | line2 : Torus [ base , base ]
+  | square : Torus [[ base , base , line2 , line2 ]]
+```
+
+Here `square` has:
+- `face_i0 = base` (at r=0, the square's s-boundary is the constant base)
+- `face_i1 = base` (at r=1, the square's s-boundary is also base)
+- `face_j0 = line2` (at s=0, the square's r-boundary is line2)
+- `face_j1 = line2` (at s=1, the square's r-boundary is also line2)
+
+##### Path Application on Square Constructors
+
+Square constructors are applied with two interval arguments:
+
+```
+square @ r @ s     -- apply square at interval points r and s
+```
+
+At concrete endpoints:
+
+```
+square @ i0 @ i0  =  base     -- face_i0 at s=0
+square @ i0 @ i1  =  base     -- face_i0 at s=1
+square @ i1 @ i0  =  base     -- face_i1 at s=0
+square @ i1 @ i1  =  base     -- face_i1 at s=1
+```
+
+##### Elimination of Square Constructors
+
+When pattern-matching on a type with a square constructor, the case body
+must be a **double path lambda** `<r> <s> body` where `r` and `s` are the
+two interval variables. The body type is a nested PathP:
+
+```
+PathP (<r> PathP (<s> T) face_i0 face_i1) face_j0 face_j1
+```
+
+**Example: Identity function on Torus**
+
+```
+def id_torus : Torus -> Torus :=
+  fun x => match x return Torus with
+  | base => base
+  | line1 i => <j> line1 @ j
+  | line2 j => <k> line2 @ k
+  | square r s => <i> <j> square @ i @ j
+```
+
+The square case body `<i> <j> square @ i @ j` constructs a surface that
+applies `square` at the two fresh interval variables, producing a value of
+type `Torus` for each pair of interval points.
+
 #### Path Constructor Face Terms
 
 Face terms reference constructor arguments via de Bruijn-like scoping.
@@ -1260,6 +1338,7 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
 <params>      ::= ("(" NAME ":" <term> ")")*
 <con_list>    ::= <con> ("|" <con>)*
 <con>         ::= NAME ":" <con_type> ["[" <face> "," <face> "]"]
+                | NAME ":" <con_type> "[[" <face> "," <face> "," <face> "," <face> "]]"
 <con_type>    ::= <atom> ("->" <atom>)*
 <UNIV>        ::= "U0" | "U1" | "U2" | ...
 
@@ -1512,7 +1591,33 @@ def neg : Bool -> Bool :=
   by intro b; destruct b; exact false; exact true
 ```
 
-### Example 9: Mutual Dependencies via Match
+### Example 9: Torus with Square Constructor
+
+```
+inductive Torus where
+  | base : Torus
+  | line1 : Torus [ base , base ]
+  | line2 : Torus [ base , base ]
+  | square : Torus [[ base , base , line2 , line2 ]]
+
+-- Identity function on Torus
+def id_torus : Torus -> Torus :=
+  fun x => match x return Torus with
+  | base => base
+  | line1 i => <j> line1 @ j
+  | line2 j => <k> line2 @ k
+  | square r s => <i> <j> square @ i @ j
+```
+
+The square case body `<i> <j> square @ i @ j` constructs a surface by
+applying the square constructor at the two fresh interval variables. The
+type checker verifies this matches the expected nested PathP type:
+
+```
+PathP (<r> PathP (<s> Torus) base base) line2 line2
+```
+
+### Example 10: Mutual Dependencies via Match
 
 ```
 inductive Nat where

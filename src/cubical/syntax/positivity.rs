@@ -113,6 +113,13 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
         }
         Term::Meta(_) => Ok(()),
         Term::TBy(_) => Ok(()),
+        Term::TSqCon(_, _, args, r, s) => {
+            for a in args {
+                check_positivity_in(target, a, negative)?;
+            }
+            check_positivity_in(target, r, negative)?;
+            check_positivity_in(target, s, negative)
+        }
     }
 }
 
@@ -185,6 +192,7 @@ mod tests {
                 ConSig { name: "suc".into(), arg_tys: vec![Term::TData("Nat".into(), vec![])] },
             ],
             pcons: vec![],
+            sqcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -206,6 +214,7 @@ mod tests {
                 },
             ],
             pcons: vec![],
+            sqcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -225,6 +234,7 @@ mod tests {
                 )],
             }],
             pcons: vec![],
+            sqcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -244,6 +254,7 @@ mod tests {
                 )],
             }],
             pcons: vec![],
+            sqcons: vec![],
             universe_level: None,
         };
         let err = check_datatype_positivity(&dt).unwrap_err();
@@ -269,6 +280,7 @@ mod tests {
                 )],
             }],
             pcons: vec![],
+            sqcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -292,6 +304,7 @@ mod tests {
                 )],
             }],
             pcons: vec![],
+            sqcons: vec![],
             universe_level: None,
         };
         let err = check_datatype_positivity(&dt).unwrap_err();
@@ -312,6 +325,7 @@ mod tests {
                 )],
             }],
             pcons: vec![],
+            sqcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -329,6 +343,7 @@ mod tests {
                 face0: Term::TCon("S1".into(), "base".into(), vec![]),
                 face1: Term::TCon("S1".into(), "base".into(), vec![]),
             }],
+            sqcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
