@@ -43,7 +43,7 @@
 
 - [x] **System types as first-class types** — `[phi => a, psi => b]` as a type (not just in comp/hfill). Added `TSystemType(System)` term variant, `VSystemType(DNFSystem)` value, full eval/quote/parser/pretty-printing. Coherence checking via `dnf_meet` on overlapping faces. Parser: `[phi => A, psi => B]` syntax.
 
-- [ ] **Regularity** — `comp A [ ] base` (empty system) should reduce to `base`. Currently may not compute.
+- [x] **Regularity** — `comp A [ ] base` (empty system) reduces to `base`. Empty systems in `hcomp`, `comp`, `fill`, and `hfill` all reduce: `fill` and `hfill` produce constant paths. Empty systems arise when all faces evaluate to ⊥ (e.g. `[0 => ...]`).
 
 ### 2. Type Theory Features
 
