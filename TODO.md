@@ -27,6 +27,20 @@
 
 - [x] Debug improvements (`-d` flag) — `process_def` logs definition name on entry. `ContextualError` wraps TypeError with definition name. Trace printing distinguishes success/error cases. Debug scope output shows term, expected type, and context depth.
 
+- [x] Prop and SSet universes — `TProp` (impredicative, at U0) and `TSSet` (predicative, at U1) added to Term/Value enums. Prop is closed under Pi/Sigma/Path when both sides are Prop (impredicativity). SSet is predicative. Parser, pretty-printer, NbE, positivity, and cumulativity all handle the new constructors. `TUniv(0)` cumulates into `TProp` via cumulativity check.
+
+- [x] Universe lifting/lowering — `TLower(t)` and `Tlift(t)` (lower/lift) for moving terms between universe levels. Parser, pretty-printer, NbE, equality, and positivity all handle the new constructors. `lower` at U0 reduces to identity.
+
+- [x] Cumulativity for inductive types — `TData(d, ps) <= TData(d, ps')` when names match and parameters are checked covariantly. `TPath` cumulativity in all three components. Implemented in `cumulativity_check`.
+
+- [x] Termination / Guard checking — Structural recursion guard in `termination.rs`. Recursive calls in TElim arms must pass a case binder (de Bruijn index < binder_count) as the scrutinee. Rejects non-structural recursion with `TerminationViolation` error. Wired into `infer_dt` before return type checking.
+
+- [x] Induction-induction (mutual inductive types) — `inductive A where ... | with inductive B where ...` syntax. `Decl::DataMutual(Vec<Datatype>)` variant. Forward references: all mutual datatypes registered before constructor parsing. Driver `process_data_mutual` does two-phase processing (register all, then check constructors). Parser `sync_from_env` handles `DataMutual`.
+
+- [x] Induction-recursion — `inductive D where ... | with f : T := e` syntax. `Decl::DataWithFunc { dt, func_name, func_ty, func_val }` variant. Function name added to parser `global_env` for self-reference. Driver `process_data_with_func` calls `process_data` then `process_def`. Parser `sync_from_env` adds func_name to global_env for subsequent declarations.
+
+- [x] Stress test and documentation — `examples/stress_mutual_and_ir.owl` exercises all 5 new features. `docs/reference.md` updated with Prop/SSet, lift/lower, mutual inductives, induction-recursion, termination guard, and worked examples.
+
 ---
 
 ## Remaining — Cubical Type Theory Completeness
@@ -47,31 +61,28 @@
 
 ### 2. Type Theory Features
 
-- **Universe polymorphism** — Already has stratified U0, U1, U2... Could add:
-  - Impredicative universe (Prop) for proof-irrelevant types
-  - Universe of small types (sSet)
-  - Cumulativity constraints beyond simple level comparison
-  - Universe lifting/lowering operations
+- **Universe polymorphism** — Already has stratified U0, U1, U2...
+
+- [x] **Universe lifting/lowering** — `TLower`/`TLift` for moving terms between universe levels.
+
+- [x] **Impredicative Prop** — `TProp` at U0, closed under Pi/Sigma/Path when both sides are Prop.
+
+- [x] **SSet (strict sets)** — `TSSet` at U1, predicative.
 
 - **Cumulativity** — `A : U_n` and `U_n : U_m` when `n <= m`. Currently basic, could be extended with:
   - Cumulativity for Sigma/Pi types
   - Cumulativity for record types
-  - Cumulativity for inductive types
 
-- **Induction-induction** — Mutual definition of a type family and a type indexed by it. Needed for:
-  - Well-founded recursion
-  - Custom induction principles
-  - Complex algebraic structures
+- [x] **Cumulativity for inductive types** — `TData(d, ps) <= TData(d, ps')` with covariant parameter checking.
 
-- **Induction-recursion** — Definition of a type simultaneously with a function on it. Needed for:
-  - Universe definitions
-  - Modal type theory
-  - Custom elimination principles
+- [x] **Induction-induction** — Mutual inductive types via `with inductive` syntax. Forward references, multi-way mutual blocks.
 
-- **Termination / Guard checking** — Currently no termination checking. Add:
-  - Structural recursion checking
-  - Well-founded recursion support
-  - Coinduction for infinite data types
+- [x] **Induction-recursion** — Simultaneous datatype + function definition via `with f : T := e` syntax.
+
+- [x] **Termination / Guard checking** — Structural recursion guard via `termination.rs`. Recursive calls must pass a case binder as scrutinee.
+
+- **Well-founded recursion** — Not yet implemented.
+- **Coinduction** — For infinite data types, not yet implemented.
 
 ### 3. HIT Improvements
 
