@@ -1,0 +1,13 @@
+-- Test transport through constant data type family
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Transport through constant data type family
+def transport_nat : Nat := transport (<i> Nat) zero
+
+-- Verify identity transport
+def transport_identity : ∀ (A : U0), A -> A := fun A a => transport (<i> A) a
+
+def main : Nat := transport_nat

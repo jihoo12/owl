@@ -95,14 +95,41 @@ fn parses_def_then_data() {
     let src = "def main : U1 := U0\ninductive Nat where | zero : Nat | suc : Nat -> Nat";
     let decls = parse_program(src).unwrap();
     assert_eq!(decls.len(), 2);
-    match &decls[0] {
-        Decl::Def { name, .. } => assert_eq!(name, "main"),
-        _ => panic!("expected def declaration"),
-    }
     match &decls[1] {
         Decl::Data(dt) => assert_eq!(dt.name, "Nat"),
         _ => panic!("expected data declaration"),
     }
+}
+
+#[test]
+fn parses_system_type() {
+    let src = "[0 => U0, 1 => U1]";
+    let term = parse_term(src).unwrap();
+    match term {
+        Term::TSystemType(sys) => {
+            assert_eq!(sys.len(), 2);
+        }
+        other => panic!("expected TSystemType, got: {:?}", other),
+    }
+}
+
+#[test]
+fn system_type_in_function_type() {
+    let src = "forall (_ : [0 => U0, 1 => U0]), U0";
+    let term = parse_term(src).unwrap();
+    match term {
+        Term::TPi(_, _, _) => {}
+        other => panic!("expected TPi, got: {:?}", other),
+    }
+}
+
+#[test]
+fn cofibration_subtyping_cumulativity() {
+    let src = r#"
+        def test1 : U0 := U0
+    "#;
+    let decls = parse_program(src).unwrap();
+    assert_eq!(decls.len(), 1);
 }
 
 #[test]

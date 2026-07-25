@@ -133,6 +133,12 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             show_term(env, phi),
             show_term(env, a)
         ),
+        Term::TSystemType(sys) => {
+            let parts: Vec<String> = sys.iter()
+                .map(|(phi, a)| format!("{} => {}", show_term(env, phi), show_term(env, a)))
+                .collect();
+            format!("[{}]", parts.join(", "))
+        }
         Term::TGlueElem(phi, t, a) => format!(
             "glue [{}] ({}) {}",
             show_term(env, phi),

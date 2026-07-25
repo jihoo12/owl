@@ -55,6 +55,9 @@ pub enum Term {
     TGlueElem(Box<Term>, Box<Term>, Box<Term>),
     TUnglue(Box<Term>, Box<Term>, Box<Term>),
     TPartial(Box<Term>, Box<Term>),
+    /// System type former: `[phi => A, psi => B]`.
+    /// Represents a partial type family — on face φ the type is A, on face ψ the type is B.
+    TSystemType(System),
     TSigma(Name, Box<Term>, Box<Term>),
     TPair(Box<Term>, Box<Term>),
     TFst(Box<Term>),
@@ -344,6 +347,13 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TPartial(phi, a) => {
             Term::TPartial(b(shift(d, c, phi)), b(shift(d, c, a)))
         }
+        Term::TSystemType(sys) => {
+            Term::TSystemType(
+                sys.iter()
+                    .map(|(phi, a)| (shift(d, c, phi), shift(d, c, a)))
+                    .collect(),
+            )
+        }
         Term::TSigma(x, a, body) => {
             Term::TSigma(x.clone(), b(shift(d, c, a)), b(shift(d, c + 1, body)))
         }
@@ -490,6 +500,13 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
         Term::TPartial(phi, a) => {
             Term::TPartial(b(subst(j, s, phi)), b(subst(j, s, a)))
         }
+        Term::TSystemType(sys) => {
+            Term::TSystemType(
+                sys.iter()
+                    .map(|(phi, a)| (subst(j, s, phi), subst(j, s, a)))
+                    .collect(),
+            )
+        }
         Term::TSigma(x, a, body) => {
             let s1 = shift(1, 0, s);
             Term::TSigma(x.clone(), b(subst(j, s, a)), b(subst(j + 1, &s1, body)))
@@ -631,6 +648,13 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TGlueElem(phi, t, a) => max_var(phi).max(max_var(t)).max(max_var(a)),
         Term::TUnglue(phi, te, g) => max_var(phi).max(max_var(te)).max(max_var(g)),
         Term::TPartial(phi, a) => max_var(phi).max(max_var(a)),
+        Term::TSystemType(sys) => {
+            let mut m = -1;
+            for (phi, a) in sys {
+                m = m.max(max_var(phi)).max(max_var(a));
+            }
+            m
+        }
         Term::TSigma(_, a, b) => max_var(a).max(max_var(b) - 1).max(-1),
         Term::TPair(a, b) => max_var(a).max(max_var(b)),
         Term::TFst(p) => max_var(p),

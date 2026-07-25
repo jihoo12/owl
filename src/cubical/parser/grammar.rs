@@ -732,7 +732,9 @@ impl Parser {
         }
 
         // [_ | phi] A — partial element type (bracket syntax)
+        // [phi => A, psi => B] — system type (bracket syntax in type position)
         if self.peek().kind == TokenKind::LBracket {
+            // Try [_ | phi] first
             if let Some(TokenKind::Ident(name)) = self.tokens.get(self.pos + 1).map(|t| &t.kind) {
                 if name == "_" {
                     if let Some(TokenKind::Pipe) = self.tokens.get(self.pos + 2).map(|t| &t.kind) {
@@ -742,6 +744,14 @@ impl Parser {
                         let a = self.parse_prefix_or_atom()?;
                         return Ok(Term::TPartial(Box::new(phi), Box::new(a)));
                     }
+                }
+            }
+            // Try [phi => A, ...] — system type
+            {
+                let save = self.pos;
+                match self.try_parse_system_type() {
+                    Ok(sys) => return Ok(sys),
+                    Err(_) => self.pos = save,
                 }
             }
         }
@@ -897,6 +907,26 @@ impl Parser {
                 name
             )))
         }
+    }
+
+    /// Try to parse a system type: [phi => A, psi => B]
+    /// Expects current position to be at the opening bracket.
+    fn try_parse_system_type(&mut self) -> Result<Term, ParseError> {
+        self.expect(TokenKind::LBracket, "expected '[' for system type")?;
+        let mut sys = Vec::new();
+        loop {
+            let phi = self.parse_join()?;
+            self.expect(TokenKind::FatArrow, "expected '=>' in system type")?;
+            let a = self.parse_prefix_or_atom()?;
+            sys.push((phi, a));
+            if self.consume(&TokenKind::Comma) {
+                continue;
+            } else {
+                break;
+            }
+        }
+        self.expect(TokenKind::RBracket, "expected ']' after system type")?;
+        Ok(Term::TSystemType(sys))
     }
 
     fn try_parse_binder_header(&mut self) -> Result<Option<(Vec<Name>, Term)>, ParseError> {

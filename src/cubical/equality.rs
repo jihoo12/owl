@@ -45,6 +45,8 @@ pub fn term_size(t: &Term) -> usize {
 
         Term::TPartial(a, u) => 1 + term_size(a) + term_size(u),
 
+        Term::TSystemType(sys) => 1 + sys.iter().map(|(phi, a)| term_size(phi) + term_size(a)).sum::<usize>(),
+
         Term::THComp(a, sys, u0) => {
             let mut s = 1 + term_size(a) + term_size(u0);
             for (phi, t) in sys {

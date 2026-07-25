@@ -188,6 +188,25 @@ fn neg_lit(l: &Literal) -> Literal {
     }
 }
 
+/// Check face implication: does `a ⇒ b`?
+/// In DNF terms, every cube in `a` must be covered by (a subset of) some cube in `b`.
+/// `dnf_bot() ⇒ anything` is true (vacuously).
+/// `anything ⇒ dnf_top()` is true (top covers everything).
+pub fn dnf_leq(a: &DNF, b: &DNF) -> bool {
+    // ⊥ ⇒ anything
+    if a.cubes.is_empty() {
+        return true;
+    }
+    // anything ⇒ ⊤ (single empty cube)
+    if b.cubes.len() == 1 && b.cubes.iter().next().unwrap().is_empty() {
+        return true;
+    }
+    // For each cube ca in a, there must exist a cube cb in b with ca ⊆ cb.
+    a.cubes.iter().all(|ca| {
+        b.cubes.iter().any(|cb| cb.is_subset(ca))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +219,43 @@ mod tests {
         ));
 
         assert_eq!(dnf, dnf_bot());
+    }
+
+    #[test]
+    fn leq_bot_implies_anything() {
+        assert!(dnf_leq(&dnf_bot(), &eval_interval(&I::Var(0))));
+    }
+
+    #[test]
+    fn leq_anything_implies_top() {
+        assert!(dnf_leq(&eval_interval(&I::Var(0)), &dnf_top()));
+    }
+
+    #[test]
+    fn leq_top_implies_bot_is_false() {
+        assert!(!dnf_leq(&dnf_top(), &dnf_bot()));
+    }
+
+    #[test]
+    fn leq_same_variable() {
+        let v = eval_interval(&I::Var(0));
+        assert!(dnf_leq(&v, &v));
+    }
+
+    #[test]
+    fn leq_meet_implies_one_operand() {
+        // (i0 ∧ i1) ⇒ i0
+        let meet = eval_interval(&I::Meet(Box::new(I::Var(0)), Box::new(I::Var(1))));
+        let v0 = eval_interval(&I::Var(0));
+        assert!(dnf_leq(&meet, &v0));
+    }
+
+    #[test]
+    fn leq_join_of_implies_each() {
+        // i0 ⇒ (i0 ∨ i1)
+        let v0 = eval_interval(&I::Var(0));
+        let join = eval_interval(&I::Join(Box::new(I::Var(0)), Box::new(I::Var(1))));
+        assert!(dnf_leq(&v0, &join));
     }
 
     #[test]

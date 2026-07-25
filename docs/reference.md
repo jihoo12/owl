@@ -177,11 +177,39 @@ for constructing Glue types and defining cubical subtyping.
 
 **Type inference**: `[_ | phi] A : U_n` when `A : U_n`.
 
+**Cofibration subtyping**: `[_ | phi] A` is a subtype of `[_ | psi] A` when
+`phi <= psi` (i.e., `phi` implies `psi`). This is checked via DNF face
+implication. For example, `[_ | i1 /\ i0] A` is a subtype of `[_ | i1] A`
+because `i1 /\ i0` implies `i1`.
+
 **Example:**
 
 ```
 -- A partial element defined on face i1
 def partial_one : [_ | i1] Nat := suc zero
+```
+
+### System Types
+
+```
+[phi => A, psi => B]    -- system type
+```
+
+System types represent partial functions — types that map faces to types.
+Each entry `phi => A` specifies a face condition `phi` and a type `A` that
+applies when that face is active. System types are first-class types that
+live in a universe.
+
+**Type inference**: `[phi => A, psi => B] : U_n` when all `A_i : U_n` and
+all faces are interval expressions. The system must be **coherent**: for
+any two entries, their types must agree on the intersection of their faces.
+This is checked via `dnf_meet`.
+
+**Example:**
+
+```
+-- A system type over two faces
+def sys_type : [i1 => Nat, i0 => Nat] := [i1 => Nat, i0 => Nat]
 ```
 
 ### Equivalence Type
@@ -713,6 +741,24 @@ Interval expressions support:
 Interval expressions are evaluated to Disjunctive Normal Form (DNF) for
 face restrictions.
 
+### Face Implication
+
+Given two DNF face conditions `a` and `b`, face implication `a ⇒ b` checks
+whether `a` logically implies `b`. In DNF, this means: for every cube `ca`
+in `a`, there exists a cube `cb` in `b` such that `cb ⊆ ca` (every literal
+in `cb` is also in `ca`).
+
+Face implication is used for:
+- **Cofibration subtyping**: `[_ | phi] A <= [_ | psi] A` when `phi ⇒ psi`
+- **System coherence**: checking that system types agree on overlapping faces
+- **Face lattice reasoning**: `i1 ⇒ i0 /\ i1` holds, `i1 /\ i0 ⇒ i0` holds
+
+**Examples:**
+- `i1 ⇒ i1` — true (always implies itself)
+- `i1 /\ i0 ⇒ i1` — true (conjunction implies its components)
+- `i0 ⇒ i1` — true (false implies anything)
+- `i1 ⇒ i0` — false (true does not imply false)
+
 ### Face Restrictions
 
 Face restrictions are used in homogeneous composition and Glue types.
@@ -917,6 +963,18 @@ unglue phi te g
 ```
 
 Extracts the underlying `A`-component from a Glue-typed value `g`.
+
+### Glue Element β-Reduction
+
+Glue elements reduce at interval endpoints:
+
+| Form | Reduction |
+| ----- | --------- |
+| `VGlueElem(phi, t, a) @ 0` | `a` (the base component) |
+| `VGlueElem(phi, t, a) @ 1` | `t` (the cap component) |
+
+These reductions allow glue elements to be unrolled at the endpoints of the
+interval, which is essential for Kan operations and univalence.
 
 ### Equivalences
 
@@ -1330,6 +1388,9 @@ the constructor's arguments are substituted for the binders.
 | `transport p x` (Pi type) | `fun arg => transport (...) (x arg)` |
 | `transport p x` (Path type) | Path lambda over transported body |
 | `transport p x` (Sigma type) | Pair of transported components |
+| `transport p x` (Data type) | Each constructor argument transported through substituted type |
+| `transport p x` (PCon) | Point constructor with transported arguments |
+| `transport p x` (SqCon) | Square constructor with transported arguments |
 
 ### Kan Operation Reductions
 
@@ -1464,6 +1525,10 @@ from scope) or an arbitrary term as the scrutinee.
 **System syntax**: hcomp, comp, fill, and hfill accept either a
 multi-face system `[phi1 => tube1, phi2 => tube2]` or a legacy
 single-face form `phi tube`.
+
+**System types**: `[phi => A, psi => B]` can be used as a type (not just
+in Kan operations). System types represent partial functions and must be
+coherent — overlapping faces must agree on their types.
 
 ---
 

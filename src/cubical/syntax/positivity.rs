@@ -77,6 +77,13 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             check_positivity_in(target, phi, negative)?;
             check_positivity_in(target, a, negative)
         }
+        Term::TSystemType(sys) => {
+            for (phi, a) in sys {
+                check_positivity_in(target, phi, negative)?;
+                check_positivity_in(target, a, negative)?;
+            }
+            Ok(())
+        }
         Term::THComp(a, sys, u0)
         | Term::TComp(a, sys, u0)
         | Term::TFill(a, sys, u0)

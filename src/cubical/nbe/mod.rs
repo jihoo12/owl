@@ -79,6 +79,7 @@ pub enum Value {
     VElim(Box<Value>, Vec<ElimCase>, Box<Value>),
     VGlue(Box<Value>, DNF, Box<Value>),
     VPartial(Box<Value>, Box<Value>),
+    VSystemType(DNFSystem),
     VGlueElem(DNF, Box<Value>, Box<Value>),
     VUnglue(DNF, Box<Value>, Box<Value>),
     VEquiv(Box<Value>, Box<Value>),
@@ -314,14 +315,28 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
                 Value::VPartial(Box::new(a_val), Box::new(Value::VCube(phi_dnf)))
             }
         }
+        Term::TSystemType(sys) => {
+            let mut entries: DNFSystem = Vec::new();
+            for (phi, a) in sys {
+                let phi_val = eval_nbe(env, globals, global_offset, phi);
+                let a_val = eval_nbe(env, globals, global_offset, a);
+                let phi_dnf = value_to_dnf(phi_val);
+                entries.push((phi_dnf, a_val));
+            }
+            Value::VSystemType(entries)
+        }
         Term::TGlueElem(phi, t, a) => {
-            let phi = value_to_dnf(eval_nbe(env, globals, global_offset, phi));
-            if phi == dnf_top() {
+            let phi_dnf = value_to_dnf(eval_nbe(env, globals, global_offset, phi));
+            let a_val = eval_nbe(env, globals, global_offset, a);
+            if phi_dnf == dnf_top() {
+                // phi=1: glue [1, t, a] = t
+                // But if t = unglue(te, a), then unglue(glue [1, unglue(te, a), a]) = a
+                // (Glue/unglue β for top face).
                 eval_nbe(env, globals, global_offset, t)
-            } else if phi == dnf_bot() {
-                eval_nbe(env, globals, global_offset, a)
+            } else if phi_dnf == dnf_bot() {
+                a_val
             } else {
-                Value::VGlueElem(phi, Box::new(eval_nbe(env, globals, global_offset, t)), Box::new(eval_nbe(env, globals, global_offset, a)))
+                Value::VGlueElem(phi_dnf, Box::new(eval_nbe(env, globals, global_offset, t)), Box::new(a_val))
             }
         }
         Term::TUnglue(phi, te, g) => {
@@ -555,6 +570,26 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             }
             Value::VPApp(Box::new(Value::VCon(data.clone(), con.clone(), args.clone())), Box::new(r))
         },
+        // VGlueElem endpoint reduction:
+        //   VGlueElem(phi, t, a) @ 0 = a       (the base A-element)
+        //   VGlueElem(phi, t, a) @ 1 = t       (the cap B-element)
+        Value::VGlueElem(ref phi, ref t, ref a) => {
+            if let Some(endpoint) = value_to_endpoint(&r) {
+                match endpoint {
+                    I::I0 => {
+                        record_step("glue-elem-papp-0".into(), "glue-elem _ _ _ @ 0".into(), value_str(globals, global_offset, a));
+                        (**a).clone()
+                    }
+                    I::I1 => {
+                        record_step("glue-elem-papp-1".into(), "glue-elem _ _ _ @ 1".into(), value_str(globals, global_offset, t));
+                        (**t).clone()
+                    }
+                    _ => Value::VPApp(Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())), Box::new(r)),
+                }
+            } else {
+                Value::VPApp(Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())), Box::new(r))
+            }
+        },
         other => Value::VPApp(Box::new(other), Box::new(r)),
     }
 }
@@ -692,6 +727,30 @@ pub fn do_transport(env: &[Value], globals: &Globals, global_offset: usize, p: V
                     })
                 }
 
+                // Data type transport: transport through a constant data type family
+                // (λi. D params) where D doesn't depend on i.
+                // Transport a constructor by transporting each argument through its type.
+                (Value::VData(d0, _), Value::VData(d1, _)) if d0 == d1 => {
+                    match x {
+                        Value::VCon(ref d, ref con, ref args) if d == d0 => {
+                            let result = transport_data_con(env, globals, global_offset, i_name, clos, con, args);
+                            record_step("transport-data".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
+                            result
+                        }
+                        Value::VPCon(ref d, ref con, ref args, ref r) if d == d0 => {
+                            let result = transport_data_pcon(env, globals, global_offset, i_name, clos, con, args, r);
+                            record_step("transport-data-pcon".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
+                            result
+                        }
+                        Value::VSqCon(ref d, ref con, ref args, ref r, ref s) if d == d0 => {
+                            let result = transport_data_sqcon(env, globals, global_offset, i_name, clos, con, args, r, s);
+                            record_step("transport-data-sqcon".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
+                            result
+                        }
+                        _ => Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(x)),
+                    }
+                }
+
                 _ => Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(x)),
             }
         }
@@ -744,6 +803,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TGlueElem(phi, t, a) => uses_var_at_level(phi, level) || uses_var_at_level(t, level) || uses_var_at_level(a, level),
         Term::TUnglue(phi, te, g) => uses_var_at_level(phi, level) || uses_var_at_level(te, level) || uses_var_at_level(g, level),
         Term::TPartial(phi, a) => uses_var_at_level(phi, level) || uses_var_at_level(a, level),
+        Term::TSystemType(sys) => sys.iter().any(|(phi, a)| uses_var_at_level(phi, level) || uses_var_at_level(a, level)),
         Term::TSigma(_, a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level + 1),
         Term::TPair(a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level),
         Term::TFst(p) => uses_var_at_level(p, level),
@@ -865,6 +925,186 @@ fn transport_sigma_pair(
     ));
 
     Value::VPair(Box::new(a_prime), Box::new(b_prime))
+}
+
+/// Transport a constructor `con c a₁ ... aₙ` through a constant data type family.
+///
+/// Strategy: build the constructor's full Pi type from the Datatype definition,
+/// transport the entire function through the family, then apply to the original
+/// arguments. This works because:
+///   transport (λi. D) (con c a₁ ... aₙ) = con c (trans₁ a₁) ... (transₙ aₙ)
+/// where transₖ transports argument k through its type (instantiated with
+/// the already-transported earlier arguments).
+fn transport_data_con(
+    env: &[Value],
+    globals: &Globals,
+    global_offset: usize,
+    i_name: &str,
+    clos: &IClosure,
+    con_name: &str,
+    args: &[Value],
+) -> Value {
+    let dts = current_dts();
+    let d_name = match clos.apply_i(I::I0) {
+        Value::VData(name, _) => name,
+        _ => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCon("".into(), con_name.into(), args.to_vec()))),
+    };
+    let dt = match dts.iter().find(|dt| dt.name == d_name) {
+        Some(dt) => dt.clone(),
+        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec()))),
+    };
+    let con_sig = match dt.find_con(con_name) {
+        Some(sig) => sig.clone(),
+        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec()))),
+    };
+
+    let n = con_sig.arity();
+    if n == 0 {
+        return Value::VCon(d_name.clone(), con_name.into(), vec![]);
+    }
+
+    // Build the constructor's Pi type: Π(a₁:A₁). Π(a₂:A₂(a₁)). ... D
+    // Then transport it through the family and apply to original args.
+    let mut result_args: Vec<Value> = Vec::new();
+    let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
+
+    // We need to transport each argument through its type.
+    // The type of argument k may depend on args[0..k].
+    // We build the type family (λi. Aₖ) for each k, substituting already-transported args.
+    for k in 0..n {
+        // Build the k-th type with already-transported args substituted in
+        let ty_k = substed_tys[k].clone();
+        // Shift to account for the Pi binders we'll abstract over
+        let mut ty_shifted = ty_k;
+        for j in (0..=k).rev() {
+            ty_shifted = shift(1, j as i32, &ty_shifted);
+        }
+        // Replace bound vars (0..k) with already-transported args as terms
+        for j in 0..k {
+            let arg_term = quote(env.len(), globals, global_offset, result_args[j].clone());
+            ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+        }
+        // ty_shifted now has: outermost binder for interval i, then variable 0 is arg k
+        // Wrap as (λi. ty_shifted) with var 0 being the interval
+        let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+        let transported = eval_nbe(env, globals, global_offset, &Term::TTransport(
+            Box::new(ty_fam),
+            Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
+        ));
+        result_args.push(transported);
+    }
+
+    Value::VCon(d_name.clone(), con_name.into(), result_args)
+}
+
+/// Transport a path constructor `pcon c a₁ ... aₙ r` through a constant data type family.
+/// Same strategy as transport_data_con, but also keeps the interval argument r unchanged.
+fn transport_data_pcon(
+    env: &[Value],
+    globals: &Globals,
+    global_offset: usize,
+    i_name: &str,
+    clos: &IClosure,
+    con_name: &str,
+    args: &[Value],
+    r: &Value,
+) -> Value {
+    let dts = current_dts();
+    let d_name = match clos.apply_i(I::I0) {
+        Value::VData(name, _) => name,
+        _ => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VPCon("".into(), con_name.into(), args.to_vec(), Box::new(r.clone())))),
+    };
+    let dt = match dts.iter().find(|dt| dt.name == d_name) {
+        Some(dt) => dt.clone(),
+        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VPCon(d_name.clone(), con_name.into(), args.to_vec(), Box::new(r.clone())))),
+    };
+    let con_sig = match dt.find_pcon(con_name) {
+        Some(sig) => sig.clone(),
+        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VPCon(d_name.clone(), con_name.into(), args.to_vec(), Box::new(r.clone())))),
+    };
+
+    let n = con_sig.arity();
+    if n == 0 {
+        return Value::VPCon(d_name.clone(), con_name.into(), vec![], Box::new(r.clone()));
+    }
+
+    let mut result_args: Vec<Value> = Vec::new();
+    let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
+
+    for k in 0..n {
+        let ty_k = substed_tys[k].clone();
+        let mut ty_shifted = ty_k;
+        for j in (0..=k).rev() {
+            ty_shifted = shift(1, j as i32, &ty_shifted);
+        }
+        for j in 0..k {
+            let arg_term = quote(env.len(), globals, global_offset, result_args[j].clone());
+            ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+        }
+        let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+        let transported = eval_nbe(env, globals, global_offset, &Term::TTransport(
+            Box::new(ty_fam),
+            Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
+        ));
+        result_args.push(transported);
+    }
+
+    Value::VPCon(d_name.clone(), con_name.into(), result_args, Box::new(r.clone()))
+}
+
+/// Transport a square constructor `sqcon c a₁ ... aₙ r s` through a constant data type family.
+fn transport_data_sqcon(
+    env: &[Value],
+    globals: &Globals,
+    global_offset: usize,
+    i_name: &str,
+    clos: &IClosure,
+    con_name: &str,
+    args: &[Value],
+    r: &Value,
+    s: &Value,
+) -> Value {
+    let dts = current_dts();
+    let d_name = match clos.apply_i(I::I0) {
+        Value::VData(name, _) => name,
+        _ => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VSqCon("".into(), con_name.into(), args.to_vec(), Box::new(r.clone()), Box::new(s.clone())))),
+    };
+    let dt = match dts.iter().find(|dt| dt.name == d_name) {
+        Some(dt) => dt.clone(),
+        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VSqCon(d_name.clone(), con_name.into(), args.to_vec(), Box::new(r.clone()), Box::new(s.clone())))),
+    };
+    let con_sig = match dt.find_sqcon(con_name) {
+        Some(sig) => sig.clone(),
+        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VSqCon(d_name.clone(), con_name.into(), args.to_vec(), Box::new(r.clone()), Box::new(s.clone())))),
+    };
+
+    let n = con_sig.arity();
+    if n == 0 {
+        return Value::VSqCon(d_name.clone(), con_name.into(), vec![], Box::new(r.clone()), Box::new(s.clone()));
+    }
+
+    let mut result_args: Vec<Value> = Vec::new();
+    let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
+
+    for k in 0..n {
+        let ty_k = substed_tys[k].clone();
+        let mut ty_shifted = ty_k;
+        for j in (0..=k).rev() {
+            ty_shifted = shift(1, j as i32, &ty_shifted);
+        }
+        for j in 0..k {
+            let arg_term = quote(env.len(), globals, global_offset, result_args[j].clone());
+            ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+        }
+        let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+        let transported = eval_nbe(env, globals, global_offset, &Term::TTransport(
+            Box::new(ty_fam),
+            Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
+        ));
+        result_args.push(transported);
+    }
+
+    Value::VSqCon(d_name.clone(), con_name.into(), result_args, Box::new(r.clone()), Box::new(s.clone()))
 }
 
 /// Transport through Glue types.
@@ -1597,6 +1837,18 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
             Box::new(quote(size, globals, global_offset, *phi)),
             Box::new(quote(size, globals, global_offset, *a)),
         ),
+        Value::VSystemType(sys) => {
+            Term::TSystemType(
+                sys.into_iter()
+                    .map(|(phi, a)| {
+                        (
+                            Term::TCube(phi),
+                            quote(size, globals, global_offset, a),
+                        )
+                    })
+                    .collect(),
+            )
+        }
         Value::VGlueElem(phi, t, a) => Term::TGlueElem(
             Box::new(Term::TCube(phi)),
             Box::new(quote(size, globals, global_offset, *t)),

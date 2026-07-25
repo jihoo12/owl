@@ -13,7 +13,7 @@ pub use errors::TypeError;
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
-use crate::cubical::interval::{DNF, I, Literal};
+use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_leq, dnf_meet};
 use crate::cubical::nbe::nbe_eval;
 use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, Term, beta, shift, show_term, subst};
 
@@ -907,6 +907,41 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             check_interval_dt(dts, ctx, phi)?;
             let n = type_level_dt(dts, ctx, a)?;
             Ok(Term::TUniv(n))
+        }
+
+        // System type: [phi => A, psi => B] — partial type families
+        // Inference: TSystemType(sys) : U_n where each A_k : U_n
+        // and system coherence is satisfied (overlapping faces agree).
+        Term::TSystemType(sys) => {
+            let mut level = 0;
+            for (phi, a) in sys {
+                check_interval_dt(dts, ctx, phi)?;
+                let n = type_level_dt(dts, ctx, a)?;
+                level = level.max(n);
+            }
+            // Coherence check: for any two entries (phi, A) and (psi, B),
+            // on their overlap (phi ∩ psi), A and B must agree.
+            for i in 0..sys.len() {
+                for j in (i + 1)..sys.len() {
+                    let phi_i = nbe_eval(&sys[i].0);
+                    let psi_j = nbe_eval(&sys[j].0);
+                    let overlap = dnf_meet(&term_to_dnf(&phi_i), &term_to_dnf(&psi_j));
+                    if overlap != dnf_bot() {
+                        let a_i = nbe_eval(&sys[i].1);
+                        let a_j = nbe_eval(&sys[j].1);
+                        if a_i != a_j {
+                            return Err(TypeError::Other(format!(
+                                "system type coherence: on overlap of {} and {}, types {} and {} disagree",
+                                show_term(&[], &sys[i].0),
+                                show_term(&[], &sys[j].0),
+                                show_term(&[], &sys[i].1),
+                                show_term(&[], &sys[j].1),
+                            )));
+                        }
+                    }
+                }
+            }
+            Ok(Term::TUniv(level))
         }
 
         // unglue phi te g
@@ -2268,6 +2303,15 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
 // Universe cumulativity
 // ---------------------------------------------------------------------------
 
+/// Extract a DNF from a term that is known to represent a face (TCube or TInterval).
+fn term_to_dnf(t: &Term) -> DNF {
+    match nbe_eval(t) {
+        Term::TCube(d) => d,
+        Term::TInterval(i) => crate::cubical::interval::eval_interval(&i),
+        _ => crate::cubical::interval::dnf_bot(),
+    }
+}
+
 /// Check whether `inferred` is a subtype of `expected` under cumulativity.
 ///
 /// Rules:
@@ -2276,6 +2320,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
 ///   and `B ≤ B'` (covariant codomain), checked recursively
 /// - `TSigma(x, A, B) ≤ TSigma(x, A', B')` when `A ≤ A'` and `B ≤ B'`
 ///   (covariant in both), checked recursively
+/// - `TPartial(phi, A) ≤ TPartial(psi, A)` when `phi ⇒ psi` (cofibration subtyping)
 fn cumulativity_check(expected: &Term, inferred: &Term) -> bool {
     match (expected, inferred) {
         // Universe cumulativity: U_n is subtype of U_m when n ≤ m
@@ -2289,6 +2334,16 @@ fn cumulativity_check(expected: &Term, inferred: &Term) -> bool {
         // Sigma cumulativity: covariant in both components
         (Term::TSigma(_, a_exp, b_exp), Term::TSigma(_, a_inf, b_inf)) => {
             cumulativity_check(a_exp, a_inf) && cumulativity_check(b_exp, b_inf)
+        }
+
+        // Cofibration subtyping: [_ | phi] A ≤ [_ | psi] A when phi ⇒ psi
+        (Term::TPartial(phi_exp, a_exp), Term::TPartial(phi_inf, a_inf)) => {
+            let phi_exp_dnf = term_to_dnf(phi_exp);
+            let phi_inf_dnf = term_to_dnf(phi_inf);
+            // The inferred partial element has face phi_inf; the expected has phi_exp.
+            // phi_inf ⇒ phi_exp means the inferred is defined on a "larger" face,
+            // so it's a valid subtype.
+            dnf_leq(&phi_inf_dnf, &phi_exp_dnf) && cumulativity_check(a_exp, a_inf)
         }
 
         _ => false,

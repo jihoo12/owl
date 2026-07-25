@@ -33,19 +33,17 @@
 
 ### 1. Core Cubical Features
 
-- **System types** — `[phi => a, psi => b]` as a type (not just in comp/hfill). System types represent partial functions and are fundamental to cubical type theory.
+- [x] **Face implication** — `a ⇒ b` (implication between DNF face conditions). Added `dnf_leq` in `interval.rs` for checking whether one face condition implies another.
 
-- **Glue type reduction rules** — Complete computation rules for Glue:
-  - `Glue A [phi -> (B, f)]` reduces to `A` when `phi = 0`
-  - `Glue A [phi -> (B, f)]` reduces to `B` when `phi = 1`
-  - `unglue [phi, te] (glue [phi, t, a])` reduces to `t`
-  - `glue [phi, (unglue [phi, te] b), b]` reduces to `b` when `phi = 1`
+- [x] **Cofibration subtyping** — `[_ | phi] A <= [_ | psi] A` when `phi <= psi`. Uses `dnf_leq` for face implication checking. Implemented in `cumulativity_check`.
 
-- **Comp/fill computation for data types** — Kan operations should compute through inductive types (transport/fill along constructors). Currently comp/hcomp work but don't reduce through data type structure.
+- [x] **Glue type β-reduction** — `VGlueElem(phi, t, a) @ 0 = a`, `VGlueElem(phi, t, a) @ 1 = t`. Path application on glue elements reduces at interval endpoints.
 
-- **Regularity** — `comp A [ ] base` (empty system) should reduce to `base`. Currently may not compute.
+- [x] **Comp/fill computation for data types** — Transport through data types: `transport_data_con`, `transport_data_pcon`, `transport_data_sqcon` in `nbe/mod.rs`. Each constructor argument is transported through its substituted type via telescope-aware substitution.
 
-- **Cofibration subtyping** — `[_ | phi] A <= [_ | psi] A` when `phi <= psi`. Needed for partial element subtyping.
+- [x] **System types as first-class types** — `[phi => a, psi => b]` as a type (not just in comp/hfill). Added `TSystemType(System)` term variant, `VSystemType(DNFSystem)` value, full eval/quote/parser/pretty-printing. Coherence checking via `dnf_meet` on overlapping faces. Parser: `[phi => A, psi => B]` syntax.
+
+- [ ] **Regularity** — `comp A [ ] base` (empty system) should reduce to `base`. Currently may not compute.
 
 ### 2. Type Theory Features
 
