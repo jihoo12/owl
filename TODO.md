@@ -43,7 +43,7 @@
 
 - [x] Coinduction — `Delay A` type, `Next` constructor, `Force` destructor with `Force (Next x) = x` beta rule. Added `TDelay`/`TNext`/`TForce` to Term, `VDelay`/`VNext`/`VForce` to Value, `NForce` to Neutral. Full pipeline: shift/subst/max_var, pretty-printer, parser (prefix operators), NbE eval/quote, typechecker (Delay A : U_n when A : U_n, Force : Delay A -> A), equality, positivity. Parser `Delay` in `parse_atom`, `Next`/`Force` in `parse_prefix_or_atom`.
 
-- [x] Stress test and documentation — `examples/stress_mutual_and_ir.owl` exercises all 5 new features. `docs/reference.md` updated with Prop/SSet, lift/lower, mutual inductives, induction-recursion, termination guard, and worked examples.
+- [x] Stress test and documentation — `examples/stress_mutual_and_ir.owl` exercises all 5 new features. `examples/stress_hit_elimination.owl` exercises nested pattern matching (4-level deep), dependent elimination, parameterized HITs, and hcomp/fill. `docs/reference.md` updated with Prop/SSet, lift/lower, mutual inductives, induction-recursion, termination guard, and worked examples.
 
 ---
 
@@ -96,8 +96,8 @@
 - [x] **HIT computation rules** — hcomp/comp/fill/hfill decompose through data type constructors when the tube system is compatible (all tubes produce the same constructor). `match_ctor_args` helper extracts constructor args from VCon/VPCon/VSqCon/VCellCon. Per-argument tube systems built by applying each tube at formal interval variable. Argument type instantiation follows `transport_data_con` pattern.
 
 - **HIT elimination improvements** — Better support for:
-  - [ ] Nested pattern matching on HITs (pre-existing stack overflow bug)
-  - [ ] Dependent elimination with complex motives (pre-existing type error)
+  - [x] Nested pattern matching on HITs — Fixed termination checker: `motive_targets_datatype` now recognizes `TData(d, _)` directly (not just `TApp(f, TData(d, _))`). `check_body_guard` else branch decomposes TElim subterms instead of recursing through `check_body_guard_deep`. See `stress_hit_elimination.owl` for 4-level nested match tests.
+  - [ ] Dependent elimination with complex motives (pre-existing type error: `check_dt` fallthrough loop when `nbe_eval` produces structurally different but semantically equivalent terms)
   - [ ] Higher-dimensional pattern matching
 
 ### 4. Proof Assistant Features
@@ -134,7 +134,7 @@
   - Record update syntax
 
 - **Pattern matching improvements** —
-  - Nested patterns
+  - [x] Nested patterns (fixed termination checker infinite recursion)
   - Or-patterns
   - As-patterns
   - Record patterns

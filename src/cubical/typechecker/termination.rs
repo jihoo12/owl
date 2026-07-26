@@ -75,7 +75,7 @@ fn check_body_guard(
 ) -> Result<(), String> {
     match body {
         // Recursive call: TElim on the same datatype.
-        Term::TElim(motive, _inner_cases, scrut) => {
+        Term::TElim(motive, inner_cases, scrut) => {
             // Check if the motive targets our datatype.
             if motive_targets_datatype(d, motive) {
                 // The scrutinee of the recursive call must be a case binder
@@ -109,8 +109,13 @@ fn check_body_guard(
                     }
                 }
             } else {
-                // Different datatype — no guard requirement, but check inner.
-                check_body_guard_deep(d, body, binder_count)
+                // Different datatype — no guard requirement, but check
+                // subterms for nested guard violations against d.
+                check_body_guard(d, motive, binder_count)?;
+                for case in inner_cases {
+                    check_body_guard(d, &case.body, binder_count + case.binders.len())?;
+                }
+                check_body_guard(d, scrut, binder_count)
             }
         }
 
@@ -237,17 +242,6 @@ fn check_body_guard(
     }
 }
 
-/// Deep check that doesn't stop at non-target TElim — continues into
-/// all subterms regardless of which datatype they eliminate.
-fn check_body_guard_deep(
-    d: &str,
-    body: &Term,
-    binder_count: usize,
-) -> Result<(), String> {
-    // For non-TElim terms, just recurse normally.
-    check_body_guard(d, body, binder_count)
-}
-
 /// Check if a motive (TAbs-shaped) targets the given datatype.
 fn motive_targets_datatype(d: &str, motive: &Term) -> bool {
     match motive {
@@ -256,6 +250,7 @@ fn motive_targets_datatype(d: &str, motive: &Term) -> bool {
             matches!(a.as_ref(), Term::TData(name, _) if name == d)
                 || motive_targets_datatype(d, f)
         }
+        Term::TData(name, _) => name == d,
         _ => false,
     }
 }

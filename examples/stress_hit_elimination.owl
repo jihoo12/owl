@@ -1,0 +1,241 @@
+-- stress_hit_elimination.owl — Comprehensive HIT elimination stress tests
+--
+-- Exercises all HIT elimination patterns that are currently supported:
+-- nested matching on Nat, dependent elimination on HITs,
+-- path constructors, parameterized HITs, and hcomp/fill.
+--
+-- Created to verify the termination checker fix for nested pattern matching
+-- (motive_targets_datatype + subterm decomposition in termination.rs).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Circle S1 — basic HIT with one path constructor
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive S1 where
+  | base : S1
+  | loop : S1 [ base , base ]
+
+def loop_path : Path S1 base base := loop
+
+def s1_loop_at_0 : S1 := loop @ i0
+def s1_loop_at_1 : S1 := loop @ i1
+
+-- Constant motive elimination
+def elim_s1_const : S1 -> Nat :=
+  fun s => match s return Nat with
+  | base => zero
+  | loop i => <j> zero
+
+-- Identity on S1 (dependent elimination)
+def elim_s1_id : S1 -> S1 :=
+  fun s => match s return S1 with
+  | base => base
+  | loop i => <j> loop @ j
+
+-- Function-type motive
+def elim_s1_fn : S1 -> (Nat -> Nat) :=
+  fun s => match s return (Nat -> Nat) with
+  | base => fun m => m
+  | loop i => <j> fun m => m
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Suspension — two points + path
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Susp where
+  | north : Susp
+  | south : Susp
+  | merid : Susp [ north , south ]
+
+def merid_at_0 : Susp := merid @ i0
+def merid_at_1 : Susp := merid @ i1
+
+def elim_susp_const : Susp -> Nat :=
+  fun s => match s return Nat with
+  | north => zero
+  | south => zero
+  | merid i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Interval as a HIT
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive MyInterval where
+  | my0 : MyInterval
+  | my1 : MyInterval
+  | myseg : MyInterval [ my0 , my1 ]
+
+def interval_path : MyInterval := myseg @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. Torus — multiple path constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Torus where
+  | pt : Torus
+  | p : Torus [ pt , pt ]
+  | q : Torus [ pt , pt ]
+
+def elim_torus_const : Torus -> Nat :=
+  fun t => match t return Nat with
+  | pt => zero
+  | p i => <j> zero
+  | q i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Bool and auxiliary HITs (needed for dependent elimination context)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+inductive MyBool where
+  | btrue : MyBool
+  | bfalse : MyBool
+
+inductive JoinBool where
+  | jtrue : JoinBool
+  | jfalse : JoinBool
+  | jpath : JoinBool [ jtrue , jfalse ]
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. Elimination on JoinBool
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def join_path : Path JoinBool jtrue jfalse := jpath
+
+def elim_joinbool : JoinBool -> Nat :=
+  fun j => match j return Nat with
+  | jtrue => zero
+  | jfalse => zero
+  | jpath i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Nested pattern matching on Nat (the fixed stack overflow)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Simple nested match: pred of pred
+def nat_pred_pred : Nat -> Nat :=
+  fun n => match n return Nat with
+  | zero => zero
+  | suc n' => match n' return Nat with
+    | zero => zero
+    | suc n'' => n''
+
+-- Nested match wrapped in constructor
+def nat_double_suc : Nat -> Nat :=
+  fun n => match n return Nat with
+  | zero => zero
+  | suc n' => suc (match n' return Nat with
+    | zero => zero
+    | suc n'' => n'')
+
+-- Triple-nested match
+def nat_triple_pred : Nat -> Nat :=
+  fun n => match n return Nat with
+  | zero => zero
+  | suc n1 => match n1 return Nat with
+    | zero => zero
+    | suc n2 => match n2 return Nat with
+      | zero => zero
+      | suc n3 => n3
+
+-- Quadruple-nested match
+def nat_quad_pred : Nat -> Nat :=
+  fun n => match n return Nat with
+  | zero => zero
+  | suc n1 => match n1 return Nat with
+    | zero => zero
+    | suc n2 => match n2 return Nat with
+      | zero => zero
+      | suc n3 => match n3 return Nat with
+        | zero => zero
+        | suc n4 => n4
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. Dependent elimination with sigma motive
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def elim_sigma : S1 -> Nat * Nat :=
+  fun s => match s return Nat * Nat with
+  | base => (zero , zero)
+  | loop i => <j> (zero , zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. Parameterized HITs with elimination
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive SuspP (A : Type) where
+  | north : SuspP A
+  | south : SuspP A
+  | merid : A -> SuspP A [ north , south ]
+
+def elim_suspP_const : SuspP Nat -> Nat :=
+  fun s => match s return Nat with
+  | north => zero
+  | south => zero
+  | merid x i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. hcomp/comp/fill through HIT constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_s1_base : S1 :=
+  hcomp S1 1 (<i> base) base
+
+def comp_s1_base : S1 :=
+  comp S1 1 (<i> base) base
+
+def fill_s1_base_at1 : S1 :=
+  fill S1 1 (<i> base) base @ i1
+
+def fill_s1_base_at0 : S1 :=
+  fill S1 1 (<i> base) base @ i0
+
+def hfill_s1_base : S1 :=
+  hfill S1 1 (<i> base) base @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 11. Transport through HIT types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transport_s1 : S1 :=
+  transport (<i> S1) base
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 12. hcomp/comp through Nat constructors (Data decomposition)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_nat_suc : Nat :=
+  hcomp Nat 1 (<i> suc zero) (suc zero)
+
+def comp_nat_suc : Nat :=
+  comp Nat 1 (<i> suc zero) (suc zero)
+
+def fill_nat_at1 : Nat :=
+  fill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 13. Nested match combined with eliminator body
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def combined_elim : S1 -> S1 :=
+  fun s => match s return S1 with
+  | base => base
+  | loop i => <j> loop @ j
+
+def loop_loop : Path S1 base base :=
+  match base return Path S1 base base with
+  | base => loop
+  | loop i => <j> loop @ j
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Main entry point
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def main : Nat := nat_triple_pred (suc (suc (suc zero)))
