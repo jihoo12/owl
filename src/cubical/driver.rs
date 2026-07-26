@@ -207,8 +207,14 @@ fn process_file_source(
             Decl::Data(dt) => {
                 process_data(&dt, env)?;
             }
-            Decl::Def { name, ty, val } => {
-                *last_def = Some(process_def(&name, &ty, &val, env)?);
+            Decl::DataMutual(dts) => {
+                process_data_mutual(&dts, env)?;
+            }
+            Decl::DataWithFunc { dt, func_name, func_ty, func_val } => {
+                process_data_with_func(&dt, &func_name, &func_ty, &func_val, env)?;
+            }
+            Decl::Def { name, ty, val, by_wf } => {
+                *last_def = Some(process_def(&name, &ty, &val, env, by_wf)?);
             }
         }
     }
@@ -286,8 +292,68 @@ fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<
     Ok(())
 }
 
-fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env) -> Result<RunOutput, RunError> {
+/// Process a mutual inductive declaration: register all datatypes first,
+/// then typecheck each constructor against the full mutual environment.
+fn process_data_mutual(
+    dts: &[crate::cubical::syntax::Datatype],
+    env: &mut Env,
+) -> Result<(), RunError> {
+    // Phase 1: Register all datatypes so they can reference each other.
+    for dt in dts {
+        crate::cubical::syntax::check_datatype_positivity(dt)
+            .map_err(|e| RunError::Type(Box::new(crate::cubical::typechecker::TypeError::Other(
+                format!("{}", e),
+            ))))?;
+        env.declare_datatype(dt.clone());
+    }
+    // Phase 2: Typecheck constructor argument types against the full mutual environment.
+    for dt in dts {
+        let param_ctx: crate::cubical::typechecker::Ctx = dt
+            .params
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(i, (pname, pty))| {
+                (pname.clone(), crate::cubical::syntax::shift(i as i32, 0, pty))
+            })
+            .collect();
+        for con in &dt.cons {
+            for arg_ty in &con.arg_tys {
+                crate::cubical::typechecker::check_dt(
+                    &env.datatypes,
+                    &param_ctx,
+                    arg_ty,
+                    &Term::TUniv(0),
+                )
+                .map_err(|e| RunError::Type(Box::new(e)))?;
+            }
+        }
+        crate::cubical::typechecker::check_sqcon_coherence(&env.datatypes, dt)
+            .map_err(|e| RunError::Type(Box::new(e)))?;
+    }
+    Ok(())
+}
+
+/// Process an induction-recursion declaration: register the datatype,
+/// then typecheck and register the function definition.
+fn process_data_with_func(
+    dt: &crate::cubical::syntax::Datatype,
+    func_name: &Name,
+    func_ty: &Term,
+    func_val: &Term,
+    env: &mut Env,
+) -> Result<RunOutput, RunError> {
+    // First, process the datatype (positivity check + register).
+    process_data(dt, env)?;
+    // Then, process the function definition with the datatype in scope.
+    process_def(func_name, func_ty, func_val, env, false)
+}
+
+fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -> Result<RunOutput, RunError> {
     crate::debug_log!("process_def '{}':", name);
+    if by_wf {
+        crate::cubical::typechecker::termination::set_skip_guard(true);
+    }
     let closed_ty_globals = apply_globals(&env.defs, ty);
     let closed_val = val.clone();
 
@@ -320,8 +386,12 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env) -> Result<RunO
 
     // Register before checking the body so recursive calls resolve.
     env.define(name.clone(), closed_ty_globals.clone(), resolved_val.clone());
-    check_with_full_env(env, &resolved_val, &closed_ty_globals)
-        .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)))?;
+    let result = check_with_full_env(env, &resolved_val, &closed_ty_globals)
+        .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
+    if by_wf {
+        crate::cubical::typechecker::termination::set_skip_guard(false);
+    }
+    result?;
     let output = RunOutput {
         name: name.clone(),
         ty: closed_ty_globals.clone(),
@@ -641,5 +711,55 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def bad : Nat := by transitivity",
         );
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn mutual_inductive_even_odd() {
+        // Even/Odd as mutually-defined inductive types.
+        // even zero, even (suc (suc n)) when even n
+        // odd (suc zero), odd (suc (suc n)) when odd n
+        let output = run_str(
+            "inductive even where \
+             | even_zero : even \
+             | even_suc : even -> even \
+             with inductive odd where \
+             | odd_one : odd \
+             | odd_suc : odd -> odd\n\
+             def main : even := even_zero",
+        )
+        .expect("mutual inductive even/odd should typecheck");
+        assert_eq!(output.name, "main");
+    }
+
+    #[test]
+    fn mutual_inductive_forward_reference() {
+        // B references A's constructors (forward reference).
+        let output = run_str(
+            "inductive A where \
+             | a1 : A \
+             | a2 : A \
+             with inductive B where \
+             | b1 : A -> B \
+             | b2 : B\n\
+             def main : B := b2",
+        )
+        .expect("mutual inductive with forward reference should typecheck");
+        assert_eq!(output.name, "main");
+    }
+
+    #[test]
+    fn induction_recursion_basic() {
+        // Induction-recursion: define a datatype and a function simultaneously.
+        let output = run_str(
+            "inductive Nat where \
+             | zero : Nat \
+             | suc : Nat -> Nat \
+             with isZero : Nat -> Nat := fun n => match n return Nat with \
+             | zero => suc zero \
+             | suc _ => zero\n\
+             def main : Nat := isZero zero",
+        )
+        .expect("induction-recursion should typecheck");
+        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(1));
     }
 }

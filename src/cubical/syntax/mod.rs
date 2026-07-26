@@ -28,6 +28,17 @@ pub enum Term {
     TApp(Box<Term>, Box<Term>),
     TAbs(Name, Box<Term>),
     TUniv(Level),
+    /// Impredicative proof-irrelevant universe (Prop).
+    /// `Prop : U0`. Prop is impredicative: `Pi (x:A). B : Prop` when both A,B : Prop.
+    TProp,
+    /// SSet — the universe of small types. `SSet : U1`. SSet is closed under Pi, Sigma, Path.
+    TSSet,
+    /// Universe lifting: `TLift(A, m)` lives in `U_{max(n,m)}` when `A : U_n`.
+    /// Semantically identity — used to coerce types between universe levels.
+    TLift(Box<Term>, Level),
+    /// Universe lowering: `TLower(A)` maps a type in `U_{n+1}` down to `U_n`.
+    /// Must be applied to a lifted value. `lower(lift(A)) = A`.
+    TLower(Box<Term>),
     TIntervalTy,
     TPi(Name, Box<Term>, Box<Term>),
     TInterval(I),
@@ -93,6 +104,15 @@ pub enum Term {
     /// `motive : (x : TData(d)) -> U_n`, given as a `TAbs`-shaped term
     /// (i.e. `motive` itself binds the scrutinee, index 0 in its body).
     TElim(Box<Term>, Vec<ElimCase>, Box<Term>),
+
+    // -- Coinduction ---------------------------------------------------------
+    /// Delay type former: `Delay A` is the type of delayed computations.
+    /// It has a single constructor `Next : A -> Delay A`.
+    TDelay(Box<Term>),
+    /// Constructor: wraps a value into `Delay A`.
+    TNext(Box<Term>),
+    /// Destructor: forces a delayed computation. `Force (Next x) = x`.
+    TForce(Box<Term>),
 }
 
 /// One arm of an eliminator. Binds `binders.len()` fresh variables over
@@ -295,6 +315,10 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TAbs(x, body) => Term::TAbs(x.clone(), b(shift(d, c + 1, body))),
         Term::TPi(x, a, body) => Term::TPi(x.clone(), b(shift(d, c, a)), b(shift(d, c + 1, body))),
         Term::TUniv(n) => Term::TUniv(*n),
+        Term::TProp => Term::TProp,
+        Term::TSSet => Term::TSSet,
+        Term::TLift(a, lvl) => Term::TLift(b(shift(d, c, a)), *lvl),
+        Term::TLower(a) => Term::TLower(b(shift(d, c, a))),
         Term::TIntervalTy => Term::TIntervalTy,
         Term::TInterval(i) => Term::TInterval(i.clone()),
         Term::TCube(cu) => Term::TCube(cu.clone()),
@@ -401,6 +425,9 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
                 .map(|tac| shift_tactic(d, c, tac))
                 .collect(),
         ),
+        Term::TDelay(a) => Term::TDelay(b(shift(d, c, a))),
+        Term::TNext(a) => Term::TNext(b(shift(d, c, a))),
+        Term::TForce(a) => Term::TForce(b(shift(d, c, a))),
     }
 }
 
@@ -445,6 +472,10 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
             Term::TPi(x.clone(), b(subst(j, s, a)), b(subst(j + 1, &s1, body)))
         }
         Term::TUniv(n) => Term::TUniv(*n),
+        Term::TProp => Term::TProp,
+        Term::TSSet => Term::TSSet,
+        Term::TLift(a, lvl) => Term::TLift(b(subst(j, s, a)), *lvl),
+        Term::TLower(a) => Term::TLower(b(subst(j, s, a))),
         Term::TIntervalTy => Term::TIntervalTy,
         Term::TInterval(i) => Term::TInterval(i.clone()),
         Term::TCube(cu) => Term::TCube(cu.clone()),
@@ -559,6 +590,9 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                 .map(|tac| subst_tactic(j, s, tac))
                 .collect(),
         ),
+        Term::TDelay(a) => Term::TDelay(b(subst(j, s, a))),
+        Term::TNext(a) => Term::TNext(b(subst(j, s, a))),
+        Term::TForce(a) => Term::TForce(b(subst(j, s, a))),
     }
 }
 
@@ -599,6 +633,10 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TApp(f, a) => max_var(f).max(max_var(a)),
         Term::TAbs(_, b) => (max_var(b) - 1).max(-1),
         Term::TUniv(_) => -1,
+        Term::TProp => -1,
+        Term::TSSet => -1,
+        Term::TLift(a, _) => max_var(a),
+        Term::TLower(a) => max_var(a),
         Term::TIntervalTy => -1,
         Term::TPi(_, a, b) => max_var(a).max(max_var(b) - 1).max(-1),
         Term::TInterval(_) => -1,
@@ -673,6 +711,9 @@ pub fn max_var(t: &Term) -> i32 {
         }
         Term::Meta(_) => -1,
         Term::TBy(_) => -1,
+        Term::TDelay(a) => max_var(a),
+        Term::TNext(a) => max_var(a),
+        Term::TForce(a) => max_var(a),
     }
 }
 

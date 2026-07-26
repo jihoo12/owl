@@ -31,6 +31,8 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
     match ty {
         Term::TVar(_) => Ok(()),
         Term::TUniv(_) | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => Ok(()),
+        Term::TProp | Term::TSSet => Ok(()),
+        Term::TLift(a, _) | Term::TLower(a) => check_positivity_in(target, a, negative),
         Term::TData(name, params) => {
             if name == target && negative {
                 Err(PositivityError {
@@ -130,6 +132,9 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             }
             check_positivity_in(target, r, negative)?;
             check_positivity_in(target, s, negative)
+        }
+        Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
+            check_positivity_in(target, a, negative)
         }
     }
 }

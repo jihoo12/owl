@@ -54,8 +54,12 @@ The following words are reserved and cannot be used as variable names:
 | `trivial`     | Tactic: prove trivial goals automatically  |
 | `match`       | Pattern matching / elimination             |
 | `return`      | Annotate match return type                 |
-| `with`        | Separator before match cases               |
+| `with`        | Match cases / mutual datatypes separator   |
 | `Type`        | Alias for universe `U0`                    |
+| `Prop`        | Impredicative proposition universe (U0)   |
+| `SSet`        | Strict set universe (U1)                   |
+| `lift`        | Lift a value into a higher universe        |
+| `lower`       | Lower a value from a higher universe       |
 | `Path`        | Path type former                           |
 | `PathP`       | Dependent path type (type family required) |
 | `hcomp`       | Homogeneous composition                    |
@@ -76,6 +80,10 @@ The following words are reserved and cannot be used as variable names:
 | `forall` / `∀` | Dependent function type former          |
 | `Σ`           | Dependent pair type former (Unicode only)  |
 | `I` / `𝕀`     | Cubical interval type                      |
+| `Delay`       | Coinductive delay type former              |
+| `Next`        | Coinductive delay constructor              |
+| `Force`       | Coinductive delay destructor               |
+| `by_wf`       | Well-founded recursion annotation          |
 
 ### Symbols and Operators
 
@@ -117,6 +125,8 @@ type. Types are themselves terms.
 ```
 U0  U1  U2  ...
 Type          -- alias for U0
+Prop          -- impredicative proposition universe, lives in U0
+SSet          -- strict set universe, lives in U1
 ```
 
 Universes are stratified to avoid paradoxes. Each universe contains the types
@@ -127,6 +137,32 @@ U0 : U1 : U2 : ...
 ```
 
 **Cumulativity**: if `n <= m`, then `U_n` is a subtype of `U_m`.
+
+**Prop** is an impredicative universe for propositions. `Prop : U0`, and
+`Pi(x:Prop). Prop : Prop` (impredicativity). Prop types can be used as
+motives in eliminators.
+
+**SSet** is a strict set universe at level 1. It is predicative: closed under
+Pi, Sigma, and Path at level 1.
+
+### Universe Lifting and Lowering
+
+```
+lift A        -- lift type A from U_n to U_{max(n, m)}
+lower a       -- lower a value of a lifted type back down
+```
+
+Universe lifting (`lift`) embeds a type into a higher universe. This is
+needed when cumulativity is not sufficient — for example, when a function
+requires all arguments at the same universe level:
+
+```
+-- Nat : U0, but we need it at U1 for a specific context
+def lifted_nat : lift Nat := lift zero
+```
+
+`lift A : U_{max(n,m)}` when `A : U_n`. `lower` reverses the embedding:
+`lower (lift x) = x`.
 
 ### Pi Types (Dependent Functions)
 
@@ -592,6 +628,115 @@ data Bad where | mk : Bad -> Bad
 This requirement applies to both ordinary and parameterized datatypes. For
 parameterized types, the positivity check examines constructor types after
 the parameters are in scope.
+
+### Mutual Inductive Types (Induction-Induction)
+
+Multiple inductive types can be declared simultaneously using the `with`
+keyword. Each type's constructors may reference any of the other types in
+the same mutual block:
+
+```
+inductive even where
+  | even_zero : even
+  | even_suc : even -> even
+with inductive odd where
+  | odd_one : odd
+  | odd_suc : odd -> odd
+```
+
+All types in a mutual block are registered before constructor typechecking,
+so **forward references** work: the second type can reference the first.
+
+#### Syntax
+
+```
+inductive A where | ... | ...
+with inductive B where | ... | ...
+[with inductive C where | ... | ...]
+```
+
+### Induction-Recursion
+
+An inductive type and a function over it can be defined simultaneously. The
+function is defined after the datatype, with the datatype already in scope:
+
+```
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+with isZero : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero => suc zero
+  | suc _ => zero
+```
+
+The function can pattern-match on the datatype being defined. After the
+declaration, both the datatype and the function are available for use.
+
+#### Syntax
+
+```
+inductive D where | ... | ...
+with func_name : FuncType := func_body
+```
+
+### Structural Recursion Guard
+
+The typechecker enforces that recursive calls in `match`/eliminator cases
+follow the **structural recursion guard**: the recursive call must
+decrease on a strict subterm of the scrutinee. Specifically, each ordinary
+constructor case must pass a case binder (a constructor argument) as the
+scrutinee of any recursive call.
+
+```
+-- Accepted: recursive call uses subterm m'
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)   -- add called with m', a subterm of m
+
+-- Rejected: recursive call uses full m (not a subterm)
+def bad : Nat -> Nat := fun m =>
+  match m return Nat with
+  | zero => zero
+  | suc m' => bad m            -- ERROR: m is not a strict subterm
+```
+
+### Well-Founded Recursion (`by_wf`)
+
+The `by_wf` annotation on a `def` disables the structural recursion guard
+check, allowing the definition to use well-founded recursion. This is
+useful when the recursive argument is not a syntactic subterm but the
+recursion is still well-founded.
+
+```
+def double : Nat -> Nat by_wf := fun n =>
+  match n return Nat with
+  | zero => zero
+  | suc n' => suc (suc (double n'))
+  end
+```
+
+### Coinduction (`Delay` / `Next` / `Force`)
+
+Owl supports coinductive types via a built-in delay type `Delay A`:
+
+- `Delay A` — the type of delayed computations of type `A`.
+- `Next : A -> Delay A` — wraps a value into a delayed computation.
+- `Force : Delay A -> A` — forces a delayed computation.
+
+The key beta rule is: `Force (Next x) = x`.
+
+```
+def wrap : forall (A : U0), A -> Delay A := fun A x => Next x
+
+def unwrap : forall (A : U0), Delay A -> A := fun A d => Force d
+
+-- Round-trip: Force (Next x) = x
+def id_delayed : forall (A : U0), A -> A := fun A x => Force (Next x)
+```
+
+`Delay A` lives in the same universe as `A`: if `A : U_n` then `Delay A : U_n`.
 
 ---
 
@@ -1427,6 +1572,9 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
 <file>        ::= <decl>*
 <decl>        ::= "import" STRING
                 | "inductive" NAME [<params>] [":" UNIV] "where" <con_list>
+                  ["with" "inductive" NAME [<params>] [":" UNIV] "where" <con_list>]*
+                | "inductive" NAME [<params>] [":" UNIV] "where" <con_list>
+                  "with" NAME ":" <term> ":=" <term>
                 | "def" NAME ":" <term> ":=" <term>
 
 <params>      ::= ("(" NAME ":" <term> ")")*
@@ -1461,6 +1609,8 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "ua" <prefix_or_atom>            -- univalence
                 | "transport" <prefix_or_atom> <prefix_or_atom>
                 | "equivFwd" <prefix_or_atom> <prefix_or_atom>
+                | "lift" <prefix_or_atom>          -- lift into higher universe
+                | "lower" <prefix_or_atom>         -- lower from higher universe
                 | <atom>
 
 <atom>        ::= NAME                             -- variable, constructor, i0, i1
@@ -1479,6 +1629,8 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "glue" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
                 | "unglue" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
                 | "[" "_" "|" <join> "]" <prefix_or_atom>   -- partial element type (bracket)
+                | "Prop"                      -- proposition universe (U0)
+                | "SSet"                       -- strict set universe (U1)
                 | <match>
 
 <system>      ::= "[" <system_entry> ("," <system_entry>)* "]"
@@ -1740,6 +1892,70 @@ def partial_nat : [_ | i1] Nat := suc zero
 -- and cubical subtyping
 ```
 
+### Example 12: Prop and SSet Universes
+
+```
+-- Prop is impredicative: Pi over Prop stays in Prop
+def trivial_prop : Prop := Prop
+
+-- SSet lives at level 1
+def strict_set_type : SSet := SSet
+```
+
+### Example 13: Universe Lifting
+
+```
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Lift a Nat into a higher universe
+def lifted_zero : lift Nat := lift zero
+```
+
+### Example 14: Mutual Inductive Types
+
+```
+inductive even where
+  | even_zero : even
+  | even_suc : even -> even
+with inductive odd where
+  | odd_one : odd
+  | odd_suc : odd -> odd
+```
+
+Both types are visible to each other's constructors. The second type can
+reference constructors of the first (forward reference).
+
+### Example 15: Induction-Recursion
+
+```
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+with isZero : Nat -> Nat :=
+  fun n => match n return Nat with
+  | zero => suc zero
+  | suc _ => zero
+```
+
+The function `isZero` is defined simultaneously with `Nat` and can
+pattern-match on `Nat` values.
+
+### Example 16: Structural Recursion Guard
+
+```
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+-- add recurses on m', which is a strict subterm of m: OK
+```
+
 ---
 
 ## 17. Error Types
@@ -1765,6 +1981,7 @@ The typechecker produces the following error categories:
 | `MissingCase(c)` | Eliminator is missing a case for constructor `c` |
 | `ExpectedData(ty)` | Expected a datatype, got `ty` |
 | `PathPNotTypeFamily(ty)` | First argument of PathP must be a type family |
+| `TerminationViolation{..}` | Recursive call does not pass a subterm of the scrutinee |
 | `EtaFuelExhausted(..)` | Eta-equality check ran out of fuel |
 
 Additionally, a separate positivity check runs during datatype declaration:

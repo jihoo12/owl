@@ -18,6 +18,8 @@ pub(super) struct Parser {
     stop_at_with: bool,
     /// When true, `starts_atom` treats the keyword `in` as a stop token.
     stop_at_in: bool,
+    /// When true, `starts_atom` treats the keyword `by_wf` as a stop token.
+    stop_at_by_wf: bool,
     /// When true, `parse_pair` does not consume commas (used inside system entries).
     stop_at_comma: bool,
 }
@@ -33,6 +35,7 @@ impl Parser {
             datatypes: Vec::new(),
             stop_at_with: false,
             stop_at_in: false,
+            stop_at_by_wf: false,
             stop_at_comma: false,
         }
     }
@@ -48,15 +51,80 @@ impl Parser {
             TokenKind::Colon,
             format!("expected ':' after definition name '{}'", name),
         )?;
+        self.stop_at_by_wf = true;
         let ty = self.parse_term()?;
+        self.stop_at_by_wf = false;
+        // Check for well-founded recursion annotation.
+        let by_wf = self.consume_ident_maybe("by_wf");
         self.expect_definition_value(&name)?;
         // Allow the definition body to refer to itself (and later globals).
         self.global_env.insert(0, name.clone());
         let val = self.parse_term()?;
-        Ok(Decl::Def { name, ty, val })
+        Ok(Decl::Def { name, ty, val, by_wf })
     }
 
     pub(super) fn parse_data_decl(&mut self) -> Result<Decl, ParseError> {
+        let first_dt = self.parse_data_decl_inner()?;
+
+        // Check for `with` keyword: mutual inductive or induction-recursion.
+        if self.consume_ident_maybe("with") {
+            // Determine if the next token starts another `inductive` block or a function def.
+            if self.peek_ident() == "inductive" {
+                // Mutual inductive: `with inductive B where | ...`
+                self.expect_ident("expected 'inductive'")?;
+                let mut all_dts = vec![first_dt];
+                // Make all previously declared datatypes visible so constructors
+                // can reference each other (forward references).
+                let old_dts_len = self.datatypes.len();
+                for dt in &all_dts {
+                    self.datatypes.push(dt.clone());
+                }
+                loop {
+                    let dt = self.parse_data_decl_inner()?;
+                    all_dts.push(dt);
+                    // Extend scope with the new datatype for subsequent blocks.
+                    self.datatypes.push(all_dts.last().unwrap().clone());
+                    if !self.consume_ident_maybe("with") {
+                        break;
+                    }
+                    if self.peek_ident() != "inductive" {
+                        self.datatypes.truncate(old_dts_len);
+                        return Err(self.error_here("expected 'inductive' after 'with' in mutual block"));
+                    }
+                    self.expect_ident("expected 'inductive'")?;
+                }
+                self.datatypes.truncate(old_dts_len);
+                return Ok(Decl::DataMutual(all_dts));
+            } else {
+                // Induction-recursion: `with f : T := e`
+                let func_name = self.expect_ident("expected function name after 'with'")?;
+                self.expect(TokenKind::Colon, format!("expected ':' after '{}'", func_name))?;
+                // Parse the function type with the datatype visible.
+                let old_dts_len = self.datatypes.len();
+                self.datatypes.push(first_dt.clone());
+                let func_ty = self.parse_term()?;
+                self.datatypes.truncate(old_dts_len);
+                self.expect(TokenKind::ColonEquals, format!("expected ':=' after type of '{}'", func_name))?;
+                // Parse the function value with the datatype visible and the function name in scope.
+                self.global_env.insert(0, func_name.clone());
+                let old_dts_len = self.datatypes.len();
+                self.datatypes.push(first_dt.clone());
+                let func_val = self.parse_term()?;
+                self.datatypes.truncate(old_dts_len);
+                return Ok(Decl::DataWithFunc {
+                    dt: first_dt,
+                    func_name,
+                    func_ty,
+                    func_val,
+                });
+            }
+        }
+        Ok(Decl::Data(first_dt))
+    }
+
+    /// Parse a single inductive datatype block. Returns the `Datatype` directly.
+    /// Used by both `parse_data_decl` and the mutual-inductive `with` handler.
+    pub(super) fn parse_data_decl_inner(&mut self) -> Result<Datatype, ParseError> {
         let name = self.expect_ident("expected datatype name")?;
 
         // Parse optional parameter binders: `inductive Trunc (A : Type) where`
@@ -111,7 +179,9 @@ impl Parser {
                 TokenKind::Colon,
                 format!("expected ':' after constructor name '{}'", con_name),
             )?;
+            self.stop_at_with = true;
             let (arg_tys, result) = self.parse_constructor_type(&name, &local_dt)?;
+            self.stop_at_with = false;
             // For parameterized types, the result is TData(name, param_args).
             // For non-parameterized types, the result is TData(name, []).
             match &result {
@@ -205,7 +275,7 @@ impl Parser {
         for _ in &params {
             self.term_env.remove(0);
         }
-        Ok(Decl::Data(Datatype { name, params, cons, pcons, sqcons, universe_level: uni_level }))
+        Ok(Datatype { name, params, cons, pcons, sqcons, universe_level: uni_level })
     }
 
     fn parse_constructor_type(
@@ -561,10 +631,20 @@ impl Parser {
             let x = self.parse_prefix_or_atom()?;
             return Ok(Term::TEquivFwd(Box::new(e), Box::new(x)));
         }
+        if self.consume_ident("Force") {
+            return Ok(Term::TForce(Box::new(self.parse_prefix_or_atom()?)));
+        }
+        if self.consume_ident("Next") {
+            return Ok(Term::TNext(Box::new(self.parse_prefix_or_atom()?)));
+        }
         self.parse_atom()
     }
 
     fn parse_atom(&mut self) -> Result<Term, ParseError> {
+        if self.consume_ident("Delay") {
+            let a = self.parse_prefix_or_atom()?;
+            return Ok(Term::TDelay(Box::new(a)));
+        }
         if self.consume_ident("Path") {
             let a = self.parse_prefix_or_atom()?;
             let u = self.parse_prefix_or_atom()?;
@@ -1040,6 +1120,12 @@ impl Parser {
         if name == "Type" {
             return Ok(Term::TUniv(0));
         }
+        if name == "Prop" {
+            return Ok(Term::TProp);
+        }
+        if name == "SSet" {
+            return Ok(Term::TSSet);
+        }
         if name == "I" || name == "𝕀" {
             return Ok(Term::TIntervalTy);
         }
@@ -1131,7 +1217,12 @@ impl Parser {
             && let TokenKind::Ident(name) = &self.peek().kind
                 && name == "in" {
                     return false;
-                }
+        }
+        if self.stop_at_by_wf
+            && let TokenKind::Ident(name) = &self.peek().kind
+                && name == "by_wf" {
+                    return false;
+        }
         matches!(
             &self.peek().kind,
             TokenKind::Ident(_) | TokenKind::Int(_) | TokenKind::LParen
@@ -1165,6 +1256,25 @@ impl Parser {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Consume the current identifier if it matches `expected`.
+    pub(super) fn consume_ident_maybe(&mut self, expected: &str) -> bool {
+        match &self.peek().kind {
+            TokenKind::Ident(name) if name == expected => {
+                self.pos += 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Peek at the current identifier without consuming it.
+    pub(super) fn peek_ident(&self) -> &str {
+        match &self.peek().kind {
+            TokenKind::Ident(name) => name,
+            _ => "",
         }
     }
 

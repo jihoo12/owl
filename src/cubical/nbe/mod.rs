@@ -68,6 +68,10 @@ pub enum Value {
     VPLam(Name, IClosure),
     VPApp(Box<Value>, Box<Value>),
     VUniv(Level),
+    VProp,
+    VSSet,
+    VLift(Box<Value>, Level),
+    VLower(Box<Value>),
     VIntervalTy,
     VInterval(I),
     VIntervalVar(usize),
@@ -100,6 +104,9 @@ pub enum Value {
     VHFill(Box<Value>, DNFSystem, Box<Value>),
     VFst(Box<Value>),
     VSnd(Box<Value>),
+    VDelay(Box<Value>),
+    VNext(Box<Value>),
+    VForce(Box<Value>),
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +140,7 @@ pub enum Neutral {
     NFill(Box<Value>, DNFSystem, Box<Value>),
     NHFill(Box<Value>, DNFSystem, Box<Value>),
     NMeta(i32),
+    NForce(Box<Neutral>),
 }
 
 impl Closure {
@@ -197,6 +205,13 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
             },
         ),
         Term::TUniv(n) => Value::VUniv(*n),
+        Term::TProp => Value::VProp,
+        Term::TSSet => Value::VSSet,
+        Term::TLift(a, lvl) => Value::VLift(
+            Box::new(eval_nbe(env, globals, global_offset, a)),
+            *lvl,
+        ),
+        Term::TLower(a) => Value::VLower(Box::new(eval_nbe(env, globals, global_offset, a))),
         Term::TIntervalTy => Value::VIntervalTy,
         Term::TPi(x, a, b) => Value::VPi(
             x.clone(),
@@ -404,6 +419,24 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
         }
         Term::Meta(i) => Value::VNeutral(Neutral::NMeta(*i)),
         Term::TBy(_) => panic!("TBy should be resolved before NbE"),
+        Term::TDelay(a) => Value::VDelay(Box::new(eval_nbe(env, globals, global_offset, a))),
+        Term::TNext(a) => Value::VNext(Box::new(eval_nbe(env, globals, global_offset, a))),
+        Term::TForce(a) => do_force(
+            eval_nbe(env, globals, global_offset, a),
+            globals,
+            global_offset,
+        ),
+    }
+}
+
+pub fn do_force(v: Value, globals: &Globals, global_offset: usize) -> Value {
+    match v {
+        Value::VNext(inner) => {
+            record_step("force-next".into(), "Force (Next _)".into(), value_str(globals, global_offset, &inner));
+            *inner
+        }
+        Value::VNeutral(n) => Value::VNeutral(Neutral::NForce(Box::new(n))),
+        other => Value::VForce(Box::new(other)),
     }
 }
 
@@ -693,6 +726,22 @@ pub fn do_transport(env: &[Value], globals: &Globals, global_offset: usize, p: V
                     x
                 }
 
+                // Prop/SSet transport (constant type families, same as Univ)
+                (Value::VProp, Value::VProp) | (Value::VSSet, Value::VSSet) => {
+                    record_step("transport-prop-ss".into(), "transport (λi. Prop/SSet) _".into(), value_str(globals, global_offset, &x));
+                    x
+                }
+
+                // Lift transport: transport (λi. Lift (A i) lvl) x
+                (Value::VLift(_, _), Value::VLift(_, _)) => {
+                    Value::VTransport(Box::new(Value::VPLam(i_name.to_string(), clos.clone())), Box::new(x))
+                }
+
+                // Lower transport: same fallback
+                (Value::VLower(_), Value::VLower(_)) => {
+                    Value::VTransport(Box::new(Value::VPLam(i_name.to_string(), clos.clone())), Box::new(x))
+                }
+
                 // Pi transport (non-dependent codomain only)
                 (Value::VPi(arg_name, _, _), Value::VPi(_, _, _)) => {
                     let result = transport_pi(env, globals, global_offset, i_name, clos, arg_name, x);
@@ -808,7 +857,9 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TPair(a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level),
         Term::TFst(p) => uses_var_at_level(p, level),
         Term::TSnd(p) => uses_var_at_level(p, level),
-        Term::TUniv(_) | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => false,
+        Term::TUniv(_) | Term::TProp | Term::TSSet | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => false,
+        Term::TLift(a, _) => uses_var_at_level(a, level),
+        Term::TLower(a) => uses_var_at_level(a, level),
         Term::TData(_, params) => params.iter().any(|p| uses_var_at_level(p, level)),
         Term::TCon(_, _, args) => args.iter().any(|a| uses_var_at_level(a, level)),
         Term::TPCon(_, _, args, r) => args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level),
@@ -818,6 +869,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         }
         Term::Meta(_) => false,
         Term::TBy(_) => false,
+        Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => uses_var_at_level(a, level),
     }
 }
 
@@ -1799,6 +1851,13 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
         Value::VPLam(x, clos) => Term::PLam(x, Box::new(quote(size + 1, globals, global_offset, clos.apply_i_var(size)))),
         Value::VPApp(p, r) => Term::PApp(Box::new(quote(size, globals, global_offset, *p)), Box::new(quote(size, globals, global_offset, *r))),
         Value::VUniv(n) => Term::TUniv(n),
+        Value::VProp => Term::TProp,
+        Value::VSSet => Term::TSSet,
+        Value::VLift(a, lvl) => Term::TLift(
+            Box::new(quote(size, globals, global_offset, *a)),
+            lvl,
+        ),
+        Value::VLower(a) => Term::TLower(Box::new(quote(size, globals, global_offset, *a))),
         Value::VIntervalTy => Term::TIntervalTy,
         Value::VInterval(i) => Term::TInterval(i),
         Value::VIntervalVar(level) => level_to_var(size, level),
@@ -1915,6 +1974,9 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
                 Box::new(quote(size, globals, global_offset, *base)),
             )
         }
+        Value::VDelay(a) => Term::TDelay(Box::new(quote(size, globals, global_offset, *a))),
+        Value::VNext(a) => Term::TNext(Box::new(quote(size, globals, global_offset, *a))),
+        Value::VForce(a) => Term::TForce(Box::new(quote(size, globals, global_offset, *a))),
     }
 }
 
@@ -1984,6 +2046,7 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             )
         }
         Neutral::NMeta(i) => Term::Meta(i),
+        Neutral::NForce(n) => Term::TForce(Box::new(quote_neutral(size, globals, global_offset, *n))),
     }
 }
 

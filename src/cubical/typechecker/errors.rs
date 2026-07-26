@@ -30,6 +30,12 @@ pub enum TypeError {
     ExpectedData(Term),
     #[allow(dead_code)]
     PathPNotTypeFamily(Term),
+    /// Structural recursion guard check failed.
+    TerminationViolation {
+        datatype: Name,
+        case: Name,
+        msg: String,
+    },
 }
 
 /// Wrapper that attaches definition context to a TypeError.
@@ -129,6 +135,13 @@ impl fmt::Display for TypeError {
             }
             TypeError::PathPNotTypeFamily(ty) => {
                 write!(f, "  PathP requires a type family, but found:\n    {}", ty)
+            }
+            TypeError::TerminationViolation { datatype, case, msg } => {
+                write!(
+                    f,
+                    "  Termination violation in '{}' case of '{}':\n    {}",
+                    case, datatype, msg
+                )
             }
         }
     }

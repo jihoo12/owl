@@ -42,8 +42,17 @@ impl std::error::Error for ParseError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decl {
-    Def { name: Name, ty: Term, val: Term },
+    Def { name: Name, ty: Term, val: Term, by_wf: bool },
     Data(Datatype),
+    /// Mutually-defined inductive types: `inductive A where ... with B where ...`
+    DataMutual(Vec<Datatype>),
+    /// Induction-recursion: `inductive D where ... with f : T := e`
+    DataWithFunc {
+        dt: Datatype,
+        func_name: Name,
+        func_ty: Term,
+        func_val: Term,
+    },
     Import { path: String },
 }
 
@@ -103,6 +112,14 @@ impl ProgramParser {
         match &decl {
             Decl::Def { .. } => {}
             Decl::Data(dt) => self.parser.datatypes.push(dt.clone()),
+            Decl::DataMutual(dts) => {
+                for dt in dts {
+                    self.parser.datatypes.push(dt.clone());
+                }
+            }
+            Decl::DataWithFunc { dt, .. } => {
+                self.parser.datatypes.push(dt.clone());
+            }
             Decl::Import { .. } => {}
         }
         Ok(Some(decl))
@@ -156,7 +173,22 @@ pub fn typecheck_program(
                 // Make the datatype available to all subsequent declarations.
                 dts.push(dt);
             }
-            Decl::Def { name, ty, val } => {
+            Decl::DataMutual(new_dts) => {
+                for dt in &new_dts {
+                    crate::cubical::syntax::check_datatype_positivity(dt)
+                        .map_err(|e| format!("{}", e))?;
+                    dts.push(dt.clone());
+                }
+            }
+            Decl::DataWithFunc { dt, func_name, func_ty, func_val } => {
+                crate::cubical::syntax::check_datatype_positivity(&dt)
+                    .map_err(|e| format!("{}", e))?;
+                dts.push(dt.clone());
+                check_closed_dt(&dts, &func_val, &func_ty)
+                    .map_err(|e| format!("type error in '{}': {}", func_name, e))?;
+                defs.push((func_name, func_ty, func_val));
+            }
+            Decl::Def { name, ty, val, .. } => {
                 // Check the definition body against its declared type, with
                 // all datatypes declared so far in scope.
                 check_closed_dt(&dts, &val, &ty)

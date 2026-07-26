@@ -32,6 +32,10 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             format!("fun {} => {}", x, show_term(&env2, b))
         }
         Term::TUniv(n) => format!("U{}", n),
+        Term::TProp => "Prop".to_string(),
+        Term::TSSet => "SSet".to_string(),
+        Term::TLift(a, lvl) => format!("lift {} {}", show_term(env, a), lvl),
+        Term::TLower(a) => format!("lower {}", show_term(env, a)),
         Term::TIntervalTy => "I".to_string(),
         Term::TPi(x, a, b) => {
             let mut env2 = vec![x.clone()];
@@ -220,6 +224,9 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             let tactic_strs: Vec<String> = tactics.iter().map(|t| show_tactic(env, t)).collect();
             format!("by {}", tactic_strs.join("; "))
         }
+        Term::TDelay(a) => format!("Delay {}", show_term(env, a)),
+        Term::TNext(a) => format!("Next {}", show_term(env, a)),
+        Term::TForce(a) => format!("Force {}", show_term(env, a)),
     }
 }
 

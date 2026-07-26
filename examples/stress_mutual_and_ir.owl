@@ -1,0 +1,78 @@
+-- Stress test for Features 4 & 5: Mutual inductive types and Induction-Recursion
+
+def prop_in_u0 : U0 := Prop
+def sset_in_u1 : U1 := SSet
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+def mul : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => zero
+  | suc m' => add n (mul m' n)
+
+def power : Nat -> Nat -> Nat := fun base exp =>
+  match exp return Nat with
+  | zero => suc zero
+  | suc e => mul base (power base e)
+
+def two_exp_three : Nat := power (suc (suc zero)) (suc (suc (suc zero)))
+
+inductive even where
+  | even_zero : even
+  | even_suc : even -> even
+with inductive odd where
+  | odd_one : odd
+  | odd_suc : odd -> odd
+
+def even_val : even := even_suc (even_suc even_zero)
+def odd_val : odd := odd_suc (odd_suc odd_one)
+
+inductive Expr where
+  | enat : Nat -> Expr
+  | eadd : Expr -> Expr -> Expr
+with inductive Ty where
+  | tnat : Ty
+  | tarr : Ty -> Ty -> Ty
+
+def my_expr : Expr := enat (suc (suc zero))
+def complex_ty : Ty := tarr (tarr tnat tnat) tnat
+
+inductive A where
+  | a1 : A
+with inductive B where
+  | b1 : A -> B
+with inductive C where
+  | c1 : B -> C
+
+def c_val : C := c1 (b1 a1)
+
+inductive Desc where
+  | d_nat : Desc
+  | d_arr : Desc -> Desc -> Desc
+with evalDesc : Desc -> Nat :=
+  fun d =>
+    match d return Nat with
+    | d_nat => suc zero
+    | d_arr d1 d2 => add (evalDesc d1) (evalDesc d2)
+
+def test_ir : Nat := evalDesc (d_arr d_nat d_nat)
+
+inductive Fin where
+  | fzero : Fin
+  | fsuc : Fin -> Fin
+with finToNat : Fin -> Nat :=
+  fun f =>
+    match f return Nat with
+    | fzero => zero
+    | fsuc f' => suc (finToNat f')
+
+def fin_val : Nat := finToNat (fsuc (fsuc fzero))
+
+def main : Nat := add test_ir fin_val

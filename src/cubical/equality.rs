@@ -23,11 +23,15 @@ pub fn term_size(t: &Term) -> usize {
         | Term::TUniv(_)
         | Term::TIntervalTy
         | Term::TInterval(_)
-        | Term::TCube(_) => 1,
+        | Term::TCube(_)
+        | Term::TProp
+        | Term::TSSet => 1,
 
         Term::TAbs(_, b) | Term::PLam(_, b) | Term::TUa(b) | Term::TFst(b) | Term::TSnd(b) => {
             1 + term_size(b)
         }
+
+        Term::TLift(a, _) | Term::TLower(a) => 1 + term_size(a),
 
         Term::TApp(f, a)
         | Term::PApp(f, a)
@@ -106,6 +110,7 @@ pub fn term_size(t: &Term) -> usize {
             1 + args.iter().map(|a| term_size(a)).sum::<usize>()
                 + term_size(r) + term_size(s)
         }
+        Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => 1 + term_size(a),
     }
 }
 

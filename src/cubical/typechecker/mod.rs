@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 
 pub mod errors;
+pub mod termination;
 pub use errors::TypeError;
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
@@ -177,6 +178,8 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
             Ok(i.max(j))
         }
         _ => match nbe_eval(t) {
+            Term::TProp => Ok(0),   // Prop : U0
+            Term::TSSet => Ok(1),   // SSet : U1
             Term::TUniv(n) => Ok(n),
             Term::TData(d, _) => {
                 let level = dts.iter()
@@ -608,6 +611,33 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
 
         // Universe: U_n : U_{n+1}
         Term::TUniv(n) => Ok(Term::TUniv(n + 1)),
+
+        // Subuniverses
+        Term::TProp => Ok(Term::TUniv(0)),   // Prop : U0
+        Term::TSSet => Ok(Term::TUniv(1)),   // SSet : U1
+
+        // Universe lifting: lift A m : U_{max(n,m)} when A : U_n
+        Term::TLift(a, m) => {
+            let n = type_level_dt(dts, ctx, a)?;
+            Ok(Term::TUniv(n.max(*m)))
+        }
+        // Universe lowering: lower A : U_n when A : U_{n+1}
+        Term::TLower(a) => {
+            match nbe_eval(a) {
+                Term::TLift(inner, _m) => {
+                    let lvl = type_level_dt(dts, ctx, &inner)?;
+                    Ok(Term::TUniv(lvl))
+                }
+                other => {
+                    let ty = type_level_dt(dts, ctx, &other)?;
+                    if ty > 0 {
+                        Ok(Term::TUniv(ty - 1))
+                    } else {
+                        Ok(Term::TUniv(0))
+                    }
+                }
+            }
+        }
 
         // Application: f a  where  f : Π(x:A).B
         Term::TApp(f, a) => match infer_dt(dts, ctx, f) {
@@ -1802,11 +1832,48 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 SKIP_PLAM_ENDPT.with(|c| c.set(false));
             }
 
+            // Structural recursion guard check.
+            if !crate::cubical::typechecker::termination::should_skip_guard() {
+                match crate::cubical::typechecker::termination::check_guard(&d, cases) {
+                    crate::cubical::typechecker::termination::GuardStatus::Ok => {}
+                    crate::cubical::typechecker::termination::GuardStatus::Violation { case, msg } => {
+                        return Err(TypeError::TerminationViolation {
+                            datatype: d.clone(),
+                            case,
+                            msg,
+                        });
+                    }
+                }
+            }
+
             // Return type: motive applied to the scrutinee.
             Ok(nbe_eval(&Term::TApp(
                 motive.clone(),
                 scrut.clone(),
             )))
+        }
+
+        // -- Coinduction ---------------------------------------------------------
+        // Delay A : U_n when A : U_n
+        Term::TDelay(a) => {
+            let a_ty = infer_dt(dts, ctx, a)?;
+            Ok(a_ty)
+        }
+        // Next : A -> Delay A
+        Term::TNext(a) => {
+            let a_ty = infer_dt(dts, ctx, a)?;
+            Ok(Term::TDelay(Box::new(a_ty)))
+        }
+        // Force : Delay A -> A
+        Term::TForce(a) => {
+            let delay_ty = infer_dt(dts, ctx, a)?;
+            // delay_ty should be Delay B for some B
+            match nbe_eval(&delay_ty) {
+                Term::TDelay(b) => Ok(*b),
+                other => Err(TypeError::Other(
+                    format!("Force expects a Delay type, but got: {}", other),
+                )),
+            }
         }
     }
 }
@@ -2323,6 +2390,23 @@ fn term_to_dnf(t: &Term) -> DNF {
 /// - `TPartial(phi, A) ≤ TPartial(psi, A)` when `phi ⇒ psi` (cofibration subtyping)
 fn cumulativity_check(expected: &Term, inferred: &Term) -> bool {
     match (expected, inferred) {
+        // Prop ≤ U0 (cumulativity: Prop is a subuniverse of U0)
+        (Term::TUniv(m), Term::TProp) if *m >= 0 => true,
+        // SSet ≤ U1
+        (Term::TUniv(m), Term::TSSet) if *m >= 1 => true,
+        // Prop ≤ Prop
+        (Term::TProp, Term::TProp) => true,
+        // SSet ≤ SSet
+        (Term::TSSet, Term::TSSet) => true,
+        // Lift cumulativity: lift A m ≤ lift B m when A ≤ B
+        (Term::TLift(a_exp, m1), Term::TLift(a_inf, m2)) if m1 == m2 => {
+            cumulativity_check(a_exp, a_inf)
+        }
+        // Lower cumulativity: lower A ≤ lower B when A ≤ B
+        (Term::TLower(a_exp), Term::TLower(a_inf)) => {
+            cumulativity_check(a_exp, a_inf)
+        }
+
         // Universe cumulativity: U_n is subtype of U_m when n ≤ m
         (Term::TUniv(m), Term::TUniv(n)) => n <= m,
 
@@ -2344,6 +2428,24 @@ fn cumulativity_check(expected: &Term, inferred: &Term) -> bool {
             // phi_inf ⇒ phi_exp means the inferred is defined on a "larger" face,
             // so it's a valid subtype.
             dnf_leq(&phi_inf_dnf, &phi_exp_dnf) && cumulativity_check(a_exp, a_inf)
+        }
+
+        // Inductive type cumulativity: same datatype, parameters checked covariantly.
+        // TData(d, ps) ≤ TData(d, ps') when each parameter p_i ≤ p'_i.
+        // Different datatypes are never subtypes of each other.
+        (Term::TData(d_exp, ps_exp), Term::TData(d_inf, ps_inf)) => {
+            if d_exp != d_inf || ps_exp.len() != ps_inf.len() {
+                return false;
+            }
+            ps_exp.iter().zip(ps_inf.iter()).all(|(a, b)| cumulativity_check(a, b))
+        }
+
+        // Path type cumulativity: Path A u v ≤ Path A' u' v' when A ≤ A' (covariant),
+        // u ≤ u' and v ≤ v' (endpoints covariant).
+        (Term::TPath(a_exp, u_exp, v_exp), Term::TPath(a_inf, u_inf, v_inf)) => {
+            cumulativity_check(a_exp, a_inf)
+                && cumulativity_check(u_exp, u_inf)
+                && cumulativity_check(v_exp, v_inf)
         }
 
         _ => false,

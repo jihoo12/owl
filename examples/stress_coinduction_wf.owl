@@ -1,0 +1,48 @@
+-- Stress test: Well-founded recursion and Coinduction
+
+-- ============================================================
+-- Part 1: Well-founded recursion (by_wf)
+-- ============================================================
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Simple structural recursion
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+-- Well-founded recursion: explicit annotation allows non-structural recursion
+def double : Nat -> Nat by_wf := fun n =>
+  match n return Nat with
+  | zero => zero
+  | suc n' => suc (suc (double n'))
+
+def double_test : Nat := double (suc (suc zero))
+
+-- ============================================================
+-- Part 2: Coinduction (Delay / Next / Force)
+-- ============================================================
+
+-- Delay A is the type of delayed computations
+-- Next : A -> Delay A    (constructor)
+-- Force : Delay A -> A   (destructor with beta rule: Force (Next x) = x)
+
+def wrap : forall (A : U0), A -> Delay A := fun A x => Next x
+
+def unwrap : forall (A : U0), Delay A -> A := fun A d => Force d
+
+-- Round-trip: unwrap (wrap x) = x (by the Force/Next beta rule)
+def roundtrip_test : Nat := unwrap Nat (wrap Nat (suc zero))
+
+-- Identity as a delayed computation
+def id_delayed : forall (A : U0), A -> A := fun A x => Force (Next x)
+
+def id_test : Nat := id_delayed Nat (suc (suc zero))
+
+-- Force on neutral: force a delayed addition
+def force_add : Nat -> Nat := fun n => Force (Next (add n n))
+
+def force_add_test : Nat := force_add (suc zero)

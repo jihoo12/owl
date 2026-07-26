@@ -39,6 +39,10 @@
 
 - [x] Induction-recursion — `inductive D where ... | with f : T := e` syntax. `Decl::DataWithFunc { dt, func_name, func_ty, func_val }` variant. Function name added to parser `global_env` for self-reference. Driver `process_data_with_func` calls `process_data` then `process_def`. Parser `sync_from_env` adds func_name to global_env for subsequent declarations.
 
+- [x] Well-founded recursion — `by_wf` annotation on `def` disables structural guard check via thread-local flag. Parser uses `stop_at_by_wf` to correctly parse the annotation. Wired in `process_def` and `termination.rs`.
+
+- [x] Coinduction — `Delay A` type, `Next` constructor, `Force` destructor with `Force (Next x) = x` beta rule. Added `TDelay`/`TNext`/`TForce` to Term, `VDelay`/`VNext`/`VForce` to Value, `NForce` to Neutral. Full pipeline: shift/subst/max_var, pretty-printer, parser (prefix operators), NbE eval/quote, typechecker (Delay A : U_n when A : U_n, Force : Delay A -> A), equality, positivity. Parser `Delay` in `parse_atom`, `Next`/`Force` in `parse_prefix_or_atom`.
+
 - [x] Stress test and documentation — `examples/stress_mutual_and_ir.owl` exercises all 5 new features. `docs/reference.md` updated with Prop/SSet, lift/lower, mutual inductives, induction-recursion, termination guard, and worked examples.
 
 ---
@@ -81,8 +85,9 @@
 
 - [x] **Termination / Guard checking** — Structural recursion guard via `termination.rs`. Recursive calls must pass a case binder as scrutinee.
 
-- **Well-founded recursion** — Not yet implemented.
-- **Coinduction** — For infinite data types, not yet implemented.
+- [x] **Well-founded recursion** — `by_wf` annotation on `def` disables structural guard check.
+
+- [x] **Coinduction** — `Delay A` type with `Next` constructor and `Force` destructor.
 
 ### 3. HIT Improvements
 

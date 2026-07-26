@@ -2,3 +2,6 @@
 .venv
 # Added by code-review-graph
 .code-review-graph/
+
+# rust-analyzer-db database
+rust_code.db
