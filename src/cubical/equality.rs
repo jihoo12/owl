@@ -262,6 +262,16 @@ pub fn infer_lam_dom(ctx: &Ctx, neutral: &Term) -> Option<Term> {
 // Core eta-equality
 // ---------------------------------------------------------------------------
 
+/// Build `PApp(...PApp(TCon(d,c,args), arg1)..., argN)` from a TCon base
+/// and optional first interval argument.
+fn build_papp_chain(d: &str, c: &str, args: &[Term], first_ivar: Option<&Term>) -> Term {
+    let base = Term::TCon(d.to_string(), c.to_string(), args.to_vec());
+    match first_ivar {
+        Some(r) => Term::PApp(Box::new(base), Box::new(r.clone())),
+        None => base,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct EtaMemoKey {
     fuel: usize,
@@ -432,6 +442,42 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
             eta_eq_memo(fuel, ctx, p1, p2, memo),
             eta_eq_memo(fuel, ctx, r1, r2, memo),
         );
+    }
+
+    // ------------------------------------------------------------------
+    // TPCon / TSqCon / TCellCon ↔ TCon + PApp structural equivalence.
+    // These are different AST representations of the same thing:
+    //   TPCon(d,c,args,r) ≡ PApp(TCon(d,c,args), r)
+    //   TSqCon(d,c,args,r,s) ≡ PApp(PApp(TCon(d,c,args), r), s)
+    //   TCellCon(d,c,args,[r1..rn]) ≡ PApp(...PApp(TCon(d,c,args),r1)...rn)
+    // ------------------------------------------------------------------
+    if let (Term::TPCon(d1, c1, args1, r1), _) = (t1, t2) {
+        let papp_form = build_papp_chain(d1, c1, args1, Some(r1));
+        return eta_eq_memo(fuel, ctx, &papp_form, t2, memo);
+    }
+    if let (_, Term::TPCon(d2, c2, args2, r2)) = (t1, t2) {
+        let papp_form = build_papp_chain(d2, c2, args2, Some(r2));
+        return eta_eq_memo(fuel, ctx, t1, &papp_form, memo);
+    }
+    if let (Term::TSqCon(d1, c1, args1, r1, s1), _) = (t1, t2) {
+        let papp_form = build_papp_chain(d1, c1, args1, Some(r1));
+        let papp_form = Term::PApp(Box::new(papp_form), Box::new((**s1).clone()));
+        return eta_eq_memo(fuel, ctx, &papp_form, t2, memo);
+    }
+    if let (_, Term::TSqCon(d2, c2, args2, r2, s2)) = (t1, t2) {
+        let papp_form = build_papp_chain(d2, c2, args2, Some(r2));
+        let papp_form = Term::PApp(Box::new(papp_form), Box::new((**s2).clone()));
+        return eta_eq_memo(fuel, ctx, t1, &papp_form, memo);
+    }
+    if let (Term::TCellCon(d1, c1, args1, ivars1), _) = (t1, t2) {
+        let papp_form = build_papp_chain(d1, c1, args1, None);
+        let papp_form = ivars1.iter().fold(papp_form, |f, iv| Term::PApp(Box::new(f), Box::new(iv.clone())));
+        return eta_eq_memo(fuel, ctx, &papp_form, t2, memo);
+    }
+    if let (_, Term::TCellCon(d2, c2, args2, ivars2)) = (t1, t2) {
+        let papp_form = build_papp_chain(d2, c2, args2, None);
+        let papp_form = ivars2.iter().fold(papp_form, |f, iv| Term::PApp(Box::new(f), Box::new(iv.clone())));
+        return eta_eq_memo(fuel, ctx, t1, &papp_form, memo);
     }
 
     // ------------------------------------------------------------------

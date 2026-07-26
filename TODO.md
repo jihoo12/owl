@@ -102,7 +102,7 @@
 - **HIT elimination improvements** — Better support for:
   - [x] Nested pattern matching on HITs — Fixed termination checker: `motive_targets_datatype` now recognizes `TData(d, _)` directly (not just `TApp(f, TData(d, _))`). `check_body_guard` else branch decomposes TElim subterms instead of recursing through `check_body_guard_deep`. See `stress_hit_elimination.owl` for 4-level nested match tests.
   - [x] Dependent elimination with complex motives — Fixed oscillation in `check_dt`: added 2-cycle detection (`nf == *t`) with retry using double-reduced term to break the loop. Removed debug instrumentation.
-  - [ ] Higher-dimensional pattern matching
+  - [x] Higher-dimensional pattern matching — CellCon boundary coherence: `apply_literal` for interval substitution with `strip_n_plams`/`shift(-n)` for PLam context. `TCellCon` case in `apply_literal` + `reduce_pcon_endpoints_dt`. SqCon endpoint reduction via `find_sqcon` fallback in PApp case (face_j0/j1 for first interval, face_i0/i1 for second). TPCon/TSqCon/TCellCon ↔ PApp(TCon) structural congruence in `eta_eq`. `torus_id.owl` and `stress_hits_cells.owl` pass.
 
 ### 4. Proof Assistant Features
 

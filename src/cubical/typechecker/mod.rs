@@ -94,16 +94,18 @@ pub fn require_equal_endpt(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(),
         EtaResult::Equal => Ok(()),
         EtaResult::NotEqual => {
             let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
+            let ne1 = nbe_eval(expected);
+            let ne2 = nbe_eval(got);
             Err(TypeError::Other(format!(
                 "endpoint mismatch (ctx_depth={}, ctx={:?})\
                  \n  expected={}  [raw={}]\
                  \n  got={}  [raw={}]",
                 ctx.len(),
                 ctx.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
-                show_term(&names, &nbe_eval(expected)),
-                nbe_eval(expected),
-                show_term(&names, &nbe_eval(got)),
-                nbe_eval(got),
+                show_term(&names, &ne1),
+                ne1,
+                show_term(&names, &ne2),
+                ne2,
             )))
         }
         EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted(
@@ -380,6 +382,12 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
                 Box::new(go(r, n, val)),
                 Box::new(go(s, n, val)),
             )),
+            Term::TCellCon(data, con, args, ivars) => nbe_eval(&Term::TCellCon(
+                data.clone(),
+                con.clone(),
+                args.iter().map(|a| go(a, n, val)).collect(),
+                ivars.iter().map(|a| go(a, n, val)).collect(),
+            )),
             Term::TElim(motive, cases, scrut) => nbe_eval(&Term::TElim(
                 Box::new(go(motive, n, val)),
                 cases
@@ -410,6 +418,19 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
     }
 
     go(t, n, &val)
+}
+
+/// Strip exactly `n` outer PLam layers from a term, returning the inner body.
+/// Returns `Err` if the term doesn't have enough PLam layers.
+fn strip_n_plams(t: &Term, n: usize) -> Result<&Term, ()> {
+    let mut cur = t;
+    for _ in 0..n {
+        match cur {
+            Term::PLam(_, b) => cur = b.as_ref(),
+            _ => return Err(()),
+        }
+    }
+    Ok(cur)
 }
 
 /// Check that `tube_at0 ≡ base` on every face of `phi`'s DNF.
@@ -1948,6 +1969,43 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 SKIP_PLAM_ENDPT.with(|c| c.set(true));
                 check_dt(dts, &case_ctx_sq, &case.body, &expected_body_ty_sq)?;
                 SKIP_PLAM_ENDPT.with(|c| c.set(false));
+
+                // Boundary coherence for sqcon cases:
+                // Strip the two PLam binders from the case body, then use
+                // apply_literal to substitute concrete endpoints for each
+                // interval variable.  Inside inner, IVar(0)=s (innermost)
+                // and IVar(1)=r (outermost).
+                if let Term::PLam(_, inner_box) = case.body.as_ref() {
+                if let Term::PLam(_, inner) = inner_box.as_ref() {
+                    // body @ r0 @ s0
+                    let body_r0_s0 = {
+                        let t = apply_literal(&Literal::NegVar(1), inner);
+                        let t = apply_literal(&Literal::NegVar(0), &t);
+                        nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
+                    };
+                    // body @ r0 @ s1
+                    let body_r0_s1 = {
+                        let t = apply_literal(&Literal::NegVar(1), inner);
+                        let t = apply_literal(&Literal::Pos(0), &t);
+                        nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
+                    };
+                    // body @ r1 @ s0
+                    let body_r1_s0 = {
+                        let t = apply_literal(&Literal::Pos(1), inner);
+                        let t = apply_literal(&Literal::NegVar(0), &t);
+                        nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
+                    };
+                    // body @ r1 @ s1
+                    let body_r1_s1 = {
+                        let t = apply_literal(&Literal::Pos(1), inner);
+                        let t = apply_literal(&Literal::Pos(0), &t);
+                        nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
+                    };
+                    require_equal_endpt(&case_ctx_sq, &shift(2, 0, &face_i0_case), &body_r0_s0)?;
+                    require_equal_endpt(&case_ctx_sq, &shift(2, 0, &face_i1_case), &body_r0_s1)?;
+                    require_equal_endpt(&case_ctx_sq, &shift(2, 0, &face_i0_case), &body_r1_s0)?;
+                    require_equal_endpt(&case_ctx_sq, &shift(2, 0, &face_i1_case), &body_r1_s1)?;
+                } }
             }
 
             // Check all n-dimensional cell constructor cases.
@@ -2062,6 +2120,65 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 SKIP_PLAM_ENDPT.with(|c| c.set(true));
                 check_dt(dts, &case_ctx_cell, &case.body, &expected_body_ty)?;
                 SKIP_PLAM_ENDPT.with(|c| c.set(false));
+
+                // Boundary coherence for cellcon cases:
+                // For level k (0 = outermost), strip (k+1) outermost PLams
+                // from the case body, substitute the exposed interval vars,
+                // keep the remaining (dim-k-1) inner PLams, then compare
+                // with face_cases[2*(dim-1-k)] shifted by (k+1).
+                //
+                // IMPORTANT: apply_literal uses a de Bruijn-level counter n
+                // that increments under PLams. inner_at_k has `keep_count`
+                // remaining PLams, so apply_literal(NegVar(v), inner_at_k)
+                // would target index v+keep_count. We adjust by subtracting
+                // keep_count from each index so the target is correct.
+                for k in 0..dim {
+                    let face_idx = 2 * (dim - 1 - k);
+                    let strip_count = k + 1;
+                    let keep_count = dim - strip_count;
+
+                    if let Ok(inner_at_k) = strip_n_plams(&case.body, strip_count) {
+                        // At this level, after stripping strip_count PLams:
+                        // IVar(0..keep_count-1) are still bound by remaining PLams
+                        // IVar(keep_count..dim-1) are free (the stripped vars)
+                        // The free var for the current level is IVar(keep_count)
+                        // (= dim - strip_count), and outer ones are IVar(keep_count+1..dim-1).
+                        //
+                        // adjust(v) = v - keep_count compensates for the keep_count
+                        // remaining PLams that apply_literal will enter (incrementing n).
+
+                        // at_i0: outer k free vars = I0, current var = I0
+                        let mut t_i0 = inner_at_k.clone();
+                        // Substitute outer free vars (keep_count+1 .. dim-1) → I0
+                        for v in (keep_count + 1)..dim {
+                            t_i0 = apply_literal(&Literal::NegVar((v - keep_count) as i32), &t_i0);
+                        }
+                        // Current var (keep_count) → I0
+                        t_i0 = apply_literal(&Literal::NegVar(0), &t_i0);
+                        let at_i0 = nbe_eval(&shift(-(strip_count as i32), 0, &reduce_pcon_endpoints_dt(dts, &t_i0)));
+
+                        // at_i1: outer k free vars = I0, current var = I1
+                        let mut t_i1 = inner_at_k.clone();
+                        for v in (keep_count + 1)..dim {
+                            t_i1 = apply_literal(&Literal::NegVar((v - keep_count) as i32), &t_i1);
+                        }
+                        t_i1 = apply_literal(&Literal::Pos(0), &t_i1);
+                        let at_i1 = nbe_eval(&shift(-(strip_count as i32), 0, &reduce_pcon_endpoints_dt(dts, &t_i1)));
+
+                        let expected_i0 = shift(strip_count as i32, 0, &face_cases[face_idx]);
+                        let expected_i1 = shift(strip_count as i32, 0, &face_cases[face_idx + 1]);
+                        require_equal_endpt(
+                            &case_ctx_cell,
+                            &expected_i0,
+                            &at_i0,
+                        )?;
+                        require_equal_endpt(
+                            &case_ctx_cell,
+                            &expected_i1,
+                            &at_i1,
+                        )?;
+                    }
+                }
             }
 
             // Structural recursion guard check.
@@ -2257,8 +2374,10 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
                         };
                         let face_inst = subst_face(face);
                         // The face is a (dim-1)-dimensional term; apply to remaining ivars.
+                        // ivar_nfs[0] is the consumed outermost endpoint; skip it.
+                        // Apply remaining in outermost-first order (matching PApp apply order).
                         let mut result = nbe_eval(&face_inst);
-                        for iv in ivar_nfs.iter().rev().skip(1) {
+                        for iv in ivar_nfs[1..].iter() {
                             result = reduce_pcon_endpoints_dt(dts, &Term::PApp(
                                 Box::new(result),
                                 Box::new(iv.clone()),
@@ -2289,8 +2408,9 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
             };
             if r_is_endpoint {
                 if let Term::TCon(ref d, ref pc, ref args) = **p {
-                    if let Some(dt) = dts.iter().find(|dt| &dt.name == d)
-                        && let Some(sig) = dt.find_pcon(pc) {
+                    if let Some(dt) = dts.iter().find(|dt| &dt.name == d) {
+                        // Try pcon first
+                        if let Some(sig) = dt.find_pcon(pc) {
                             let is_i0 = match &r_nf {
                                 Term::TInterval(i) => crate::cubical::interval::eval_interval(i) == crate::cubical::interval::dnf_bot(),
                                 _ => false,
@@ -2305,10 +2425,33 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
                             }
                             return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face_inst));
                         }
+                        // Try sqcon: first PApp on a bare sqcon TCon
+                        // applies to the r (outer) interval.
+                        // sq @ 0 = face_j0, sq @ 1 = face_j1
+                        if let Some(sig) = dt.sqcons.iter().find(|c| &c.name == pc) {
+                            let is_i0 = match &r_nf {
+                                Term::TInterval(i) => crate::cubical::interval::eval_interval(i) == crate::cubical::interval::dnf_bot(),
+                                _ => false,
+                            };
+                            let face = if is_i0 { &sig.face_j0 } else { &sig.face_j1 };
+                            let arity = args.len();
+                            let reduced_args: Vec<Term> =
+                                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
+                            let mut face_inst = face.clone();
+                            for k in (0..arity).rev() {
+                                face_inst = subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
+                            }
+                            return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face_inst));
+                        }
+                    }
                 }
             }
             let p2 = reduce_pcon_endpoints_dt(dts, p);
             nbe_eval(&Term::PApp(Box::new(p2), Box::new(r_nf)))
+        }
+        // Recurse into PLam so that e.g. `PLam(k, cube3 @ i0 @ j @ k)` reduces too.
+        Term::PLam(name, body) => {
+            Term::PLam(name.clone(), Box::new(reduce_pcon_endpoints_dt(dts, body)))
         }
         _ => t,
     }
