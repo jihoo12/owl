@@ -1,0 +1,174 @@
+-- stress_hit_computation.owl — HIT computation rules and elimination improvements
+--
+-- Exercises: hcomp/fill/comp through HIT constructors,
+-- dependent elimination with complex motives.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. hcomp through Nat constructors (Data type decomposition)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_nat_zero : Nat :=
+  hcomp Nat 1 (<i> zero) zero
+
+def hcomp_nat_suc : Nat :=
+  hcomp Nat 1 (<i> suc zero) (suc zero)
+
+def hcomp_nat_suc_suc : Nat :=
+  hcomp Nat 1 (<i> suc (suc zero)) (suc (suc zero))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. comp through Nat constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def comp_nat_zero : Nat :=
+  comp Nat 1 (<i> zero) zero
+
+def comp_nat_suc : Nat :=
+  comp Nat 1 (<i> suc zero) (suc zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. fill through Nat constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def fill_nat_zero_at1 : Nat :=
+  fill Nat 1 (<i> zero) zero @ i1
+
+def fill_nat_suc_at1 : Nat :=
+  fill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+def fill_nat_at0 : Nat :=
+  fill Nat 1 (<i> suc zero) (suc zero) @ i0
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. hfill through Nat constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hfill_nat_at1 : Nat :=
+  hfill Nat 1 (<i> suc zero) (suc zero) @ i1
+
+def hfill_nat_at0 : Nat :=
+  hfill Nat 1 (<i> suc zero) (suc zero) @ i0
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. hcomp/comp with bottom face (no-op)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_bot_nat : Nat :=
+  hcomp Nat 0 (<i> suc zero) (suc (suc zero))
+
+def comp_bot_nat : Nat :=
+  comp Nat 0 (<i> suc zero) (suc (suc zero))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. hcomp/comp on Bool constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_bool : Bool :=
+  hcomp Bool 1 (<i> true) true
+
+def comp_bool : Bool :=
+  comp Bool 1 (<i> false) false
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Circle S1 with path constructor
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive S1 where
+  | base : S1
+  | loop : S1 [ base , base ]
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. Pattern matching on S1 (constant motive)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def elim_s1_const : S1 -> Nat :=
+  fun s => match s return Nat with
+  | base => zero
+  | loop i => <j> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. Dependent elimination with path-valued motive (identity on S1)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def s1_id : S1 -> S1 :=
+  fun s => match s return S1 with
+  | base => base
+  | loop i => <j> loop @ j
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. Dependent elimination with complex motive (function type)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def elim_fn_motive : S1 -> (Nat -> Nat) :=
+  fun s => match s return (Nat -> Nat) with
+  | base => fun m => m
+  | loop i => <j> fun m => m
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 11. Dependent elimination with sigma motive
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def elim_sigma_motive : S1 -> Nat * Nat :=
+  fun s => match s return Nat * Nat with
+  | base => (zero , zero)
+  | loop i => <j> (zero , zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 12. Suspension with dependent elimination
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Susp where
+  | north : Susp
+  | south : Susp
+  | merid : Susp [ north , south ]
+
+-- Constant elimination
+def elim_susp_const : Susp -> Nat :=
+  fun s => match s return Nat with
+  | north => zero
+  | south => zero
+  | merid i => <j> zero
+
+-- Identity on Susp
+def susp_id : Susp -> Susp :=
+  fun s => match s return Susp with
+  | north => north
+  | south => south
+  | merid i => <j> merid @ j
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 13. Transport through S1 (constant family)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def transport_s1_base : S1 :=
+  transport (<i> S1) base
+
+def transport_s1_loop : Path S1 base base :=
+  <i> transport (<j> S1) (loop @ i)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 15. Comp/fill through S1 base constructor
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hcomp_s1_base : S1 :=
+  hcomp S1 1 (<i> base) base
+
+def comp_s1_base : S1 :=
+  comp S1 1 (<i> base) base
+
+def fill_s1_base_at1 : S1 :=
+  fill S1 1 (<i> base) base @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Main entry point
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def main : Nat := hcomp_nat_suc

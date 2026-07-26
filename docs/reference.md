@@ -1640,6 +1640,19 @@ the constructor's arguments are substituted for the binders.
 | `hfill A phi tube base` | `phi = 1` | `tube` |
 | `hfill A phi tube base` | `phi = 0` | `fun j -> base` |
 
+### HIT Computation Rules
+
+hcomp/comp/fill/hfill decompose through data type constructors when the
+tube system is compatible (every tube produces the same constructor as the base):
+
+| Form | Condition | Reduction |
+| ----- | --------- | --------- |
+| `hcomp D phi tube (C args)` | all tubes = `C(tube_args)` | `C(hcomp A₁ phi tube₁ args₁, ...)` |
+| `comp D phi tube (C args)` | all tubes = `C(tube_args)` | `C(comp A₁ phi tube₁ args₁, ...)` |
+
+This decomposes the Kan operation through each constructor argument
+independently, transporting each argument through its type.
+
 ### Nat Display
 
 Natural number values (`TCon("Nat", "suc", [TCon("Nat", "suc", [...])])`)

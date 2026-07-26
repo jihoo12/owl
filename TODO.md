@@ -57,7 +57,7 @@
 
 - [x] **Glue type β-reduction** — `VGlueElem(phi, t, a) @ 0 = a`, `VGlueElem(phi, t, a) @ 1 = t`. Path application on glue elements reduces at interval endpoints.
 
-- [x] **Comp/fill computation for data types** — Transport through data types: `transport_data_con`, `transport_data_pcon`, `transport_data_sqcon` in `nbe/mod.rs`. Each constructor argument is transported through its substituted type via telescope-aware substitution.
+- [x] **Comp/fill decomposition for data types** — `do_hcomp` and `do_comp` in `nbe/mod.rs` decompose through data type constructors. `match_ctor_args` helper extracts constructor args uniformly from VCon/VPCon/VSqCon/VCellCon. When base is a constructor and all tubes produce the same constructor, pushes Kan operation through each argument independently using type instantiation from constructor signature. `fill`/`hfill` benefit automatically (they call comp/hcomp at i=1). Falls through to stuck if tubes don't match.
 
 - [x] **System types as first-class types** — `[phi => a, psi => b]` as a type (not just in comp/hfill). Added `TSystemType(System)` term variant, `VSystemType(DNFSystem)` value, full eval/quote/parser/pretty-printing. Coherence checking via `dnf_meet` on overlapping faces. Parser: `[phi => A, psi => B]` syntax.
 
@@ -93,15 +93,12 @@
 
 - [x] **Higher-dimensional HIT cells** — n-dimensional cell constructors via `[[[...]]]` syntax (bracket depth = dimension). `TCellCon(Name, Name, Vec<Term>, Vec<Term>)` in Term enum, `VCellCon`/`NCellApp` in Value/Neutral enums. `CellConSig` stores faces as `Vec<Term>` (2*n entries, innermost-to-outermost). Type inference builds nested `PathP` type. Endpoint reduction in `reduce_pcon_endpoints_dt`. Parser handles multi-`@` application, match case binding, and constructor resolution. `find_constructor` recognizes cell constructors. Example: `examples/cell_constructors.owl`.
 
-- **HIT computation rules** — Transport/fill through HITs should compute:
-  - Transport along path constructors
-  - Transport along square constructors
-  - Fill operations for HIT constructors
+- [x] **HIT computation rules** — hcomp/comp/fill/hfill decompose through data type constructors when the tube system is compatible (all tubes produce the same constructor). `match_ctor_args` helper extracts constructor args from VCon/VPCon/VSqCon/VCellCon. Per-argument tube systems built by applying each tube at formal interval variable. Argument type instantiation follows `transport_data_con` pattern.
 
 - **HIT elimination improvements** — Better support for:
-  - Nested pattern matching on HITs
-  - Dependent elimination with complex motives
-  - Higher-dimensional pattern matching
+  - [ ] Nested pattern matching on HITs (pre-existing stack overflow bug)
+  - [ ] Dependent elimination with complex motives (pre-existing type error)
+  - [ ] Higher-dimensional pattern matching
 
 ### 4. Proof Assistant Features
 

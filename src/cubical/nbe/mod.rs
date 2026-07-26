@@ -1658,6 +1658,26 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
     }
 }
 
+/// Try to match a constructor value and extract its ordinary + interval args.
+/// Returns (con_name, ordinary_args, interval_args) or None.
+fn match_ctor_args<'a>(v: &'a Value, expected_name: &str) -> Option<(&'a str, Vec<&'a Value>, Vec<&'a Value>)> {
+    match v {
+        Value::VCon(_, name, args) if name == expected_name => {
+            Some((name.as_str(), args.iter().collect(), vec![]))
+        }
+        Value::VPCon(_, name, args, r) if name == expected_name => {
+            Some((name.as_str(), args.iter().collect(), vec![r.as_ref()]))
+        }
+        Value::VSqCon(_, name, args, r, s) if name == expected_name => {
+            Some((name.as_str(), args.iter().collect(), vec![r.as_ref(), s.as_ref()]))
+        }
+        Value::VCellCon(_, name, args, ivars) if name == expected_name => {
+            Some((name.as_str(), args.iter().collect(), ivars.iter().collect()))
+        }
+        _ => None,
+    }
+}
+
 pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSystem, base: Value) -> Value {
     // Filter out ⊥ faces
     let sys: DNFSystem = sys.into_iter().filter(|(phi, _)| *phi != dnf_bot()).collect();
@@ -1769,6 +1789,89 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
                 result
             }
 
+            // ── Data type decomposition: push hcomp through constructor arguments ──
+            (Value::VData(d_name, _), _) => {
+                let (base_con, base_args, base_ivars) = match &base {
+                    Value::VCon(_, name, args) => (name.clone(), args.clone(), vec![]),
+                    Value::VPCon(_, name, args, r) => (name.clone(), args.clone(), vec![(**r).clone()]),
+                    Value::VSqCon(_, name, args, r, s) => (name.clone(), args.clone(), vec![(**r).clone(), (**s).clone()]),
+                    Value::VCellCon(_, name, args, ivars) => (name.clone(), args.clone(), ivars.clone()),
+                    _ => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
+                };
+
+                let dts = current_dts();
+                let dt = match dts.iter().find(|dt| dt.name == *d_name) {
+                    Some(dt) => dt.clone(),
+                    None => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
+                };
+
+                let arg_tys = match dt.find_con(&base_con).map(|s| s.arg_tys.clone())
+                    .or_else(|| dt.find_pcon(&base_con).map(|s| s.arg_tys.clone()))
+                    .or_else(|| dt.find_sqcon(&base_con).map(|s| s.arg_tys.clone()))
+                    .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()))
+                {
+                    Some(tys) => tys,
+                    None => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
+                };
+
+                let n = arg_tys.len();
+                if n == 0 {
+                    return base;
+                }
+
+                let mut per_arg_tubes: Vec<Vec<(DNF, Value)>> = vec![vec![]; n];
+                for (phi, tube) in &sys {
+                    let tube_val = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            iclos.apply_interval_value(formal_i)
+                        }
+                        _ => tube.clone(),
+                    };
+
+                    if let Some((_, tube_args, _)) = match_ctor_args(&tube_val, &base_con) {
+                        if tube_args.len() == n {
+                            for (k, tube_arg) in tube_args.iter().enumerate() {
+                                let tube_arg_plam = Value::VPLam("_".to_string(), IClosure {
+                                    env: vec![],
+                                    globals: globals.clone(),
+                                    global_offset,
+                                    body: quote(1, globals, global_offset, (*tube_arg).clone()),
+                                });
+                                per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
+                            }
+                        } else {
+                            return Value::VHComp(Box::new(a_ty), sys, Box::new(base));
+                        }
+                    } else {
+                        return Value::VHComp(Box::new(a_ty), sys, Box::new(base));
+                    }
+                }
+
+                let mut result_args: Vec<Value> = Vec::new();
+                for k in 0..n {
+                    let mut ty_shifted = arg_tys[k].clone();
+                    for j in (0..=k).rev() {
+                        ty_shifted = shift(1, j as i32, &ty_shifted);
+                    }
+                    for j in 0..k {
+                        let arg_term = quote(0, globals, global_offset, result_args[j].clone());
+                        ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+                    }
+                    let arg_ty = eval_nbe(&[], globals, global_offset, &ty_shifted);
+                    let arg_result = do_hcomp(globals, global_offset, arg_ty, per_arg_tubes[k].clone(), base_args[k].clone());
+                    result_args.push(arg_result);
+                }
+
+                match &base {
+                    Value::VCon(_, _, _) => Value::VCon(d_name.clone(), base_con.clone(), result_args),
+                    Value::VPCon(_, _, _, _) => Value::VPCon(d_name.clone(), base_con.clone(), result_args, Box::new(base_ivars[0].clone())),
+                    Value::VSqCon(_, _, _, _, _) => Value::VSqCon(d_name.clone(), base_con.clone(), result_args, Box::new(base_ivars[0].clone()), Box::new(base_ivars[1].clone())),
+                    Value::VCellCon(_, _, _, _) => Value::VCellCon(d_name.clone(), base_con.clone(), result_args, base_ivars),
+                    _ => unreachable!(),
+                }
+            }
+
             // ── Default: stuck hcomp ──
             _ => Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
         }
@@ -1869,6 +1972,107 @@ pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
 
                 let result = Value::VPair(Box::new(fst_result), Box::new(snd_result));
                 record_step("comp-sigma".into(), "comp (Σ _ _) sys p q".into(), value_str(globals, global_offset, &result));
+                result
+            }
+
+            // ── Data type decomposition: push comp through constructor arguments ──
+            (Value::VData(d_name, _), _) => {
+                let (base_con, base_args, base_ivars) = match &base {
+                    Value::VCon(_, name, args) => (name.clone(), args.clone(), vec![]),
+                    Value::VPCon(_, name, args, r) => (name.clone(), args.clone(), vec![(**r).clone()]),
+                    Value::VSqCon(_, name, args, r, s) => (name.clone(), args.clone(), vec![(**r).clone(), (**s).clone()]),
+                    Value::VCellCon(_, name, args, ivars) => (name.clone(), args.clone(), ivars.clone()),
+                    _ => {
+                        let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                        record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let dts = current_dts();
+                let dt = match dts.iter().find(|dt| dt.name == *d_name) {
+                    Some(dt) => dt.clone(),
+                    None => {
+                        let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                        record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let arg_tys = dt.find_con(&base_con).map(|s| s.arg_tys.clone())
+                    .or_else(|| dt.find_pcon(&base_con).map(|s| s.arg_tys.clone()))
+                    .or_else(|| dt.find_sqcon(&base_con).map(|s| s.arg_tys.clone()))
+                    .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()));
+                let arg_tys = match arg_tys {
+                    Some(tys) => tys,
+                    None => {
+                        let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                        record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let n = arg_tys.len();
+                if n == 0 {
+                    return base;
+                }
+
+                let mut per_arg_tubes: Vec<Vec<(DNF, Value)>> = vec![vec![]; n];
+                for (phi, tube) in &sys {
+                    let tube_val = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            iclos.apply_interval_value(formal_i)
+                        }
+                        _ => tube.clone(),
+                    };
+
+                    if let Some((_, tube_args, _)) = match_ctor_args(&tube_val, &base_con) {
+                        if tube_args.len() == n {
+                            for (k, tube_arg) in tube_args.iter().enumerate() {
+                                let tube_arg_plam = Value::VPLam("_".to_string(), IClosure {
+                                    env: vec![],
+                                    globals: globals.clone(),
+                                    global_offset,
+                                    body: quote(1, globals, global_offset, (*tube_arg).clone()),
+                                });
+                                per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
+                            }
+                        } else {
+                            let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                            record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                            return result;
+                        }
+                    } else {
+                        let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                        record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                }
+
+                let mut result_args: Vec<Value> = Vec::new();
+                for k in 0..n {
+                    let mut ty_shifted = arg_tys[k].clone();
+                    for j in (0..=k).rev() {
+                        ty_shifted = shift(1, j as i32, &ty_shifted);
+                    }
+                    for j in 0..k {
+                        let arg_term = quote(0, globals, global_offset, result_args[j].clone());
+                        ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+                    }
+                    let arg_ty = eval_nbe(&[], globals, global_offset, &ty_shifted);
+                    let arg_result = do_comp(globals, global_offset, arg_ty, per_arg_tubes[k].clone(), base_args[k].clone());
+                    result_args.push(arg_result);
+                }
+
+                let result = match &base {
+                    Value::VCon(_, _, _) => Value::VCon(d_name.clone(), base_con.clone(), result_args),
+                    Value::VPCon(_, _, _, _) => Value::VPCon(d_name.clone(), base_con.clone(), result_args, Box::new(base_ivars[0].clone())),
+                    Value::VSqCon(_, _, _, _, _) => Value::VSqCon(d_name.clone(), base_con.clone(), result_args, Box::new(base_ivars[0].clone()), Box::new(base_ivars[1].clone())),
+                    Value::VCellCon(_, _, _, _) => Value::VCellCon(d_name.clone(), base_con.clone(), result_args, base_ivars),
+                    _ => unreachable!(),
+                };
+                record_step("comp-data".into(), format!("comp (λi. {}) ({} ...)", d_name, base_con), value_str(globals, global_offset, &result));
                 result
             }
 
