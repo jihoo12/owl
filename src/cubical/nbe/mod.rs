@@ -2,7 +2,6 @@
 
 pub mod trace;
 
-use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -16,25 +15,20 @@ use trace::record_step;
 // This allows `do_papp` to look up square-constructor face terms for boundary reduction
 // without threading `dts` through every NbE function signature.
 thread_local! {
-    static CURRENT_DTS: Cell<Option<*const [Datatype]>> = Cell::new(None);
+    static CURRENT_DTS: std::cell::RefCell<Vec<Datatype>> = std::cell::RefCell::new(Vec::new());
 }
 
 /// Set the current datatype definitions for the duration of evaluation.
 pub fn set_current_dts(dts: &[Datatype]) {
-    let ptr = dts as *const [Datatype];
     CURRENT_DTS.with(|cell| {
-        cell.set(Some(ptr));
+        *cell.borrow_mut() = dts.to_vec();
     });
 }
 
 /// Get the current datatype definitions. Returns empty vec if not set.
 fn current_dts() -> Vec<Datatype> {
     CURRENT_DTS.with(|cell| {
-        if let Some(ptr) = cell.get() {
-            unsafe { &*ptr }.to_vec()
-        } else {
-            Vec::new()
-        }
+        cell.borrow().clone()
     })
 }
 

@@ -45,6 +45,10 @@
 
 - [x] Stress test and documentation — `examples/stress_mutual_and_ir.owl` exercises all 5 new features. `examples/stress_hit_elimination.owl` exercises nested pattern matching (4-level deep), dependent elimination, parameterized HITs, and hcomp/fill. `docs/reference.md` updated with Prop/SSet, lift/lower, mutual inductives, induction-recursion, termination guard, and worked examples.
 
+- [x] Parser nested pattern matching — Column-based `|` nesting: records column of first `|` in match, breaks when `self.peek().col < my_col`. Fixed infinite recursion in termination checker via `motive_targets_datatype` + `check_body_guard` else branch. Nested patterns work across all HIT types.
+
+- [x] Safe `CURRENT_DTS` — Replaced `Cell<Option<*const [Datatype]>>` raw pointer with `RefCell<Vec<Datatype>>` in thread-local. Eliminates all `unsafe` from `nbe/mod.rs`.
+
 ---
 
 ## Remaining — Cubical Type Theory Completeness
@@ -97,7 +101,7 @@
 
 - **HIT elimination improvements** — Better support for:
   - [x] Nested pattern matching on HITs — Fixed termination checker: `motive_targets_datatype` now recognizes `TData(d, _)` directly (not just `TApp(f, TData(d, _))`). `check_body_guard` else branch decomposes TElim subterms instead of recursing through `check_body_guard_deep`. See `stress_hit_elimination.owl` for 4-level nested match tests.
-  - [ ] Dependent elimination with complex motives (pre-existing type error: `check_dt` fallthrough loop when `nbe_eval` produces structurally different but semantically equivalent terms)
+  - [x] Dependent elimination with complex motives — Fixed oscillation in `check_dt`: added 2-cycle detection (`nf == *t`) with retry using double-reduced term to break the loop. Removed debug instrumentation.
   - [ ] Higher-dimensional pattern matching
 
 ### 4. Proof Assistant Features
