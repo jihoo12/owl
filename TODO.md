@@ -91,10 +91,7 @@
 
 ### 3. HIT Improvements
 
-- **Higher-dimensional HIT cells** — Currently support path (1D) and square (2D) constructors. Add:
-  - Cube constructors (3D cells)
-  - n-dimensional cell constructors
-  - General boundary specification syntax
+- [x] **Higher-dimensional HIT cells** — n-dimensional cell constructors via `[[[...]]]` syntax (bracket depth = dimension). `TCellCon(Name, Name, Vec<Term>, Vec<Term>)` in Term enum, `VCellCon`/`NCellApp` in Value/Neutral enums. `CellConSig` stores faces as `Vec<Term>` (2*n entries, innermost-to-outermost). Type inference builds nested `PathP` type. Endpoint reduction in `reduce_pcon_endpoints_dt`. Parser handles multi-`@` application, match case binding, and constructor resolution. `find_constructor` recognizes cell constructors. Example: `examples/cell_constructors.owl`.
 
 - **HIT computation rules** — Transport/fill through HITs should compute:
   - Transport along path constructors

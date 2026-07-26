@@ -197,6 +197,12 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             parts.push(format!("@ {} @ {}", show_term(env, r), show_term(env, s)));
             format!("({} {})", c, parts.join(" "))
         }
+        Term::TCellCon(_, c, args, ivars) => {
+            let mut parts: Vec<String> = args.iter().map(|a| show_term(env, a)).collect();
+            let ivar_strs: Vec<String> = ivars.iter().map(|v| format!("@ {}", show_term(env, v))).collect();
+            parts.extend(ivar_strs);
+            format!("({} {})", c, parts.join(" "))
+        }
         Term::TElim(motive, cases, scrut) => {
             let case_strs: Vec<String> = cases
                 .iter()

@@ -1494,6 +1494,124 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             Ok(outer_type)
         }
 
+        // TCellCon(d, cc, args, ivars) :
+        //   PathP (<i_1> PathP (<i_2> ... PathP (<i_n> TData(d, params)) face_0 face_1) ... face_{2n-4} face_{2n-3}) face_{2n-2} face_{2n-1}
+        //
+        // The cell constructor has dimension n = ivars.len().
+        // faces are ordered: [face_0, face_1, face_2, face_3, ..., face_{2n-2}, face_{2n-1}]
+        // where each consecutive pair (face_{2k}, face_{2k+1}) is the boundary
+        // at interval variable i_{n-k} = 0 / i_{n-k} = 1.
+        Term::TCellCon(d, cc, args, ivars) => {
+            let dt = dts
+                .iter()
+                .find(|dt| &dt.name == d)
+                .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+            let sig = dt
+                .find_cellcon(cc)
+                .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), cc.clone()))?;
+            if args.len() != sig.arity() {
+                return Err(TypeError::WrongNumberOfArgs {
+                    con: cc.clone(),
+                    expected: sig.arity(),
+                    got: args.len(),
+                });
+            }
+            let dim = ivars.len();
+            if dim != sig.dimension() {
+                return Err(TypeError::WrongNumberOfArgs {
+                    con: cc.clone(),
+                    expected: sig.dimension(),
+                    got: dim,
+                });
+            }
+            let num_params = dt.params.len();
+            let (param_terms, checked_args) = infer_and_check_params(
+                dts, ctx, &sig.arg_tys, args, num_params,
+            )?;
+            // Check all interval arguments.
+            for iv in ivars {
+                check_interval(ctx, iv)?;
+            }
+            let params = build_params(&param_terms);
+            let data_ty = Term::TData(d.clone(), params.clone());
+
+            if dim == 0 {
+                return Ok(data_ty);
+            }
+
+            // Substitute constructor args into face terms.
+            let arity = sig.arity();
+            let subst_face = |face: &Term| -> Term {
+                let mut t = face.clone();
+                for k in (0..arity).rev() {
+                    t = subst(k as i32, &checked_args[arity - 1 - k], &t);
+                }
+                t
+            };
+
+            let substituted_faces: Vec<Term> = sig.faces.iter().map(|f| subst_face(f)).collect();
+
+            // Check if all interval args are concrete endpoints.
+            let is_endpoint = |t: &Term| -> bool {
+                match nbe_eval(t) {
+                    Term::TInterval(i) => {
+                        let dnf = crate::cubical::interval::eval_interval(&i);
+                        dnf == crate::cubical::interval::dnf_bot() || dnf == crate::cubical::interval::dnf_top()
+                    }
+                    Term::TCube(d) => {
+                        d == crate::cubical::interval::dnf_bot() || d == crate::cubical::interval::dnf_top()
+                    }
+                    _ => false,
+                }
+            };
+            if ivars.iter().all(|iv| is_endpoint(iv)) {
+                return Ok(data_ty);
+            }
+
+            // Build nested PathP type from innermost to outermost.
+            // faces = [f_0, f_1, f_2, f_3, ..., f_{2n-2}, f_{2n-1}]
+            // Type: PathP (<i_1> PathP (<i_2> ... PathP (<i_n> A) f_0 f_1) ... f_{2n-4} f_{2n-3}) f_{2n-2} f_{2n-1}
+            //
+            // Interval variable names: _i1, _i2, ..., _in (innermost to outermost)
+            let ivar_names: Vec<String> = (0..dim)
+                .map(|k| format!("_i{}", k + 1))
+                .collect();
+
+            // Start with the innermost PathP using the last interval variable.
+            let mut result_type = Term::TPath(
+                Box::new(Term::PLam(ivar_names[0].clone(), Box::new(data_ty))),
+                Box::new(substituted_faces[0].clone()),
+                Box::new(substituted_faces[1].clone()),
+            );
+
+            // Wrap with PathPs for each subsequent interval variable (from inner to outer).
+            for k in 1..dim {
+                let body = result_type;
+                result_type = Term::TPath(
+                    Box::new(Term::PLam(ivar_names[k].clone(), Box::new(body))),
+                    Box::new(substituted_faces[2 * k].clone()),
+                    Box::new(substituted_faces[2 * k + 1].clone()),
+                );
+            }
+
+            // If some outer interval args are at endpoints, peel those PathPs.
+            // Peel off outermost PathPs where the interval arg is an endpoint.
+            let mut current = result_type;
+            for k in (0..dim).rev() {
+                if is_endpoint(&ivars[k]) {
+                    if let Term::TPath(_, inner, _) = current {
+                        current = *inner;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            Ok(current)
+        }
+
         // TElim(motive, cases, scrut)
         //
         // motive : TData(d, params) → U_n
@@ -1832,6 +1950,120 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 SKIP_PLAM_ENDPT.with(|c| c.set(false));
             }
 
+            // Check all n-dimensional cell constructor cases.
+            for cellcon_sig in &dt.cellcons {
+                let case = cases
+                    .iter()
+                    .find(|c| c.con == cellcon_sig.name)
+                    .ok_or_else(|| TypeError::MissingCase(cellcon_sig.name.clone()))?;
+
+                let subst_arg_tys = subst_params(&cellcon_sig.arg_tys, &scrut_params);
+                let dim = cellcon_sig.dimension();
+
+                // binders = arity ordinary args + dim interval vars.
+                let expected_binders = subst_arg_tys.len() + dim;
+                if case.binders.len() != expected_binders {
+                    return Err(TypeError::BadElimCase {
+                        con: cellcon_sig.name.clone(),
+                        msg: format!(
+                            "expected {} binders ({} ordinary + {} interval), got {}",
+                            expected_binders,
+                            subst_arg_tys.len(),
+                            dim,
+                            case.binders.len()
+                        ),
+                    });
+                }
+
+                let ord_binders_cell = &case.binders[..subst_arg_tys.len()];
+                let ivar_names: Vec<&String> = case.binders[subst_arg_tys.len()..].iter().collect();
+
+                let mut case_ctx_cell = ctx.clone();
+                let mut cellcon_args_in_ctx: Vec<Term> = Vec::new();
+                for (k, binder_name) in ord_binders_cell.iter().enumerate() {
+                    let arg_ty = cellcon_args_in_ctx
+                        .iter()
+                        .rev()
+                        .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
+                    let depth = k as i32;
+                    cellcon_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
+                    case_ctx_cell = extend_ctx(binder_name.clone(), nbe_eval(&arg_ty), &case_ctx_cell);
+                }
+
+                let arity_cell = subst_arg_tys.len();
+                // Extend context with interval variables (innermost first).
+                for iv_name in ivar_names.iter().rev() {
+                    case_ctx_cell = extend_ctx(iv_name.to_string(), interval_ty(), &case_ctx_cell);
+                }
+
+                // Build variable references for the constructor args and interval vars.
+                let ord_var_no_ivars: Vec<Term> = (0..arity_cell)
+                    .map(|k| Term::TVar((arity_cell - 1 - k) as i32))
+                    .collect();
+                // Interval variables: TVar(0) is the innermost, TVar(dim-1) is the outermost.
+                let ivar_vars: Vec<Term> = (0..dim)
+                    .map(|k| Term::TVar(k as i32))
+                    .collect();
+                let ord_var_cell: Vec<Term> = (0..arity_cell)
+                    .map(|k| Term::TVar((arity_cell + dim - k) as i32))
+                    .collect();
+
+                let cellcon_term = Term::TCellCon(
+                    d.clone(),
+                    cellcon_sig.name.clone(),
+                    ord_var_cell.clone(),
+                    ivar_vars.clone(),
+                );
+                let motive_shifted_cell = shift((arity_cell + dim) as i32, 0, motive);
+                let motive_at_cellcon = nbe_eval(&Term::TApp(
+                    Box::new(motive_shifted_cell.clone()),
+                    Box::new(cellcon_term),
+                ));
+
+                // Build the expected body type as a nested PathP.
+                // The body should be a PLam-shaped term over the dim interval variables,
+                // with type PathP(<i_1> ... PathP(<i_dim> motive(cellcon_args @ ivars)) ... ) face_0 face_1.
+                //
+                // For each face pair, we compute the case body applied to the substituted face,
+                // then build nested PathPs from innermost to outermost.
+
+                // Substitute scrutinee params into each face.
+                let substituted_faces: Vec<Term> = cellcon_sig.faces.iter()
+                    .map(|f| subst_params_face(f, &scrut_params, arity_cell))
+                    .collect();
+
+                // For each face, compute the expected case body value at that face.
+                let face_cases: Vec<Term> = substituted_faces.iter()
+                    .map(|f| eval_elim_face(motive, cases, f, &ord_var_no_ivars, (arity_cell + dim) as i32))
+                    .collect();
+
+                // Build nested PathP from innermost to outermost.
+                // faces = [f_0, f_1, f_2, f_3, ..., f_{2n-2}, f_{2n-1}]
+                // Type: PathP (<i_1> PathP (<i_2> ... PathP (<i_dim> motive_val) face_0 face_1) ... face_{2n-4} face_{2n-3}) face_{2n-2} face_{2n-1}
+                // where i_1 is innermost and i_dim is outermost.
+
+                // Start with the innermost PathP.
+                let mut expected_body_ty = Term::TPath(
+                    Box::new(Term::PLam(ivar_names[0].to_string(), Box::new(motive_at_cellcon))),
+                    Box::new(shift(1, 0, &face_cases[0])),
+                    Box::new(shift(1, 0, &face_cases[1])),
+                );
+
+                // Wrap with PathPs for each subsequent interval variable.
+                for k in 1..dim {
+                    let body = expected_body_ty;
+                    expected_body_ty = Term::TPath(
+                        Box::new(Term::PLam(ivar_names[k].to_string(), Box::new(body))),
+                        Box::new(shift((k + 1) as i32, 0, &face_cases[2 * k])),
+                        Box::new(shift((k + 1) as i32, 0, &face_cases[2 * k + 1])),
+                    );
+                }
+
+                SKIP_PLAM_ENDPT.with(|c| c.set(true));
+                check_dt(dts, &case_ctx_cell, &case.body, &expected_body_ty)?;
+                SKIP_PLAM_ENDPT.with(|c| c.set(false));
+            }
+
             // Structural recursion guard check.
             if !crate::cubical::typechecker::termination::should_skip_guard() {
                 match crate::cubical::typechecker::termination::check_guard(&d, cases) {
@@ -1987,6 +2219,60 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
                 args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect(),
                 Box::new(r_nf),
                 Box::new(s_nf),
+            ))
+        }
+        Term::TCellCon(d, cc, args, ivars) => {
+            let dim = ivars.len();
+            let ivar_nfs: Vec<Term> = ivars.iter().map(|v| nbe_eval(v)).collect();
+            // Check which interval args are at endpoints.
+            let ivar_is_endpoint: Vec<(bool, bool)> = ivar_nfs.iter().map(|v| match v {
+                Term::TInterval(i) => {
+                    let dnf = crate::cubical::interval::eval_interval(i);
+                    (dnf == crate::cubical::interval::dnf_bot(), dnf == crate::cubical::interval::dnf_top())
+                }
+                Term::TCube(d) => {
+                    (d == &crate::cubical::interval::dnf_bot(), d == &crate::cubical::interval::dnf_top())
+                }
+                _ => (false, false),
+            }).collect();
+            if let Some(dt) = dts.iter().find(|dt| &dt.name == d)
+                && let Some(sig) = dt.find_cellcon(cc) {
+                    let arity = sig.arity();
+                    let reduced_args: Vec<Term> =
+                        args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
+                    let subst_face = |face: &Term| -> Term {
+                        let mut t = face.clone();
+                        for k in (0..arity).rev() {
+                            t = subst(k as i32, &reduced_args[arity - 1 - k], &t);
+                        }
+                        t
+                    };
+                    // Try outermost interval arg first (highest dimension).
+                    // cell @ r1 @ r2 @ ... @ rn: if r1 is endpoint, reduce via outer face pair.
+                    if ivar_is_endpoint[0].0 || ivar_is_endpoint[0].1 {
+                        let face = if ivar_is_endpoint[0].0 {
+                            &sig.faces[2 * dim - 2]  // face at outermost=0
+                        } else {
+                            &sig.faces[2 * dim - 1]  // face at outermost=1
+                        };
+                        let face_inst = subst_face(face);
+                        // The face is a (dim-1)-dimensional term; apply to remaining ivars.
+                        let mut result = nbe_eval(&face_inst);
+                        for iv in ivar_nfs.iter().rev().skip(1) {
+                            result = reduce_pcon_endpoints_dt(dts, &Term::PApp(
+                                Box::new(result),
+                                Box::new(iv.clone()),
+                            ));
+                        }
+                        return reduce_pcon_endpoints_dt(dts, &result);
+                    }
+                }
+            // Not at an endpoint: reduce sub-terms.
+            nbe_eval(&Term::TCellCon(
+                d.clone(),
+                cc.clone(),
+                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect(),
+                ivar_nfs,
             ))
         }
         // Recurse into PApp so that e.g. `pcon @ (~ i0)` reduces too.
@@ -2260,6 +2546,38 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 }
             }
             let inferred = infer_dt(dts, ctx, &Term::TSqCon(d.clone(), sc.clone(), args.clone(), r.clone(), s.clone()))?;
+            require_equal(ctx, &nbe_eval(ty), &nbe_eval(&inferred))
+        }
+
+        Term::TCellCon(d, cc, args, ivars) => {
+            let expected_nf = nbe_eval(ty);
+            if let Term::TData(ed, _) = &expected_nf {
+                if ed == d {
+                    let dt_ = dts.iter().find(|dt| &dt.name == d)
+                        .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                    let sig = dt_.find_cellcon(cc)
+                        .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), cc.clone()))?;
+                    if args.len() != sig.arity() {
+                        return Err(TypeError::WrongNumberOfArgs {
+                            con: cc.clone(),
+                            expected: sig.arity(),
+                            got: args.len(),
+                        });
+                    }
+                    if ivars.len() != sig.dimension() {
+                        return Err(TypeError::WrongNumberOfArgs {
+                            con: cc.clone(),
+                            expected: sig.dimension(),
+                            got: ivars.len(),
+                        });
+                    }
+                    for iv in ivars {
+                        check_interval(ctx, iv)?;
+                    }
+                    return Ok(());
+                }
+            }
+            let inferred = infer_dt(dts, ctx, &Term::TCellCon(d.clone(), cc.clone(), args.clone(), ivars.clone()))?;
             require_equal(ctx, &nbe_eval(ty), &nbe_eval(&inferred))
         }
 

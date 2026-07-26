@@ -213,6 +213,15 @@ fn check_body_guard(
             check_body_guard(d, r, binder_count)?;
             check_body_guard(d, s, binder_count)
         }
+        Term::TCellCon(_, _, args, ivars) => {
+            for arg in args {
+                check_body_guard(d, arg, binder_count)?;
+            }
+            for iv in ivars {
+                check_body_guard(d, iv, binder_count)?;
+            }
+            Ok(())
+        }
 
         // Atoms — no recursion possible.
         Term::TVar(_) | Term::TUniv(_) | Term::TProp | Term::TSSet
@@ -257,6 +266,7 @@ fn is_constructor_of(d: &str, t: &Term) -> bool {
         Term::TCon(name, _, _) => name == d,
         Term::TPCon(name, _, _, _) => name == d,
         Term::TSqCon(name, _, _, _, _) => name == d,
+        Term::TCellCon(name, _, _, _) => name == d,
         _ => false,
     }
 }

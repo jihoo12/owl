@@ -1,0 +1,30 @@
+-- Cell constructor test: 3D cell (cube) on a HIT
+-- [[[ face_10, face_11, face_20, face_21, face_30, face_31 ]]]
+-- Faces ordered innermost-to-outermost.
+-- For a 3D cell: PathP(<i> PathP(<j> PathP(<k> A) f_10 f_11) f_20 f_21) f_30 f_31
+
+-- A simple 3D cell type: a "cube" with base point and 3D fill
+inductive Cube where
+  | base : Cube
+  | line1 : Cube [ base , base ]
+  | line2 : Cube [ base , base ]
+  | square : Cube [[ base , base , line2 , line2 ]]
+  | cube3 : Cube [[[ base , base , line2 , line2 , square , square ]]]
+
+-- 3D cell at concrete endpoints should reduce to Cube values
+def test_cube3_000 : Cube := cube3 @ i0 @ i0 @ i0
+def test_cube3_111 : Cube := cube3 @ i1 @ i1 @ i1
+def test_cube3_010 : Cube := cube3 @ i0 @ i1 @ i0
+
+-- Elimination: constant function
+def elim_const : Cube -> Cube :=
+  fun x => match x return Cube with
+  | base => base
+  | line1 i => <j> base
+  | line2 j => <k> base
+  | square r s => <i> <j> base
+  | cube3 r s t => <i> <j> <k> base
+
+-- Test elimination
+def test_elim_base : Cube := elim_const base
+def test_elim_cube3 : Cube := elim_const (cube3 @ i0 @ i0 @ i0)

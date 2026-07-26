@@ -111,6 +111,10 @@ pub fn term_size(t: &Term) -> usize {
                 + term_size(r) + term_size(s)
         }
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => 1 + term_size(a),
+        Term::TCellCon(_, _, args, ivars) => {
+            1 + args.iter().map(term_size).sum::<usize>()
+                + ivars.iter().map(term_size).sum::<usize>()
+        }
     }
 }
 
@@ -552,6 +556,21 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
             and_result(acc, eta_eq_memo(fuel, ctx, a1, a2, memo))
         });
         return and_result(args_eq, eta_eq_memo(fuel, ctx, r1, r2, memo));
+    }
+
+    // Cell-constructor congruence: same datatype, same cell-constructor,
+    // check ordinary args and then each interval argument.
+    if let (Term::TCellCon(d1, c1, args1, ivars1), Term::TCellCon(d2, c2, args2, ivars2)) = (t1, t2) {
+        if d1 != d2 || c1 != c2 || args1.len() != args2.len() || ivars1.len() != ivars2.len() {
+            return NotEqual;
+        }
+        let args_eq = args1.iter().zip(args2.iter()).fold(Equal, |acc, (a1, a2)| {
+            and_result(acc, eta_eq_memo(fuel, ctx, a1, a2, memo))
+        });
+        let ivars_eq = ivars1.iter().zip(ivars2.iter()).fold(Equal, |acc, (i1, i2)| {
+            and_result(acc, eta_eq_memo(fuel, ctx, i1, i2, memo))
+        });
+        return and_result(args_eq, ivars_eq);
     }
 
     // Eliminator congruence: check motive, each matching case body

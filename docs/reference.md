@@ -93,7 +93,7 @@ The following words are reserved and cannot be used as variable names:
 | `=>`      | Lambda arrow                       | --            |
 | `:=`      | Definition body separator          | --            |
 | `*` / `x` | Non-dependent product (Sigma) type | right         |
-| `@`       | Path application                   | left          |
+| `@`       | Path/cell application               | left          |
 | `/\`      | Interval meet (conjunction)        | right         |
 | `\/`      | Interval join (disjunction)        | right         |
 | `~`       | Interval negation                  | prefix        |
@@ -593,6 +593,93 @@ def id_torus : Torus -> Torus :=
 The square case body `<i> <j> square @ i @ j` constructs a surface that
 applies `square` at the two fresh interval variables, producing a value of
 type `Torus` for each pair of interval points.
+
+#### N-Dimensional Cell Constructors (3D and Higher)
+
+Cell constructors generalize square constructors to arbitrary dimension.
+A cell constructor of dimension *n* specifies 2*n* face terms, one for
+each boundary face of the *n*-dimensional cell.
+
+##### Syntax
+
+```
+con : T [[[ face_10 , face_11 , face_20 , face_21 , ... , face_n0 , face_n1 ]]]
+```
+
+Bracket depth determines the dimension: `[[[` is dimension 3 (a cube),
+`[[[[` is dimension 4, and so on. Face terms are ordered innermost to
+outermost:
+
+- `face_10, face_11`: boundary at innermost interval r_1 = 0 and r_1 = 1
+- `face_20, face_21`: boundary at r_2 = 0 and r_2 = 1
+- ...
+- `face_n0, face_n1`: boundary at outermost interval r_n = 0 and r_n = 1
+
+The inferred type is a nested PathP:
+
+```
+PathP (<r_1> PathP (<r_2> ... PathP (<r_n> T) face_10 face_11) ... face_{n-1,0} face_{n-1,1}) face_n0 face_n1
+```
+
+Face terms can reference the constructor's ordinary arguments via de Bruijn
+indices. The *n* interval variables are implicitly bound.
+
+##### Example: 3D Cube Cell
+
+```
+inductive Cube where
+  | base : Cube
+  | line1 : Cube [ base , base ]
+  | line2 : Cube [ base , base ]
+  | square : Cube [[ base , base , line2 , line2 ]]
+  | cube3  : Cube [[[ base , base , line2 , line2 , square , square ]]]
+```
+
+`cube3` is a 3-dimensional cell constructor with 6 face terms:
+- Innermost boundary (r_1): `base, base`
+- Middle boundary (r_2): `line2, line2`
+- Outermost boundary (r_3): `square, square`
+
+##### Application on Cell Constructors
+
+Cell constructors are applied with *n* interval arguments:
+
+```
+cube3 @ r @ s @ t    -- apply cube3 at three interval points
+```
+
+At concrete endpoints, cell constructors reduce to their boundary values:
+
+```
+cube3 @ i0 @ i0 @ i0  =  base     -- innermost face at all endpoints
+cube3 @ i1 @ i1 @ i1  =  base     -- all faces at i1
+cube3 @ i0 @ i1 @ i0  =  base     -- mixed endpoints
+```
+
+##### Elimination of Cell Constructors
+
+When pattern-matching on a type with an n-dimensional cell constructor,
+the case body must be an *n*-fold path lambda `<r_1> <r_2> ... <r_n> body`.
+The body type is a nested PathP:
+
+```
+PathP (<r_1> PathP (<r_2> ... PathP (<r_n> T) face_10 face_11) ...) face_n0 face_n1
+```
+
+**Example: Identity function on Cube**
+
+```
+def id_cube : Cube -> Cube :=
+  fun x => match x return Cube with
+  | base => base
+  | line1 i => <j> line1 @ j
+  | line2 j => <k> line2 @ k
+  | square r s => <i> <j> square @ i @ j
+  | cube3 r s t => <i> <j> <k> cube3 @ i @ j @ k
+```
+
+The cube case body `<i> <j> <k> cube3 @ i @ j @ k` constructs a
+3-dimensional cell that applies `cube3` at three fresh interval variables.
 
 #### Path Constructor Face Terms
 
@@ -1536,6 +1623,7 @@ the constructor's arguments are substituted for the binders.
 | `transport p x` (Data type) | Each constructor argument transported through substituted type |
 | `transport p x` (PCon) | Point constructor with transported arguments |
 | `transport p x` (SqCon) | Square constructor with transported arguments |
+| `transport p x` (CellCon) | n-dimensional cell constructor with transported arguments |
 
 ### Kan Operation Reductions
 
@@ -1581,6 +1669,8 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
 <con_list>    ::= <con> ("|" <con>)*
 <con>         ::= NAME ":" <con_type> ["[" <face> "," <face> "]"]
                 | NAME ":" <con_type> "[[" <face> "," <face> "," <face> "," <face> "]]"
+                | NAME ":" <con_type> "["+ <face> ("," <face>)* "]" "+"
+                | NAME ":" <con_type>  -- ordinary (point) constructor
 <con_type>    ::= <atom> ("->" <atom>)*
 <UNIV>        ::= "U0" | "U1" | "U2" | ...
 

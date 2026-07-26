@@ -1,0 +1,158 @@
+-- stress_hits_cells.owl — n-dimensional cell constructors for HITs
+--
+-- Exercises: 3D cell constructors (cube), nested 2D+3D in same type,
+-- endpoint reduction at all cube corners, elimination patterns,
+-- cell constructors with arguments, and multiple cell constructors.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Cube HIT: base + 2 path constructors + 1 square + 1 cube (3D cell)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive Cube where
+  | base : Cube
+  | line1 : Cube [ base , base ]
+  | line2 : Cube [ base , base ]
+  | square : Cube [[ base , base , line2 , line2 ]]
+  | cube3 : Cube [[[ base , base , line2 , line2 , square , square ]]]
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Endpoint reduction: all 8 corners of the cube
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def cube_000 : Cube := cube3 @ i0 @ i0 @ i0
+def cube_001 : Cube := cube3 @ i0 @ i0 @ i1
+def cube_010 : Cube := cube3 @ i0 @ i1 @ i0
+def cube_011 : Cube := cube3 @ i0 @ i1 @ i1
+def cube_100 : Cube := cube3 @ i1 @ i0 @ i0
+def cube_101 : Cube := cube3 @ i1 @ i0 @ i1
+def cube_110 : Cube := cube3 @ i1 @ i1 @ i0
+def cube_111 : Cube := cube3 @ i1 @ i1 @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Negation in interval args
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def cube_neg0 : Cube := cube3 @ (~ i0) @ i1 @ i0
+def cube_neg1 : Cube := cube3 @ i1 @ (~ i1) @ i0
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. Elimination: constant function on Cube
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def elim_const_cube : Cube -> Cube :=
+  fun x => match x return Cube with
+  | base => base
+  | line1 i => <j> base
+  | line2 j => <k> base
+  | square r s => <i> <j> base
+  | cube3 r s t => <i> <j> <k> base
+
+def test_elim_base : Cube := elim_const_cube base
+def test_elim_cube3_000 : Cube := elim_const_cube (cube3 @ i0 @ i0 @ i0)
+def test_elim_cube3_111 : Cube := elim_const_cube (cube3 @ i1 @ i1 @ i1)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Elimination: identity function on Cube (re-apply cube3)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def id_cube : Cube -> Cube :=
+  fun x => match x return Cube with
+  | base => base
+  | line1 i => <j> line1 @ j
+  | line2 j => <k> line2 @ k
+  | square r s => <i> <j> square @ i @ j
+  | cube3 r s t => <i> <j> <k> cube3 @ i @ j @ k
+
+def test_id_base : Cube := id_cube base
+def test_id_cube3 : Cube := id_cube (cube3 @ i0 @ i1 @ i0)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. Cube with parameterized argument (construction + endpoint only)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive ParamCube (A : U0) where
+  | pbase : ParamCube A
+  | pline : A -> ParamCube A [ pbase , pbase ]
+  | psquare : A -> ParamCube A [[ pbase , pbase , pline psquare_0 , pline psquare_0 ]]
+  | pcube : A -> ParamCube A [[[ pbase , pbase , pline pcube_0 , pline pcube_0 , psquare pcube_0 , psquare pcube_0 ]]]
+
+def test_paramcube : ParamCube Nat := pbase
+def test_paramcube_line : Path (ParamCube Nat) pbase pbase := pline zero
+def test_paramcube_cube : ParamCube Nat := pcube zero @ i0 @ i0 @ i0
+
+-- Endpoint reduction on parameterized cube
+def test_paramcube_cube_000 : ParamCube Nat := pcube zero @ i0 @ i0 @ i0
+def test_paramcube_cube_111 : ParamCube Nat := pcube zero @ i1 @ i1 @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Multiple cell constructors on same type
+-- ═══════════════════════════════════════════════════════════════════════════
+
+inductive MultiCube where
+  | mbase : MultiCube
+  | mline : MultiCube [ mbase , mbase ]
+  | msq1 : MultiCube [[ mbase , mbase , mline , mline ]]
+  | msq2 : MultiCube [[ mbase , mbase , mline , mline ]]
+  | mcube1 : MultiCube [[[ mbase , mbase , mline , mline , msq1 , msq1 ]]]
+  | mcube2 : MultiCube [[[ mbase , mbase , mline , mline , msq2 , msq2 ]]]
+
+def test_multi_1 : MultiCube := mcube1 @ i0 @ i0 @ i0
+def test_multi_2 : MultiCube := mcube2 @ i1 @ i1 @ i1
+
+-- Elimination with multiple cube constructors
+def elim_multi : MultiCube -> MultiCube :=
+  fun x => match x return MultiCube with
+  | mbase => mbase
+  | mline i => <j> mline @ j
+  | msq1 r s => <i> <j> msq1 @ i @ j
+  | msq2 r s => <i> <j> msq2 @ i @ j
+  | mcube1 r s t => <i> <j> <k> mcube1 @ i @ j @ k
+  | mcube2 r s t => <i> <j> <k> mcube2 @ i @ j @ k
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. Mixed: path + square + cube in same elimination
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def mixed_elim : Cube -> Nat :=
+  fun x => match x return Nat with
+  | base => zero
+  | line1 i => <j> zero
+  | line2 j => <k> zero
+  | square r s => <i> <j> zero
+  | cube3 r s t => <i> <j> <k> zero
+
+def test_mixed : Nat := mixed_elim (cube3 @ i1 @ i0 @ i1)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. Square endpoint reduction still works alongside cube
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def sq_00 : Cube := square @ i0 @ i0
+def sq_01 : Cube := square @ i0 @ i1
+def sq_10 : Cube := square @ i1 @ i0
+def sq_11 : Cube := square @ i1 @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. Path endpoint reduction still works alongside cube
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def line1_0 : Cube := line1 @ i0
+def line1_1 : Cube := line1 @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 11. Higher-order: cube inside a function
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def cube_in_fun : Cube -> Cube :=
+  fun c => match c return Cube with
+  | base => base
+  | line1 i => <j> line1 @ j
+  | line2 j => <k> line2 @ k
+  | square r s => <i> <j> square @ i @ j
+  | cube3 r s t => <i> <j> <k> cube3 @ i @ j @ k
+
+def main : Nat := test_mixed

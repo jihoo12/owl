@@ -99,6 +99,12 @@ pub enum Term {
     /// `r` and `s` are the two interval arguments. `args` are the constructor's
     /// ordinary arguments only.
     TSqCon(Name, Name, Vec<Term>, Box<Term>, Box<Term>),
+    /// N-dimensional cell-constructor application: `TCellCon(datatype, constructor, args, ivars)`.
+    /// `ivars` is the list of interval arguments (0 = point con, 1 = path con,
+    /// 2 = square con, 3 = cube con, ...). `args` are the constructor's ordinary
+    /// arguments only.  Replaces TPCon/TSqCon for dimensions >= 3 and provides
+    /// a uniform representation for all HIT cell constructors.
+    TCellCon(Name, Name, Vec<Term>, Vec<Term>),
     /// Eliminator (dependent recursor) for a datatype.
     /// `TElim(motive, cases, scrutinee)`.
     /// `motive : (x : TData(d)) -> U_n`, given as a `TAbs`-shaped term
@@ -271,6 +277,41 @@ impl SqConSig {
     }
 }
 
+/// Signature of an n-dimensional cell constructor (generalises PConSig/SqConSig).
+/// For dimension `d` there are `2*d` faces stored as pairs from innermost to
+/// outermost:
+///
+/// ```text
+/// faces = [ face_d0, face_d1,          // innermost dimension
+///           face_{d-1}0, face_{d-1}1,  // next
+///           ...,
+///           face_10, face_11 ]         // outermost dimension
+/// ```
+///
+/// The type of the cell constructor is:
+/// ```text
+/// PathP (<i_1> PathP (<i_2> ... PathP (<i_d> A) face_d0 face_d1) ... face_20 face_21) face_10 face_11
+/// ```
+///
+/// Each face_k0/face_k1 pair corresponds to the boundary at interval variable
+/// `i_k = 0` / `i_k = 1`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CellConSig {
+    pub name: Name,
+    pub arg_tys: Vec<Term>,
+    pub faces: Vec<Term>,
+}
+
+impl CellConSig {
+    pub fn arity(&self) -> usize {
+        self.arg_tys.len()
+    }
+    /// The dimension (number of interval arguments) of this cell constructor.
+    pub fn dimension(&self) -> usize {
+        self.faces.len() / 2
+    }
+}
+
 /// A full datatype declaration: `data Name = con1 ... | con2 ... | pcon1 ...`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Datatype {
@@ -282,6 +323,9 @@ pub struct Datatype {
     pub cons: Vec<ConSig>,
     pub pcons: Vec<PConSig>,
     pub sqcons: Vec<SqConSig>,
+    /// N-dimensional cell constructors (dimension >= 3).
+    /// Generalises `pcons` (dim 1) and `sqcons` (dim 2).
+    pub cellcons: Vec<CellConSig>,
     /// Optional universe-level annotation: `data D : U_n = ...`
     /// When `Some(n)`, the datatype lives in `U_n` regardless of its
     /// constructor arguments. When `None`, the level is inferred as
@@ -298,6 +342,9 @@ impl Datatype {
     }
     pub fn find_sqcon(&self, name: &str) -> Option<&SqConSig> {
         self.sqcons.iter().find(|c| c.name == name)
+    }
+    pub fn find_cellcon(&self, name: &str) -> Option<&CellConSig> {
+        self.cellcons.iter().find(|c| c.name == name)
     }
 }
 
@@ -405,6 +452,12 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
             args.iter().map(|a| shift(d, c, a)).collect(),
             b(shift(d, c, r)),
             b(shift(d, c, s)),
+        ),
+        Term::TCellCon(data, con, args, ivars) => Term::TCellCon(
+            data.clone(),
+            con.clone(),
+            args.iter().map(|a| shift(d, c, a)).collect(),
+            ivars.iter().map(|v| shift(d, c, v)).collect(),
         ),
         Term::TElim(motive, cases, scrut) => Term::TElim(
             b(shift(d, c, motive)),
@@ -567,6 +620,12 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
             b(subst(j, s, r)),
             b(subst(j, s, s)),
         ),
+        Term::TCellCon(data, con, args, ivars) => Term::TCellCon(
+            data.clone(),
+            con.clone(),
+            args.iter().map(|a| subst(j, s, a)).collect(),
+            ivars.iter().map(|v| subst(j, s, v)).collect(),
+        ),
         Term::TElim(motive, cases, scrut) => Term::TElim(
             b(subst(j, s, motive)),
             cases
@@ -701,6 +760,7 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TCon(_, _, args) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)),
         Term::TPCon(_, _, args, r) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(max_var(r)),
         Term::TSqCon(_, _, args, r, s) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(max_var(r)).max(max_var(s)),
+        Term::TCellCon(_, _, args, ivars) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(ivars.iter().map(max_var).fold(-1, |m, x| m.max(x))),
         Term::TElim(motive, cases, scrut) => {
             let mut m = max_var(motive).max(max_var(scrut));
             for case in cases {
@@ -833,6 +893,7 @@ mod tests {
             ],
             pcons: vec![],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());

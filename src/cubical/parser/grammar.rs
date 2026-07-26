@@ -5,7 +5,7 @@
 use super::lexer::{err, Token, TokenKind};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
-use crate::cubical::syntax::{ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift};
+use crate::cubical::syntax::{CellConSig, ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift};
 
 pub(super) struct Parser {
     tokens: Vec<Token>,
@@ -165,12 +165,14 @@ impl Parser {
         let mut cons = Vec::new();
         let mut pcons = Vec::new();
         let mut sqcons = Vec::new();
+        let mut cellcons = Vec::new();
         let mut local_dt = Datatype {
             name: name.clone(),
             params: params.clone(),
             cons: Vec::new(),
             pcons: Vec::new(),
             sqcons: Vec::new(),
+            cellcons: Vec::new(),
             universe_level: None,
         };
         while self.consume(&TokenKind::Pipe) {
@@ -199,34 +201,70 @@ impl Parser {
             if self.consume(&TokenKind::LBracket) {
                 // Check for double bracket `[[` for square constructors
                 if self.consume(&TokenKind::LBracket) {
-                    // Square constructor: `sqcon : A [[ face_i0, face_i1, face_j0, face_j1 ]]`
-                    let num_args = arg_tys.len();
-                    for k in 0..num_args {
-                        self.term_env
-                            .insert(0, format!("{}_{}", con_name, k));
+                    // Count additional brackets for n-dimensional cells (dim >= 3).
+                    let mut extra_brackets = 0;
+                    while self.consume(&TokenKind::LBracket) {
+                        extra_brackets += 1;
                     }
-                    let face_i0 = self.parse_face_with_extra_datatype(&local_dt)?;
-                    self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
-                    let face_i1 = self.parse_face_with_extra_datatype(&local_dt)?;
-                    self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
-                    let face_j0 = self.parse_face_with_extra_datatype(&local_dt)?;
-                    self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
-                    let face_j1 = self.parse_face_with_extra_datatype(&local_dt)?;
-                    self.expect(TokenKind::RBracket, "expected ']' after square-constructor faces")?;
-                    self.expect(TokenKind::RBracket, "expected ']]' after square-constructor faces")?;
-                    for _ in 0..num_args {
-                        self.term_env.remove(0);
+                    let dim = 2 + extra_brackets;
+                    if dim == 2 {
+                        // Square constructor: `sqcon : A [[ face_i0, face_i1, face_j0, face_j1 ]]`
+                        let num_args = arg_tys.len();
+                        for k in 0..num_args {
+                            self.term_env
+                                .insert(0, format!("{}_{}", con_name, k));
+                        }
+                        let face_i0 = self.parse_face_with_extra_datatype(&local_dt)?;
+                        self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                        let face_i1 = self.parse_face_with_extra_datatype(&local_dt)?;
+                        self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                        let face_j0 = self.parse_face_with_extra_datatype(&local_dt)?;
+                        self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                        let face_j1 = self.parse_face_with_extra_datatype(&local_dt)?;
+                        self.expect(TokenKind::RBracket, "expected ']' after square-constructor faces")?;
+                        self.expect(TokenKind::RBracket, "expected ']]' after square-constructor faces")?;
+                        for _ in 0..num_args {
+                            self.term_env.remove(0);
+                        }
+                        let sig = SqConSig {
+                            name: con_name,
+                            arg_tys,
+                            face_i0,
+                            face_i1,
+                            face_j0,
+                            face_j1,
+                        };
+                        local_dt.sqcons.push(sig.clone());
+                        sqcons.push(sig);
+                    } else {
+                        // N-dimensional cell constructor: `cellcon : A [[[ ... dim faces ... ]]]`
+                        let num_args = arg_tys.len();
+                        for k in 0..num_args {
+                            self.term_env
+                                .insert(0, format!("{}_{}", con_name, k));
+                        }
+                        let mut faces = Vec::new();
+                        for fi in 0..(2 * dim) {
+                            if fi > 0 {
+                                self.expect(TokenKind::Comma, "expected ',' between cell-constructor faces")?;
+                            }
+                            faces.push(self.parse_face_with_extra_datatype(&local_dt)?);
+                        }
+                        // Close all brackets: dim closing brackets.
+                        for bi in 0..dim {
+                            self.expect(TokenKind::RBracket, &format!("expected ']' to close cell-constructor brackets ({} of {})", bi + 1, dim))?;
+                        }
+                        for _ in 0..num_args {
+                            self.term_env.remove(0);
+                        }
+                        let sig = CellConSig {
+                            name: con_name,
+                            arg_tys,
+                            faces,
+                        };
+                        local_dt.cellcons.push(sig.clone());
+                        cellcons.push(sig);
                     }
-                    let sig = SqConSig {
-                        name: con_name,
-                        arg_tys,
-                        face_i0,
-                        face_i1,
-                        face_j0,
-                        face_j1,
-                    };
-                    local_dt.sqcons.push(sig.clone());
-                    sqcons.push(sig);
                 } else {
                     // Path constructor: `pcon : A [ face0, face1 ]`
                     let num_args = arg_tys.len();
@@ -265,7 +303,7 @@ impl Parser {
                 cons.push(sig);
             }
         }
-        if cons.is_empty() && pcons.is_empty() && sqcons.is_empty() {
+        if cons.is_empty() && pcons.is_empty() && sqcons.is_empty() && cellcons.is_empty() {
             return Err(self.error_here(format!(
                 "datatype '{}' must declare at least one constructor",
                 name
@@ -275,7 +313,7 @@ impl Parser {
         for _ in &params {
             self.term_env.remove(0);
         }
-        Ok(Datatype { name, params, cons, pcons, sqcons, universe_level: uni_level })
+        Ok(Datatype { name, params, cons, pcons, sqcons, cellcons, universe_level: uni_level })
     }
 
     fn parse_constructor_type(
@@ -563,7 +601,19 @@ impl Parser {
     fn parse_papp(&mut self) -> Result<Term, ParseError> {
         let mut term = self.parse_app()?;
         if let Term::TCon(ref dt, ref con, _) = term {
-            if self.is_square_constructor(dt, con) && self.peek().kind == TokenKind::At {
+            if let Some(dim) = self.is_cell_constructor(dt, con) {
+                if dim >= 2 && self.peek().kind == TokenKind::At {
+                    // Cell constructor: parse `dim` interval args
+                    let mut interval_args = Vec::new();
+                    for _ in 0..dim {
+                        self.expect(TokenKind::At, "expected '@' for cell constructor interval arg")?;
+                        interval_args.push(self.parse_interval_arg()?);
+                    }
+                    if let Term::TCon(dt, con, args) = term {
+                        term = Term::TCellCon(dt, con, args, interval_args);
+                    }
+                }
+            } else if self.is_square_constructor(dt, con) && self.peek().kind == TokenKind::At {
                 // Square constructor: parse both interval args without going through
                 // parse_papp recursion (which would consume the second @)
                 self.consume(&TokenKind::At);
@@ -1069,14 +1119,24 @@ impl Parser {
                 binders.push(name);
             }
             if self.consume(&TokenKind::FatArrow) || self.consume(&TokenKind::Arrow) {
-                // Determine if this is a path constructor or square constructor:
+                // Determine the type of constructor:
+                // - plain constructor: no interval binders
                 // - path constructor: last binder is the interval variable
                 // - square constructor: last TWO binders are interval variables
+                // - cell constructor: last `dim` binders are interval variables
+                let cell_dim = self.is_cell_constructor_case(&con);
                 let is_sqcon = self.is_square_constructor_case(&con);
                 let is_path_con = self
                     .find_constructor(&con)
                     .is_some_and(|(_, is_path)| is_path);
-                let (ord_binders, ivar_binders) = if is_sqcon && binders.len() >= 2 {
+                let (ord_binders, ivar_binders) = if let Some(dim) = cell_dim {
+                    if binders.len() >= dim {
+                        let split = binders.len() - dim;
+                        (&binders[..split], &binders[split..])
+                    } else {
+                        (&binders[..], &[] as &[String])
+                    }
+                } else if is_sqcon && binders.len() >= 2 {
                     let split = binders.len() - 2;
                     (&binders[..split], &binders[split..])
                 } else if is_path_con && !binders.is_empty() && !is_sqcon {
@@ -1170,6 +1230,9 @@ impl Parser {
             if dt.sqcons.iter().any(|c| c.name == name) {
                 return Some((dt.name.clone(), true)); // true = has interval binders
             }
+            if dt.cellcons.iter().any(|c| c.name == name) {
+                return Some((dt.name.clone(), true)); // true = has interval binders
+            }
         }
         None
     }
@@ -1179,6 +1242,15 @@ impl Parser {
             .iter()
             .rev()
             .any(|dt| dt.sqcons.iter().any(|c| c.name == con_name))
+    }
+
+    fn is_cell_constructor_case(&self, con_name: &str) -> Option<usize> {
+        self.datatypes
+            .iter()
+            .rev()
+            .find(|dt| dt.cellcons.iter().any(|c| c.name == con_name))
+            .and_then(|dt| dt.cellcons.iter().find(|c| c.name == con_name))
+            .map(|c| c.dimension())
     }
 
     fn is_path_constructor(&self, dt_name: &str, con_name: &str) -> bool {
@@ -1195,6 +1267,15 @@ impl Parser {
             .rev()
             .find(|dt| dt.name == dt_name)
             .is_some_and(|dt| dt.sqcons.iter().any(|c| c.name == con_name))
+    }
+
+    fn is_cell_constructor(&self, dt_name: &str, con_name: &str) -> Option<usize> {
+        self.datatypes
+            .iter()
+            .rev()
+            .find(|dt| dt.name == dt_name)
+            .and_then(|dt| dt.cellcons.iter().find(|c| c.name == con_name))
+            .map(|c| c.dimension())
     }
 
     fn is_decl_start(&self) -> bool {

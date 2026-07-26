@@ -80,6 +80,8 @@ pub enum Value {
     VCon(Name, Name, Vec<Value>),
     VPCon(Name, Name, Vec<Value>, Box<Value>),
     VSqCon(Name, Name, Vec<Value>, Box<Value>, Box<Value>),
+    /// N-dimensional cell constructor value: `VCellCon(dt, con, args, ivars)`.
+    VCellCon(Name, Name, Vec<Value>, Vec<Value>),
     VElim(Box<Value>, Vec<ElimCase>, Box<Value>),
     VGlue(Box<Value>, DNF, Box<Value>),
     VPartial(Box<Value>, Box<Value>),
@@ -131,6 +133,8 @@ pub enum Neutral {
     NApp(Box<Neutral>, Box<Value>),
     NPApp(Box<Neutral>, Box<Value>),
     NSqApp(Box<Neutral>, Box<Value>, Box<Value>),
+    /// N-dimensional cell application: `NCellApp(neutral, [r1, r2, ..., rn])`.
+    NCellApp(Box<Neutral>, Vec<Value>),
     NFst(Box<Neutral>),
     NSnd(Box<Neutral>),
     NElim(Box<Value>, Vec<ElimCase>, Box<Neutral>),
@@ -407,6 +411,12 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
             Box::new(eval_nbe(env, globals, global_offset, r)),
             Box::new(eval_nbe(env, globals, global_offset, s)),
         ),
+        Term::TCellCon(data, con, args, ivars) => Value::VCellCon(
+            data.clone(),
+            con.clone(),
+            args.iter().map(|a| eval_nbe(env, globals, global_offset, a)).collect(),
+            ivars.iter().map(|v| eval_nbe(env, globals, global_offset, v)).collect(),
+        ),
         Term::TElim(motive, cases, scrut) => {
             do_elim(
                 eval_nbe(env, globals, global_offset, motive),
@@ -581,6 +591,54 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
                 Value::VPApp(Box::new(Value::VSqCon(data.clone(), con.clone(), args.clone(), sq_r.clone(), sq_s.clone())), Box::new(r))
             }
         },
+        // N-dimensional cell constructor boundary reduction.
+        //
+        // A cell constructor with n interval args and faces
+        //   faces = [f_0, f_1, ..., f_{2n-2}, f_{2n-1}]
+        // has type:
+        //   PathP (<i_1> ... PathP (<i_n> A) f_0 f_1) ... f_{2n-2} f_{2n-1})
+        //
+        // When the first interval arg is a concrete endpoint:
+        //   cell @ 0 @ r2 @ ... @ rn  =  (eval f_{2n-2}[args]) @ r2 @ ... @ rn
+        //   cell @ 1 @ r2 @ ... @ rn  =  (eval f_{2n-1}[args]) @ r2 @ ... @ rn
+        Value::VCellCon(ref data, ref con, ref args, ref ivars) => {
+            if let Some(endpoint) = value_to_endpoint(&r) {
+                let dts = current_dts();
+                if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
+                    && let Some(sig) = dt.cellcons.iter().find(|c| &c.name == con) {
+                        let arity = sig.arity();
+                        let dim = sig.dimension();
+                        // The outermost face pair is the last pair in the faces list.
+                        let face = match endpoint {
+                            I::I0 => &sig.faces[2 * dim - 2],
+                            I::I1 => &sig.faces[2 * dim - 1],
+                            _ => unreachable!(),
+                        };
+                        let mut face_inst = face.clone();
+                        let arg_terms: Vec<Term> = args.iter()
+                            .map(|a| quote(0, globals, global_offset, a.clone()))
+                            .collect();
+                        for k in (0..arity).rev() {
+                            face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
+                        }
+                        let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
+                        let mut face_val = eval_nbe(&[], &empty_globals, 0, &face_inst);
+                        record_step("cellcon-boundary".into(),
+                            format!("{} @ {} @ ...", con, if endpoint == I::I0 { "0" } else { "1" }),
+                            value_str(globals, global_offset, &face_val));
+                        // Apply the face value to the remaining (n-1) interval args.
+                        for iv in ivars.iter().rev().skip(1) {
+                            face_val = do_papp(globals, global_offset, face_val, iv.clone());
+                        }
+                        return face_val;
+                    }
+                Value::VPApp(Box::new(Value::VCellCon(data.clone(), con.clone(), args.clone(), ivars.clone())), Box::new(r))
+            } else {
+                // Non-endpoint interval arg: build nested PApp for remaining ivars.
+                let result = Value::VPApp(Box::new(Value::VCellCon(data.clone(), con.clone(), args.clone(), ivars.clone())), Box::new(r));
+                result
+            }
+        },
         // Zero-arg path constructor: VCon(d, c, []) applied to interval endpoint.
         // A zero-arg path constructor like `line2` has type PathP, so PApp(line2, r)
         // should reduce via the PConSig faces.
@@ -699,6 +757,27 @@ pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &[Value], g
                 Box::new(Value::VSqCon("".into(), con.clone(), args.clone(), r.clone(), s.clone())),
             ),
         },
+        // N-dimensional cell constructor elimination: body has n interval binders.
+        // Evaluate body with args in scope, then apply to all interval args.
+        Value::VCellCon(ref data, ref con, ref args, ref ivars) => match cases.iter().find(|case| case.con == *con) {
+            Some(case) => {
+                let mut env2: Env = args.iter().rev().cloned().collect();
+                env2.extend_from_slice(env);
+                let body = eval_nbe(&env2, globals, global_offset, &case.body);
+                // Apply body to all interval args (innermost first).
+                let mut result = body;
+                for iv in ivars.iter() {
+                    result = do_papp(globals, global_offset, result, iv.clone());
+                }
+                record_step("elim-cellcon".into(), format!("elim _ [{}] ({} {})", con, data, con), value_str(globals, global_offset, &result));
+                result
+            }
+            None => Value::VElim(
+                Box::new(motive),
+                cases.to_vec(),
+                Box::new(Value::VCellCon("".into(), con.clone(), args.clone(), ivars.clone())),
+            ),
+        },
         Value::VNeutral(n) => stuck_elim(motive, cases, n),
         other => Value::VElim(Box::new(motive), cases.to_vec(), Box::new(other)),
     }
@@ -796,6 +875,11 @@ pub fn do_transport(env: &[Value], globals: &Globals, global_offset: usize, p: V
                             record_step("transport-data-sqcon".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
                             result
                         }
+                        Value::VCellCon(ref d, ref con, ref args, ref ivars) if d == d0 => {
+                            let result = transport_data_cellcon(env, globals, global_offset, i_name, clos, con, args, ivars);
+                            record_step("transport-data-cellcon".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
+                            result
+                        }
                         _ => Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(x)),
                     }
                 }
@@ -864,6 +948,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TCon(_, _, args) => args.iter().any(|a| uses_var_at_level(a, level)),
         Term::TPCon(_, _, args, r) => args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level),
         Term::TSqCon(_, _, args, r, s) => args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level) || uses_var_at_level(s, level),
+        Term::TCellCon(_, _, args, ivars) => args.iter().any(|a| uses_var_at_level(a, level)) || ivars.iter().any(|v| uses_var_at_level(v, level)),
         Term::TElim(motive, cases, scrut) => {
             uses_var_at_level(motive, level) || uses_var_at_level(scrut, level) || cases.iter().any(|c| uses_var_at_level(&c.body, level + 1))
         }
@@ -1157,6 +1242,61 @@ fn transport_data_sqcon(
     }
 
     Value::VSqCon(d_name.clone(), con_name.into(), result_args, Box::new(r.clone()), Box::new(s.clone()))
+}
+
+/// Transport an n-dimensional cell constructor through a constant data type family.
+/// Same strategy as transport_data_pcon/sqcon, but keeps all interval args unchanged.
+fn transport_data_cellcon(
+    env: &[Value],
+    globals: &Globals,
+    global_offset: usize,
+    i_name: &str,
+    clos: &IClosure,
+    con_name: &str,
+    args: &[Value],
+    ivars: &[Value],
+) -> Value {
+    let dts = current_dts();
+    let d_name = match clos.apply_i(I::I0) {
+        Value::VData(name, _) => name,
+        _ => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCellCon("".into(), con_name.into(), args.to_vec(), ivars.to_vec()))),
+    };
+    let dt = match dts.iter().find(|dt| dt.name == d_name) {
+        Some(dt) => dt.clone(),
+        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCellCon(d_name.clone(), con_name.into(), args.to_vec(), ivars.to_vec()))),
+    };
+    let con_sig = match dt.find_cellcon(con_name) {
+        Some(sig) => sig.clone(),
+        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCellCon(d_name.clone(), con_name.into(), args.to_vec(), ivars.to_vec()))),
+    };
+
+    let n = con_sig.arity();
+    if n == 0 {
+        return Value::VCellCon(d_name.clone(), con_name.into(), vec![], ivars.to_vec());
+    }
+
+    let mut result_args: Vec<Value> = Vec::new();
+    let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
+
+    for k in 0..n {
+        let ty_k = substed_tys[k].clone();
+        let mut ty_shifted = ty_k;
+        for j in (0..=k).rev() {
+            ty_shifted = shift(1, j as i32, &ty_shifted);
+        }
+        for j in 0..k {
+            let arg_term = quote(env.len(), globals, global_offset, result_args[j].clone());
+            ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+        }
+        let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+        let transported = eval_nbe(env, globals, global_offset, &Term::TTransport(
+            Box::new(ty_fam),
+            Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
+        ));
+        result_args.push(transported);
+    }
+
+    Value::VCellCon(d_name.clone(), con_name.into(), result_args, ivars.to_vec())
 }
 
 /// Transport through Glue types.
@@ -1882,6 +2022,12 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
             Box::new(quote(size, globals, global_offset, *r)),
             Box::new(quote(size, globals, global_offset, *s)),
         ),
+        Value::VCellCon(d, c, args, ivars) => Term::TCellCon(
+            d,
+            c,
+            args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect(),
+            ivars.into_iter().map(|v| quote(size, globals, global_offset, v)).collect(),
+        ),
         Value::VElim(motive, cases, scrut) => Term::TElim(
             Box::new(quote(size, globals, global_offset, *motive)),
             quote_cases(size, globals, global_offset, cases),
@@ -1994,6 +2140,13 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             let rq = quote(size, globals, global_offset, *r);
             let sq = quote(size, globals, global_offset, *s);
             Term::PApp(Box::new(Term::PApp(Box::new(pq), Box::new(rq))), Box::new(sq))
+        }
+        Neutral::NCellApp(p, ivars) => {
+            let mut result = quote_neutral(size, globals, global_offset, *p);
+            for iv in ivars.into_iter().rev() {
+                result = Term::PApp(Box::new(result), Box::new(quote(size, globals, global_offset, iv)));
+            }
+            result
         }
         Neutral::NFst(p) => Term::TFst(Box::new(quote_neutral(size, globals, global_offset, *p))),
         Neutral::NSnd(p) => Term::TSnd(Box::new(quote_neutral(size, globals, global_offset, *p))),

@@ -133,6 +133,15 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             check_positivity_in(target, r, negative)?;
             check_positivity_in(target, s, negative)
         }
+        Term::TCellCon(_, _, args, ivars) => {
+            for a in args {
+                check_positivity_in(target, a, negative)?;
+            }
+            for v in ivars {
+                check_positivity_in(target, v, negative)?;
+            }
+            Ok(())
+        }
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
             check_positivity_in(target, a, negative)
         }
@@ -186,6 +195,19 @@ pub fn check_datatype_positivity(dt: &Datatype) -> Result<(), PositivityError> {
             e
         })?;
     }
+    for cellcon in &dt.cellcons {
+        check_con_positivity(&dt.name, &cellcon.name, &cellcon.arg_tys)?;
+        for (fi, face) in cellcon.faces.iter().enumerate() {
+            check_positivity_in(&dt.name, face, false).map_err(|mut e| {
+                e.constructor = cellcon.name.clone();
+                e.message = format!(
+                    "face{} of cell constructor '{}': {}",
+                    fi, cellcon.name, e.message
+                );
+                e
+            })?;
+        }
+    }
     Ok(())
 }
 
@@ -209,6 +231,7 @@ mod tests {
             ],
             pcons: vec![],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -231,6 +254,7 @@ mod tests {
             ],
             pcons: vec![],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -251,6 +275,7 @@ mod tests {
             }],
             pcons: vec![],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -271,6 +296,7 @@ mod tests {
             }],
             pcons: vec![],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         let err = check_datatype_positivity(&dt).unwrap_err();
@@ -297,6 +323,7 @@ mod tests {
             }],
             pcons: vec![],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -321,6 +348,7 @@ mod tests {
             }],
             pcons: vec![],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         let err = check_datatype_positivity(&dt).unwrap_err();
@@ -342,6 +370,7 @@ mod tests {
             }],
             pcons: vec![],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
@@ -360,6 +389,7 @@ mod tests {
                 face1: Term::TCon("S1".into(), "base".into(), vec![]),
             }],
             sqcons: vec![],
+            cellcons: vec![],
             universe_level: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
