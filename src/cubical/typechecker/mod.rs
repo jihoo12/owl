@@ -2611,7 +2611,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Err(e) => {
                     let reduced = nbe_eval(t);
                     if reduced == *t { Err(e) }
-                    else { check_dt(dts, ctx, &reduced, ty) }
+                    else {
+                        let nf = nbe_eval(&reduced);
+                        if nf == *t { Err(e) }
+                        else { check_dt(dts, ctx, &nf, ty) }
+                    }
                 }
             }
         }
@@ -2634,7 +2638,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Err(e) => {
                     let reduced = nbe_eval(t);
                     if reduced == *t { Err(e) }
-                    else { check_dt(dts, ctx, &reduced, ty) }
+                    else {
+                        let nf = nbe_eval(&reduced);
+                        if nf == *t { Err(e) }
+                        else { check_dt(dts, ctx, &nf, ty) }
+                    }
                 }
             }
         }
@@ -2656,7 +2664,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Err(e) => {
                     let reduced = nbe_eval(t);
                     if reduced == *t { Err(e) }
-                    else { check_dt(dts, ctx, &reduced, ty) }
+                    else {
+                        let nf = nbe_eval(&reduced);
+                        if nf == *t { Err(e) }
+                        else { check_dt(dts, ctx, &nf, ty) }
+                    }
                 }
             }
         }
@@ -2674,10 +2686,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             }
             Err(e) => {
                 let reduced = nbe_eval(t);
-                if reduced == *t {
-                    Err(e)
-                } else {
-                    check_dt(dts, ctx, &reduced, ty)
+                if reduced == *t { Err(e) }
+                else {
+                    let nf = nbe_eval(&reduced);
+                    if nf == *t { Err(e) }
+                    else { check_dt(dts, ctx, &nf, ty) }
                 }
             }
         }

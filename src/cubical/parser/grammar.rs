@@ -1106,6 +1106,7 @@ impl Parser {
             return Err(self.error_here("expected '|' before match cases"));
         }
 
+        let my_col = self.peek().col;
         let mut cases = Vec::new();
         self.consume(&TokenKind::Pipe);
         loop {
@@ -1168,7 +1169,9 @@ impl Parser {
             } else {
                 return Err(self.error_here("expected '=>' after eliminator case binders"));
             }
-            if !self.consume(&TokenKind::Pipe) {
+            if self.at(&TokenKind::Pipe) && self.peek().col >= my_col {
+                self.consume(&TokenKind::Pipe);
+            } else {
                 break;
             }
         }
