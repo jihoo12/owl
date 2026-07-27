@@ -110,6 +110,7 @@ pub fn term_size(t: &Term) -> usize {
             1 + args.iter().map(|a| term_size(a)).sum::<usize>()
                 + term_size(r) + term_size(s)
         }
+        Term::TProj(_, r) => 1 + term_size(r),
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => 1 + term_size(a),
         Term::TCellCon(_, _, args, ivars) => {
             1 + args.iter().map(term_size).sum::<usize>()
@@ -571,6 +572,12 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
     }
     if let (Term::TSnd(p1), Term::TSnd(p2)) = (t1, t2) {
         return eta_eq_memo(fuel, ctx, p1, p2, memo);
+    }
+    if let (Term::TProj(f1, r1), Term::TProj(f2, r2)) = (t1, t2) {
+        if f1 != f2 {
+            return NotEqual;
+        }
+        return eta_eq_memo(fuel, ctx, r1, r2, memo);
     }
 
     // ------------------------------------------------------------------

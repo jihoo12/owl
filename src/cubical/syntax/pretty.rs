@@ -230,6 +230,7 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             let tactic_strs: Vec<String> = tactics.iter().map(|t| show_tactic(env, t)).collect();
             format!("by {}", tactic_strs.join("; "))
         }
+        Term::TProj(field, r) => format!("{}.{}", show_term(env, r), field),
         Term::TDelay(a) => format!("Delay {}", show_term(env, a)),
         Term::TNext(a) => format!("Next {}", show_term(env, a)),
         Term::TForce(a) => format!("Force {}", show_term(env, a)),

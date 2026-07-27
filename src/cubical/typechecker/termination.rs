@@ -235,6 +235,9 @@ fn check_body_guard(
 
         Term::TBy(_) | Term::TLift(_, _) | Term::TLower(_) => Ok(()),
 
+        // Record projection — recurse into the record term.
+        Term::TProj(_, r) => check_body_guard(d, r, binder_count),
+
         // Coinduction — recurse into subterms.
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
             check_body_guard(d, a, binder_count)

@@ -1,0 +1,23 @@
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+record Pair (A : Type) (B : Type) where
+  field fst : A
+  field snd : B
+
+-- Basic projections
+def get_fst : ∀ (A : Type), ∀ (B : Type), Pair A B -> A :=
+  fun A B p => p.fst
+
+def get_snd : ∀ (A : Type), ∀ (B : Type), Pair A B -> B :=
+  fun A B p => p.snd
+
+-- Swap (the hardest test — args in reversed order)
+def swap : ∀ (A : Type), ∀ (B : Type), Pair A B -> Pair B A :=
+  fun A B p => mkPair p.snd p.fst
+
+-- Chain of pairs
+record Nested (A : Type) where
+  field inner : A
+  field count : Nat

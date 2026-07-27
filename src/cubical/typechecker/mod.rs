@@ -566,13 +566,14 @@ fn infer_and_check_params_seeded(
         let mut prev_args: Vec<Term> = Vec::new();
         for (k, arg) in args.iter().enumerate() {
             let mut arg_ty = sig_arg_tys[k].clone();
-            for i in (0..num_params).rev() {
+            // Substitute known params using plain subst (not beta).
+            // Param i lives at de Bruijn (num_params - 1 - i) due to
+            // insert(0,...) ordering. Process highest index first.
+            for i in 0..num_params {
+                let d = (num_params - 1 - i) as i32;
                 if let Some(ref pv) = param_terms[i] {
-                    arg_ty = beta(&arg_ty, pv);
+                    arg_ty = subst(d, pv, &arg_ty);
                 }
-            }
-            for prev in prev_args.iter().rev() {
-                arg_ty = beta(&arg_ty, prev);
             }
             if let Term::TVar(idx) = &arg_ty {
                 let i = *idx as usize;
@@ -588,14 +589,19 @@ fn infer_and_check_params_seeded(
     let mut checked_args: Vec<Term> = Vec::with_capacity(args.len());
     for (k, arg) in args.iter().enumerate() {
         let mut arg_ty = sig_arg_tys[k].clone();
-        for i in (0..num_params).rev() {
+        // Substitute known params.
+        for i in 0..num_params {
+            let d = (num_params - 1 - i) as i32;
             if let Some(ref pv) = param_terms[i] {
-                arg_ty = beta(&arg_ty, pv);
+                arg_ty = subst(d, pv, &arg_ty);
             }
         }
-        for prev in checked_args.iter().rev() {
-            arg_ty = beta(&arg_ty, prev);
-        }
+        // NOTE: We intentionally do NOT apply previous-arg substitution here.
+        // The arg_tys telescope references only datatype parameters (via de Bruijn
+        // indices), not previous constructor arguments.  Using `beta` would
+        // incorrectly shift(-1,0,...) all free variables after substitution,
+        // corrupting indices.  Dependent record fields (where a field type
+        // references a previous field) are not yet supported.
         check_dt(dts, ctx, arg, &nbe_eval(&arg_ty))?;
         checked_args.push(nbe_eval(arg));
     }
@@ -1049,6 +1055,54 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             Ok(p_ty) => match nbe_eval(&p_ty) {
                 Term::TSigma(_, _, b_ty) => Ok(nbe_eval(&beta(&b_ty, &Term::TFst(p.clone())))),
                 other => Err(TypeError::ExpectedSigma(other)),
+            },
+            Err(e) => infer_via_reduction(dts, ctx, t, e),
+        },
+
+        // r.field : field type   where  r : RecordType
+        Term::TProj(field, r) => match infer_dt(dts, ctx, r) {
+            Ok(r_ty) => match nbe_eval(&r_ty) {
+                Term::TData(dname, params) => {
+                    if let Some(dt) = dts.iter().find(|dt| dt.name == dname) {
+                        if let Some(field_names) = &dt.field_names {
+                            if let Some(con_sig) = dt.cons.first() {
+                                if let Some(idx) = field_names.iter().position(|n| n == field) {
+                                    if let Some(raw_ty) = con_sig.arg_tys.get(idx) {
+                                        // Substitute param variables with concrete params.
+                                        let mut result = raw_ty.clone();
+                                        // Substitute param variables with concrete params.
+                                        // In the record parser, params are inserted into
+                                        // term_env via insert(0,...), so params[i] ends
+                                        // up at de Bruijn index (num_params - 1 - i).
+                                        let n = params.len() as i32;
+                                        for (i, param_val) in params.iter().enumerate() {
+                                            let db_idx = n - 1 - (i as i32);
+                                            result = subst(db_idx, param_val, &result);
+                                        }
+                                        // Dependent records (fields referencing earlier fields)
+                                        // are not yet supported. The loop below would substitute
+                                        // earlier field projections for free-variable references,
+                                        // but for non-dependent fields it corrupts de Bruijn
+                                        // indices via unconditional shift(-1,0,...).
+                                        return Ok(result);
+                                    }
+                                    return Err(TypeError::Other(format!(
+                                        "field '{}' has no type in record '{}'", field, dname
+                                    )));
+                                }
+                                return Err(TypeError::Other(format!(
+                                    "field '{}' not found in record '{}'", field, dname
+                                )));
+                            }
+                        }
+                    }
+                    Err(TypeError::Other(format!(
+                        "cannot project '{}' from non-record type", field
+                    )))
+                }
+                other => Err(TypeError::Other(format!(
+                    "cannot project '{}' from type {}", field, show_term(&names, &other)
+                ))),
             },
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },

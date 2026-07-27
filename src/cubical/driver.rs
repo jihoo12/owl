@@ -210,6 +210,9 @@ fn process_file_source(
             Decl::DataMutual(dts) => {
                 process_data_mutual(&dts, env)?;
             }
+            Decl::Record(dt) => {
+                process_data(&dt, env)?;
+            }
             Decl::DataWithFunc { dt, func_name, func_ty, func_val } => {
                 process_data_with_func(&dt, &func_name, &func_ty, &func_val, env)?;
             }

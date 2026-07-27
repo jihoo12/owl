@@ -111,6 +111,13 @@ pub enum Term {
     /// (i.e. `motive` itself binds the scrutinee, index 0 in its body).
     TElim(Box<Term>, Vec<ElimCase>, Box<Term>),
 
+    // -- Record types --------------------------------------------------------
+    /// Record field projection: `TProj(field, record)`.
+    /// Projects the named field from a record value. Records are inductive types
+    /// with a single constructor, so this is semantically an eliminator that
+    /// selects the appropriate constructor argument.
+    TProj(Name, Box<Term>),
+
     // -- Coinduction ---------------------------------------------------------
     /// Delay type former: `Delay A` is the type of delayed computations.
     /// It has a single constructor `Next : A -> Delay A`.
@@ -331,6 +338,11 @@ pub struct Datatype {
     /// constructor arguments. When `None`, the level is inferred as
     /// `max` over constructor argument universe levels.
     pub universe_level: Option<Level>,
+    /// Field names for record types. When `Some(names)`, this is a record type
+    /// with a single constructor, and `names[i]` is the name of the i-th field
+    /// (constructor argument). Used by projection (`r.field`) to find the
+    /// correct argument index.
+    pub field_names: Option<Vec<Name>>,
 }
 
 impl Datatype {
@@ -478,6 +490,7 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
                 .map(|tac| shift_tactic(d, c, tac))
                 .collect(),
         ),
+        Term::TProj(field, r) => Term::TProj(field.clone(), b(shift(d, c, r))),
         Term::TDelay(a) => Term::TDelay(b(shift(d, c, a))),
         Term::TNext(a) => Term::TNext(b(shift(d, c, a))),
         Term::TForce(a) => Term::TForce(b(shift(d, c, a))),
@@ -649,6 +662,7 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                 .map(|tac| subst_tactic(j, s, tac))
                 .collect(),
         ),
+        Term::TProj(field, r) => Term::TProj(field.clone(), b(subst(j, s, r))),
         Term::TDelay(a) => Term::TDelay(b(subst(j, s, a))),
         Term::TNext(a) => Term::TNext(b(subst(j, s, a))),
         Term::TForce(a) => Term::TForce(b(subst(j, s, a))),
@@ -771,6 +785,7 @@ pub fn max_var(t: &Term) -> i32 {
         }
         Term::Meta(_) => -1,
         Term::TBy(_) => -1,
+        Term::TProj(_, r) => max_var(r),
         Term::TDelay(a) => max_var(a),
         Term::TNext(a) => max_var(a),
         Term::TForce(a) => max_var(a),
@@ -895,6 +910,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
     }

@@ -269,6 +269,49 @@ Interval expressions support meet (`/\`), join (`\/`), and negation (`~`).
 
 User-defined types declared with `inductive`. Referenced by name (e.g. `Nat`).
 
+### Records
+
+```
+record Name (params...) where
+  field name1 : Type1
+  field name2 : Type2
+```
+
+Records are syntactic sugar for single-constructor inductives. A record
+declaration `record R (p : P) where field f : T` desugars to:
+
+```
+inductive R (p : P) where
+  | mkR : T -> R p
+```
+
+The constructor is automatically named `mk` followed by the record name
+(e.g. `mkPair`, `mkPoint`).
+
+**Field access** uses dot notation: `r.field`. Chained projections work:
+`r.field1.field2`.
+
+**Example:**
+
+```
+record Pair (A : Type) (B : Type) where
+  field fst : A
+  field snd : B
+
+def swap : ∀ A B, Pair A B -> Pair B A :=
+  fun A B p => mkPair p.snd p.fst
+```
+
+This is equivalent to:
+
+```
+inductive Pair (A : Type) (B : Type) where
+  | mkPair : A -> B -> Pair A B
+
+def swap : ∀ A B, Pair A B -> Pair B A :=
+  fun A B p => mkPair (p.snd) (p.fst)
+```
+
 ---
 
 ## 3. Definitions

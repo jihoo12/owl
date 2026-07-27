@@ -100,6 +100,7 @@ pub enum Value {
     VHFill(Box<Value>, DNFSystem, Box<Value>),
     VFst(Box<Value>),
     VSnd(Box<Value>),
+    VProj(Name, Box<Value>),
     VDelay(Box<Value>),
     VNext(Box<Value>),
     VForce(Box<Value>),
@@ -139,6 +140,8 @@ pub enum Neutral {
     NHFill(Box<Value>, DNFSystem, Box<Value>),
     NMeta(i32),
     NForce(Box<Neutral>),
+    /// Record field projection stuck on a neutral record value.
+    NProj(Box<Neutral>, Name),
 }
 
 impl Closure {
@@ -383,6 +386,7 @@ pub fn eval_nbe(env: &[Value], globals: &Globals, global_offset: usize, t: &Term
         ),
         Term::TFst(p) => do_fst(globals, global_offset, eval_nbe(env, globals, global_offset, p)),
         Term::TSnd(p) => do_snd(globals, global_offset, eval_nbe(env, globals, global_offset, p)),
+        Term::TProj(field, r) => do_proj(field, eval_nbe(env, globals, global_offset, r)),
         Term::TData(d, params) => Value::VData(
             d.clone(),
             params.iter().map(|p| eval_nbe(env, globals, global_offset, p)).collect(),
@@ -701,6 +705,32 @@ pub fn do_snd(globals: &Globals, global_offset: usize, p: Value) -> Value {
     }
 }
 
+pub fn do_proj(field: &str, r: Value) -> Value {
+    match r {
+        Value::VCon(_, _, ref args) => {
+            let dts = current_dts();
+            if let Some(dt) = dts.iter().find(|dt| {
+                dt.cons.len() == 1
+                    && dt.pcons.is_empty()
+                    && dt.sqcons.is_empty()
+                    && dt.cellcons.is_empty()
+                    && dt.field_names.is_some()
+            }) {
+                if let Some(field_names) = &dt.field_names {
+                    if let Some(idx) = field_names.iter().position(|n| n == field) {
+                        if idx < args.len() {
+                            return args[idx].clone();
+                        }
+                    }
+                }
+            }
+            Value::VProj(field.to_string(), Box::new(r))
+        }
+        Value::VNeutral(n) => Value::VNeutral(Neutral::NProj(Box::new(n), field.to_string())),
+        other => Value::VProj(field.to_string(), Box::new(other)),
+    }
+}
+
 pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &[Value], globals: &Globals, global_offset: usize) -> Value {
     match scrut {
         Value::VCon(ref data, ref con, ref args) => match cases.iter().find(|case| case.con == *con) {
@@ -935,6 +965,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TPair(a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level),
         Term::TFst(p) => uses_var_at_level(p, level),
         Term::TSnd(p) => uses_var_at_level(p, level),
+        Term::TProj(_, r) => uses_var_at_level(r, level),
         Term::TUniv(_) | Term::TProp | Term::TSSet | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => false,
         Term::TLift(a, _) => uses_var_at_level(a, level),
         Term::TLower(a) => uses_var_at_level(a, level),
@@ -2181,6 +2212,7 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
         Value::VPair(a, b) => Term::TPair(Box::new(quote(size, globals, global_offset, *a)), Box::new(quote(size, globals, global_offset, *b))),
         Value::VFst(p) => Term::TFst(Box::new(quote(size, globals, global_offset, *p))),
         Value::VSnd(p) => Term::TSnd(Box::new(quote(size, globals, global_offset, *p))),
+        Value::VProj(field, r) => Term::TProj(field, Box::new(quote(size, globals, global_offset, *r))),
         Value::VPath(a, u, v) => Term::TPath(
             Box::new(quote(size, globals, global_offset, *a)),
             Box::new(quote(size, globals, global_offset, *u)),
@@ -2398,6 +2430,7 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
         }
         Neutral::NMeta(i) => Term::Meta(i),
         Neutral::NForce(n) => Term::TForce(Box::new(quote_neutral(size, globals, global_offset, *n))),
+        Neutral::NProj(n, field) => Term::TProj(field, Box::new(quote_neutral(size, globals, global_offset, *n))),
     }
 }
 

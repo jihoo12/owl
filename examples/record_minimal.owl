@@ -1,0 +1,13 @@
+inductive Nat where
+  | zero : Nat
+  | succ : Nat -> Nat
+
+record Point where
+  field x : Nat
+  field y : Nat
+
+def origin : Point := mkPoint Nat.zero Nat.zero
+
+def get_x : Point -> Nat := fun p => p.x
+
+def get_y : Point -> Nat := fun p => p.y

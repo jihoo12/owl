@@ -142,6 +142,7 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             }
             Ok(())
         }
+        Term::TProj(_, r) => check_positivity_in(target, r, negative),
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
             check_positivity_in(target, a, negative)
         }
@@ -233,6 +234,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
     }
@@ -256,6 +258,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
     }
@@ -277,6 +280,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
     }
@@ -298,6 +302,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         let err = check_datatype_positivity(&dt).unwrap_err();
         assert_eq!(err.datatype, "Bad");
@@ -325,6 +330,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
     }
@@ -350,6 +356,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         let err = check_datatype_positivity(&dt).unwrap_err();
         assert_eq!(err.datatype, "Bad");
@@ -372,6 +379,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
     }
@@ -391,6 +399,7 @@ mod tests {
             sqcons: vec![],
             cellcons: vec![],
             universe_level: None,
+            field_names: None,
         };
         assert!(check_datatype_positivity(&dt).is_ok());
     }

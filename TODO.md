@@ -133,8 +133,10 @@
   - Module instantiation
 
 - **Record types** — Named sigma types with projections:
-  - `record R where field x : A; field y : B`
-  - Automatic projection functions
+  - [x] `record R where field x : A; field y : B` (desugars to single-constructor inductive)
+  - [x] Automatic projection functions (`r.field` syntax, chained projections)
+  - [x] Parameterized records (`record Pair (A : Type) (B : Type) where ...`)
+  - [x] Constructor auto-named `mk<RecordName>` (e.g. `mkPair`)
   - Record update syntax
 
 - **Pattern matching improvements** —

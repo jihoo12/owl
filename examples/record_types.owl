@@ -1,0 +1,23 @@
+-- Record types (Section 4.8 of TODO)
+-- Desugared to single-constructor inductives with field projection.
+-- Constructor is auto-named `mk<RecordName>`.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+record Point where
+  field x : Nat
+  field y : Nat
+
+def origin : Point := mkPoint Nat.zero Nat.zero
+
+def get_x : Point -> Nat := fun p => p.x
+
+def get_y : Point -> Nat := fun p => p.y
+
+record Pair (A : Type) (B : Type) where
+  field fst : A
+  field snd : B
+
+def pair_nat : Pair Nat Nat := mkPair Nat.zero Nat.zero

@@ -22,6 +22,9 @@ pub(super) struct Parser {
     stop_at_by_wf: bool,
     /// When true, `parse_pair` does not consume commas (used inside system entries).
     stop_at_comma: bool,
+    /// When true, `starts_atom` treats the keyword `field` as a stop token
+    /// (used inside record field type parsing).
+    stop_at_field: bool,
 }
 
 impl Parser {
@@ -37,6 +40,7 @@ impl Parser {
             stop_at_in: false,
             stop_at_by_wf: false,
             stop_at_comma: false,
+            stop_at_field: false,
         }
     }
 
@@ -174,6 +178,7 @@ impl Parser {
             sqcons: Vec::new(),
             cellcons: Vec::new(),
             universe_level: None,
+            field_names: None,
         };
         while self.consume(&TokenKind::Pipe) {
             let con_name = self.expect_ident("expected constructor name after '|'")?;
@@ -313,7 +318,90 @@ impl Parser {
         for _ in &params {
             self.term_env.remove(0);
         }
-        Ok(Datatype { name, params, cons, pcons, sqcons, cellcons, universe_level: uni_level })
+        Ok(Datatype { name, params, cons, pcons, sqcons, cellcons, universe_level: uni_level, field_names: None })
+    }
+
+    /// Parse a record declaration:
+    ///   record R where
+    ///     field x : A
+    ///     field y : B
+    ///
+    /// Desugars to a single-constructor inductive type plus projection definitions.
+    pub(super) fn parse_record_decl(&mut self) -> Result<Datatype, ParseError> {
+        let name = self.expect_ident("expected record type name")?;
+
+        // Parse optional parameter binders: `record Pair (A : Type) where`
+        let mut params: Vec<(Name, Term)> = Vec::new();
+        while self.at(&TokenKind::LParen) && self.peek_ahead_is_binder() {
+            self.expect(TokenKind::LParen, "expected '(' for parameter binder")?;
+            let param_name = self.expect_ident("expected parameter name")?;
+            self.expect(
+                TokenKind::Colon,
+                format!("expected ':' after parameter name '{}'", param_name),
+            )?;
+            let param_ty = self.parse_term()?;
+            self.expect(TokenKind::RParen, "expected ')' after parameter type")?;
+            self.term_env.insert(0, param_name.clone());
+            params.push((param_name, param_ty));
+        }
+
+        self.expect_ident("expected 'where' after record name")
+            .and_then(|keyword| {
+                if keyword == "where" {
+                    Ok(())
+                } else {
+                    Err(self.error_here("expected 'where' after record name"))
+                }
+            })?;
+
+        // Parse field declarations
+        let mut field_names = Vec::new();
+        let mut field_tys = Vec::new();
+        let mut local_dt = Datatype {
+            name: name.clone(),
+            params: params.clone(),
+            cons: Vec::new(),
+            pcons: Vec::new(),
+            sqcons: Vec::new(),
+            cellcons: Vec::new(),
+            universe_level: None,
+            field_names: None,
+        };
+
+        while self.consume_ident("field") {
+            let field_name = self.expect_ident("expected field name after 'field'")?;
+            self.expect(
+                TokenKind::Colon,
+                format!("expected ':' after field name '{}'", field_name),
+            )?;
+            self.stop_at_with = true;
+            self.stop_at_field = true;
+            let field_ty = self.parse_term()?;
+            self.stop_at_with = false;
+            self.stop_at_field = false;
+            field_names.push(field_name);
+            field_tys.push(field_ty);
+        }
+
+        if field_names.is_empty() {
+            return Err(self.error_here("record must have at least one field"));
+        }
+
+        // Build the single constructor: `mkR : (field1 : A) -> (field2 : B) -> ... -> R`
+        let con_name = format!("mk{}", name);
+        let con_sig = ConSig {
+            name: con_name,
+            arg_tys: field_tys,
+        };
+        local_dt.cons.push(con_sig);
+        local_dt.field_names = Some(field_names);
+
+        // Remove parameter binders from term_env
+        for _ in &params {
+            self.term_env.remove(0);
+        }
+
+        Ok(local_dt)
     }
 
     fn parse_constructor_type(
@@ -687,7 +775,28 @@ impl Parser {
         if self.consume_ident("Next") {
             return Ok(Term::TNext(Box::new(self.parse_prefix_or_atom()?)));
         }
-        self.parse_atom()
+        // Record field projection: `record.field` — parse as TProj
+        // This is handled after prefix operators so that `Force x.y` etc. work.
+        let mut term = self.parse_atom()?;
+        // Check for `.field` suffix (projection) — loop for chained projections
+        while self.consume(&TokenKind::Dot) {
+            if let TokenKind::Ident(field) = self.peek().kind.clone() {
+                // If the term is `TData("Foo", [])` and "Foo" has a constructor
+                // named `field`, treat this as a constructor reference: `Foo.field`.
+                // Only use projection when the term is NOT a datatype name.
+                if let Term::TData(ref dt_name, _) = term {
+                    if self.datatypes.iter().any(|dt| dt.name == *dt_name && dt.cons.iter().any(|c| c.name == field)) {
+                        self.pos += 1;
+                        return Ok(Term::TCon(dt_name.clone(), field, Vec::new()));
+                    }
+                }
+                self.pos += 1;
+                term = Term::TProj(field, Box::new(term));
+            } else {
+                break;
+            }
+        }
+        Ok(term)
     }
 
     fn parse_atom(&mut self) -> Result<Term, ParseError> {
@@ -1284,7 +1393,7 @@ impl Parser {
     fn is_decl_start(&self) -> bool {
         matches!(
             &self.peek().kind,
-            TokenKind::Ident(name) if name == "def" || name == "inductive" || name == "import"
+            TokenKind::Ident(name) if name == "def" || name == "inductive" || name == "record" || name == "import"
         )
     }
 
@@ -1305,6 +1414,11 @@ impl Parser {
         if self.stop_at_by_wf
             && let TokenKind::Ident(name) = &self.peek().kind
                 && name == "by_wf" {
+                    return false;
+        }
+        if self.stop_at_field
+            && let TokenKind::Ident(name) = &self.peek().kind
+                && name == "field" {
                     return false;
         }
         matches!(
@@ -1642,6 +1756,7 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "trivial"
             | "def"
             | "inductive"
+            | "record"
             | "import"
             | "match"
             | "return"

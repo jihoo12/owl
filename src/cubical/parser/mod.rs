@@ -53,6 +53,9 @@ pub enum Decl {
         func_ty: Term,
         func_val: Term,
     },
+    /// Record type: `record R where field x : A; field y : B`
+    /// Desugars to a single-constructor inductive type.
+    Record(Datatype),
     Import { path: String },
 }
 
@@ -104,6 +107,9 @@ impl ProgramParser {
             self.parser.parse_def()?
         } else if self.parser.consume_ident("inductive") {
             self.parser.parse_data_decl()?
+        } else if self.parser.consume_ident("record") {
+            let dt = self.parser.parse_record_decl()?;
+            Decl::Record(dt)
         } else if self.parser.consume_ident("import") {
             self.parser.parse_import()?
         } else {
@@ -118,6 +124,9 @@ impl ProgramParser {
                 }
             }
             Decl::DataWithFunc { dt, .. } => {
+                self.parser.datatypes.push(dt.clone());
+            }
+            Decl::Record(dt) => {
                 self.parser.datatypes.push(dt.clone());
             }
             Decl::Import { .. } => {}
@@ -187,6 +196,12 @@ pub fn typecheck_program(
                 check_closed_dt(&dts, &func_val, &func_ty)
                     .map_err(|e| format!("type error in '{}': {}", func_name, e))?;
                 defs.push((func_name, func_ty, func_val));
+            }
+            Decl::Record(dt) => {
+                // Record desugars to a single-constructor inductive type.
+                crate::cubical::syntax::check_datatype_positivity(&dt)
+                    .map_err(|e| format!("{}", e))?;
+                dts.push(dt.clone());
             }
             Decl::Def { name, ty, val, .. } => {
                 // Check the definition body against its declared type, with
