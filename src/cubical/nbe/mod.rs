@@ -5,6 +5,7 @@ pub mod trace;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::cubical::equality::definitionally_equal;
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top, eval_interval};
 use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, System, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, show_term, subst};
 
@@ -1741,6 +1742,28 @@ fn match_ctor_args<'a>(v: &'a Value, expected_name: &str) -> Option<(&'a str, Ve
     }
 }
 
+/// Check if all tubes in the system are constant (tube @ I0 ≡ tube @ I1)
+/// AND coherent with base (tube @ I0 ≡ base). When this holds, the Kan
+/// operations degenerate: hcomp/comp → base, fill/hfill → constant path.
+fn all_tubes_constant_and_coherent(globals: &Globals, global_offset: usize, sys: &DNFSystem, base: &Value) -> bool {
+    let base_term = quote(0, globals, global_offset, base.clone());
+    for (_phi, tube) in sys {
+        let t0 = do_papp(globals, global_offset, tube.clone(), Value::VInterval(I::I0));
+        let t1 = do_papp(globals, global_offset, tube.clone(), Value::VInterval(I::I1));
+        let t0_term = quote(0, globals, global_offset, t0);
+        let t1_term = quote(0, globals, global_offset, t1);
+        // Tube must be constant: t @ I0 ≡ t @ I1
+        if !definitionally_equal(&t0_term, &t1_term) {
+            return false;
+        }
+        // Tube must be coherent with base: t @ I0 ≡ base
+        if !definitionally_equal(&t0_term, &base_term) {
+            return false;
+        }
+    }
+    true
+}
+
 pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSystem, base: Value) -> Value {
     // Filter out ⊥ faces
     let sys: DNFSystem = sys.into_iter().filter(|(phi, _)| *phi != dnf_bot()).collect();
@@ -1758,6 +1781,14 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
             record_step("hcomp-top-face".into(), "hcomp A [⊤ ↦ t, ...] base".into(), value_str(globals, global_offset, &result));
             return result;
         }
+    }
+
+    // Constant-tube shortcut: when all tubes don't depend on the interval
+    // variable (tube @ i0 ≡ tube @ i1) and agree with base, the system
+    // imposes no varying constraint and hcomp reduces to base.
+    if all_tubes_constant_and_coherent(globals, global_offset, &sys, &base) {
+        record_step("hcomp-const-tube".into(), "hcomp A [const tubes] base".into(), value_str(globals, global_offset, &base));
+        return base;
     }
 
     {
@@ -1958,6 +1989,12 @@ pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
             record_step("comp-top-face".into(), "comp _ [⊤ ↦ t, ...] base".into(), value_str(globals, global_offset, &result));
             return result;
         }
+    }
+
+    // Constant-tube shortcut
+    if all_tubes_constant_and_coherent(globals, global_offset, &sys, &base) {
+        record_step("comp-const-tube".into(), "comp A [const tubes] base".into(), value_str(globals, global_offset, &base));
+        return base;
     }
 
     {
@@ -2171,6 +2208,18 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
             record_step("fill-top-face".into(), "fill _ [⊤ ↦ t, ...] base".into(), value_str(globals, global_offset, &result));
             return result;
         }
+    }
+
+    // Constant-tube shortcut: fill produces a constant path when tubes don't vary
+    if all_tubes_constant_and_coherent(globals, global_offset, &sys, &base) {
+        let result = Value::VPLam("j".to_string(), IClosure {
+            env: vec![],
+            globals: globals.clone(),
+            global_offset,
+            body: quote(1, globals, global_offset, base.clone()),
+        });
+        record_step("fill-const-tube".into(), "fill A [const tubes] base".into(), value_str(globals, global_offset, &result));
+        return result;
     }
 
     // ── Decompose fill for Pi/Sigma/Data types ──
@@ -2419,6 +2468,18 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
             record_step("hfill-top-face".into(), "hfill _ [⊤ ↦ t, ...] base".into(), value_str(globals, global_offset, &result));
             return result;
         }
+    }
+
+    // Constant-tube shortcut: hfill produces a constant path when tubes don't vary
+    if all_tubes_constant_and_coherent(globals, global_offset, &sys, &base) {
+        let result = Value::VPLam("j".to_string(), IClosure {
+            env: vec![],
+            globals: globals.clone(),
+            global_offset,
+            body: quote(1, globals, global_offset, base.clone()),
+        });
+        record_step("hfill-const-tube".into(), "hfill A [const tubes] base".into(), value_str(globals, global_offset, &result));
+        return result;
     }
 
     // ── Decompose hfill for Pi/Sigma/Data types ──
@@ -3231,6 +3292,37 @@ mod tests {
         let term = Term::PApp(b(hcomp), b(Term::TInterval(I::I1)));
         let result = nbe_eval(&term);
         assert_eq!(result, Term::TUniv(0));
+    }
+
+    #[test]
+    fn hcomp_const_tube_coherent_reduces_to_base() {
+        // hcomp U [i1 => λj. U0] U0 should reduce to U0 (constant-tube shortcut)
+        // Tube PLam("j", U0) is constant (U0 at both I0 and I1) and equals base U0.
+        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+        let hcomp = Term::THComp(
+            b(Term::TUniv(0)),
+            vec![(Term::TInterval(I::I1), tube)],
+            b(Term::TUniv(0)),
+        );
+        let result = nbe_eval(&hcomp);
+        assert_eq!(result, Term::TUniv(0), "constant-tube hcomp should reduce to base");
+    }
+
+    #[test]
+    fn fill_const_tube_coherent_reduces_to_const_path() {
+        // fill U [i1 => λj. U0] U0 should reduce to λj. U0 (constant-tube shortcut)
+        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+        let fill = Term::TFill(
+            b(Term::TUniv(0)),
+            vec![(Term::TInterval(I::I1), tube)],
+            b(Term::TUniv(0)),
+        );
+        let result = nbe_eval(&fill);
+        assert!(
+            matches!(&result, Term::PLam(_, _)),
+            "constant-tube fill should reduce to VPLam (constant path), got: {}",
+            crate::cubical::syntax::show_term(&[], &result)
+        );
     }
 
     #[test]
