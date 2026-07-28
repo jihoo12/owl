@@ -1,0 +1,391 @@
+-- stress_section5.owl — Comprehensive Section 5 (Cubical Improvements) stress test
+--
+-- Covers all items from TODO.md Section 5:
+--   5.1 Face lattice (meet, join, neg, implication, equivalence)
+--   5.2 Comp/hfill systems (multi-face, decomposition, constant-tube shortcut)
+--   5.3 Transport (constant, Pi, Sigma, Path, Lift/Lower, record, inductive)
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.1: Face Lattice Operations
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 1.1 Face negation: ~i0 = 1, ~i1 = 0
+def face_neg_i0 : Nat :=
+  hcomp Nat [~i0 => <i> suc zero] zero
+
+def face_neg_i1 : Nat :=
+  hcomp Nat [~i1 => <i> suc zero] zero
+
+-- 1.2 Face meet with negation: i0 /\ ~i0 = 0 (bottom)
+def face_meet_neg_self : Nat :=
+  hcomp Nat [i0 /\ ~i0 => <i> zero] zero
+
+-- 1.3 Face join with negation: i0 \/ ~i0 = 1 (top)
+def face_join_neg_self : Nat :=
+  hcomp Nat [i0 \/ ~i0 => <i> suc zero] (suc zero)
+
+-- 1.4 Complex: ~i0 /\ ~i1 = ~i0 /\ ~i1 (neither endpoint)
+def face_complex_neg : Nat :=
+  hcomp Nat [~i0 /\ ~i1 => <i> suc zero] zero
+
+-- 1.5 Complex: ~i0 \/ i1 (true except at i=0 when i=0)
+def face_complex_join : Nat :=
+  hcomp Nat [~i0 \/ i1 => <i> suc zero] zero
+
+-- 1.6 Meet of negations: ~i0 /\ ~i1 (bottom at both endpoints)
+def face_double_neg_meet : Nat :=
+  hcomp Nat [~i0 /\ ~i1 => <i> zero] zero
+
+-- 1.7 Idempotence: i1 /\ i1 = i1
+def face_idempotent_meet : Nat :=
+  hcomp Nat [i1 /\ i1 => <i> suc zero] (suc zero)
+
+-- 1.8 Idempotence: i0 \/ i0 = i0
+def face_idempotent_join : Nat :=
+  hcomp Nat [i0 \/ i0 => <i> zero] zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.2: Comp/Hfill System Types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 2.1 Multi-face hcomp with => syntax
+def multi_hcomp : Nat :=
+  hcomp Nat [i0 => <i> zero, i1 => <i> suc zero] (suc zero)
+
+-- 2.2 Multi-face hcomp: both tubes match base
+def multi_hcomp_match : Nat :=
+  hcomp Nat [i0 => <i> suc zero, i1 => <i> suc zero] (suc zero)
+
+-- 2.3 hcomp with meet face using => syntax
+def hcomp_meet_face : Nat :=
+  hcomp Nat [1 /\ 1 => <i> suc zero] (suc zero)
+
+-- 2.4 hcomp with join face using => syntax
+def hcomp_join_face : Nat :=
+  hcomp Nat [0 \/ 0 => <i> zero] zero
+
+-- 2.5 Multi-face comp with => syntax
+def multi_comp : Nat :=
+  comp Nat [i0 => <i> zero, i1 => <i> suc zero] (suc zero)
+
+-- 2.6 Multi-face fill with => syntax
+def multi_fill_at0 : Nat :=
+  fill Nat [i0 => <i> zero, i1 => <i> suc zero] (suc zero) @ i0
+
+def multi_fill_at1 : Nat :=
+  fill Nat [i0 => <i> zero, i1 => <i> suc zero] (suc zero) @ i1
+
+-- 2.7 Multi-face hfill with => syntax
+def multi_hfill_at0 : Nat :=
+  hfill Nat [i0 => <i> zero, i1 => <i> suc zero] (suc zero) @ i0
+
+def multi_hfill_at1 : Nat :=
+  hfill Nat [i0 => <i> zero, i1 => <i> suc zero] (suc zero) @ i1
+
+-- 2.8 hcomp with bottom face system: [0 => tube] reduces to base
+def hcomp_bottom_sys : Nat :=
+  hcomp Nat [0 => <i> suc zero] zero
+
+-- 2.9 Regularity: empty system in hcomp → base
+def hcomp_empty : Nat :=
+  hcomp Nat [] zero
+
+-- 2.10 Regularity: fill with empty system → constant path
+def fill_empty_at0 : Nat :=
+  fill Nat [] zero @ i0
+
+def fill_empty_at1 : Nat :=
+  fill Nat [] zero @ i1
+
+-- 2.11 Regularity: hfill with empty system → constant path
+def hfill_empty_at0 : Nat :=
+  hfill Nat [] zero @ i0
+
+def hfill_empty_at1 : Nat :=
+  hfill Nat [] zero @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.2a: Constant-Tube Shortcut
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- When all tubes are constant (tube @ i0 ≡ tube @ i1) and coherent
+-- with base, hcomp/comp reduce to base and fill/hfill to constant path.
+
+-- 3.1 hcomp with constant tube matching base
+def const_hcomp : Nat :=
+  hcomp Nat [i1 => <i> suc zero] (suc zero)
+
+-- 3.2 fill with constant tube matching base → constant path
+def const_fill_at0 : Nat :=
+  fill Nat [i1 => <i> suc zero] (suc zero) @ i0
+
+def const_fill_at1 : Nat :=
+  fill Nat [i1 => <i> suc zero] (suc zero) @ i1
+
+-- 3.3 hfill with constant tube matching base → constant path
+def const_hfill_at0 : Nat :=
+  hfill Nat [i1 => <i> suc zero] (suc zero) @ i0
+
+def const_hfill_at1 : Nat :=
+  hfill Nat [i1 => <i> suc zero] (suc zero) @ i1
+
+-- 3.4 Multiple constant tubes, all matching base
+def const_multi_hcomp : Nat :=
+  hcomp Nat [i0 => <i> suc zero, i1 => <i> suc zero] (suc zero)
+
+-- 3.5 Constant tube with bottom face: [0 => <i> suc zero] with base=suc zero
+def const_bot_hcomp : Nat :=
+  hcomp Nat [0 => <i> suc zero] (suc zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.2b: Fill/Hfill Decomposition Through Types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 4.1 Fill through Pi with multi-face system
+def fill_pi_multi_at0 : Nat :=
+  (fill (Nat -> Nat) [i0 => <i> fun x => x, i1 => <i> fun x => x] (fun x => x) @ i0) zero
+
+def fill_pi_multi_at1 : Nat :=
+  (fill (Nat -> Nat) [i0 => <i> fun x => x, i1 => <i> fun x => x] (fun x => x) @ i1) (suc zero)
+
+-- 4.2 Fill through Sigma with single-face system
+def fill_sigma_multi_fst : Nat :=
+  fst (fill (Nat * Nat) [] (zero, zero) @ i1)
+
+def fill_sigma_multi_snd : Nat :=
+  snd (fill (Nat * Nat) [] (zero, zero) @ i1)
+
+-- 4.3 Fill through Nat data type with multi-face system
+def fill_nat_multi : Nat :=
+  fill Nat [i0 => <i> suc zero, i1 => <i> suc zero] (suc zero) @ i1
+
+-- 4.4 hfill through Pi with multi-face system
+def hfill_pi_multi_at0 : Nat :=
+  (hfill (Nat -> Nat) [i0 => <i> fun x => x, i1 => <i> fun x => x] (fun x => x) @ i0) zero
+
+def hfill_pi_multi_at1 : Nat :=
+  (hfill (Nat -> Nat) [i0 => <i> fun x => x, i1 => <i> fun x => x] (fun x => x) @ i1) (suc zero)
+
+-- 4.5 hfill through Sigma with empty system
+def hfill_sigma_multi_fst : Nat :=
+  fst (hfill (Nat * Nat) [] (zero, zero) @ i1)
+
+-- 4.6 Nested fill: Pi returning Pi
+def nested_fill_pi_pi : Nat :=
+  ((fill (Nat -> Nat -> Nat)
+    [i1 => <i> fun x => fun y => y]
+    (fun x => fun y => y) @ i1) zero) zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.3: Transport Computation
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 5.1 Transport along constant path (identity family)
+def transport_const : Nat :=
+  transport (<i> Nat) zero
+
+-- 5.2 Transport through Pi type
+def transport_pi : Nat :=
+  (transport (<i> Nat -> Nat) (fun x => x)) zero
+
+-- 5.3 Transport through Pi with non-trivial function
+def transport_pi_suc : Nat :=
+  (transport (<i> Nat -> Nat) (fun x => suc x)) zero
+
+-- 5.4 Transport through Sigma type
+def transport_sigma_fst : Nat :=
+  fst (transport (<i> Nat * Nat) (zero, zero))
+
+def transport_sigma_snd : Nat :=
+  snd (transport (<i> Nat * Nat) (zero, zero))
+
+-- 5.5 Transport through Sigma with non-trivial pair
+def transport_sigma_nontriv : Nat :=
+  fst (transport (<i> Nat * Bool) (zero, true))
+
+-- 5.6 Transport of zero (constant family)
+def transport_zero : Nat :=
+  transport (<i> Nat) zero
+
+-- 5.7 Transport of suc zero (constant family)
+def transport_suc : Nat :=
+  transport (<i> Nat) (suc zero)
+
+-- 5.8 Nested transport
+def nested_transport : Nat :=
+  transport (<i> Nat) (transport (<i> Nat) zero)
+
+-- 5.9 Transport through Bool
+def transport_bool : Bool :=
+  transport (<i> Bool) true
+
+-- 5.10 Transport through nested type: Bool * Nat
+def transport_pair_type_fst : Bool :=
+  fst (transport (<i> Bool * Nat) (true, zero))
+
+def transport_pair_type_snd : Nat :=
+  snd (transport (<i> Bool * Nat) (true, zero))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.3a: Transport Through Path Types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Transport through Path type: pointwise transport
+def transport_path_at0 : Nat :=
+  (transport (<i> Path Nat zero zero) (<i> zero)) @ i0
+
+def transport_path_at1 : Nat :=
+  (transport (<i> Path Nat zero zero) (<i> zero)) @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.3b: Transport Through Lift/Lower (no parser syntax, skipped)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.3c: Transport Through Record Types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+record Point where
+  field px : Nat
+  field py : Nat
+
+-- Transport through record type (desugared to inductive)
+def transport_record : Nat :=
+  (transport (<i> Point) (mkPoint zero zero)).px
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.3d: Transport Along Non-Constant Paths (via ua)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Transport via ua with identity equivalence
+-- mkEquiv takes: A B f g eta eps where
+--   eta : (x : A) -> Path B (f x) (equivFwd e x)
+--   eps : (y : B) -> Path A (g y) (equivBwd e y)
+-- This is complex, so we test ua with a simpler stuck form
+def transport_ua_stuck : Nat :=
+  transport (ua (mkEquiv Nat Nat (fun x => x) (fun x => x) (fun x => <i> x) (fun x => <i> x))) zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.2c: Kan Operations Inside Functions (Pi decomposition)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 6.1 hcomp inside lambda (Pi decomposition)
+def hcomp_in_lambda : Nat :=
+  (hcomp (Nat -> Nat) [i1 => <i> fun x => x] (fun x => x)) zero
+
+-- 6.2 comp inside lambda
+def comp_in_lambda : Nat :=
+  (comp (Nat -> Nat) [i1 => <i> fun x => x] (fun x => x)) zero
+
+-- 6.3 fill inside lambda (produces path, applied at argument)
+def fill_in_lambda_at0 : Nat :=
+  (fill (Nat -> Nat) [i1 => <i> fun x => x] (fun x => x) @ i0) zero
+
+def fill_in_lambda_at1 : Nat :=
+  (fill (Nat -> Nat) [i1 => <i> fun x => x] (fun x => x) @ i1) zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.2d: Kan Operations on Data Types (data decomposition)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 7.1 hcomp through Nat suc constructor
+def hcomp_nat_suc : Nat :=
+  hcomp Nat [i1 => <i> suc (suc zero)] (suc zero)
+
+-- 7.2 fill through Nat suc
+def fill_nat_suc_at0 : Nat :=
+  fill Nat [i1 => <i> suc zero] (suc zero) @ i0
+
+def fill_nat_suc_at1 : Nat :=
+  fill Nat [i1 => <i> suc zero] (suc zero) @ i1
+
+-- 7.3 hcomp through Bool true
+def hcomp_bool : Bool :=
+  hcomp Bool [i1 => <i> true] true
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5.2e: Non-Trivial Face Interactions
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 8.1 hcomp with face that's always false: [i0 /\ i1 => ...] is 0 (bottom)
+--     since i0 and i1 can't both be true simultaneously in the interval
+def hcomp_disjoint : Nat :=
+  hcomp Nat [i0 /\ i1 => <i> suc zero] zero
+
+-- 8.2 fill with bottom face system → constant path
+def fill_bottom_sys_at0 : Nat :=
+  fill Nat [0 => <i> zero] zero @ i0
+
+def fill_bottom_sys_at1 : Nat :=
+  fill Nat [0 => <i> zero] zero @ i1
+
+-- 8.3 hfill with bottom face system
+def hfill_bottom_sys_at0 : Nat :=
+  hfill Nat [0 => <i> zero] zero @ i0
+
+def hfill_bottom_sys_at1 : Nat :=
+  hfill Nat [0 => <i> zero] zero @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION 5: Cross-Cutting Interactions
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 9.1 Transport of hcomp result
+def transport_of_hcomp : Nat :=
+  transport (<i> Nat) (hcomp Nat [i1 => <i> suc zero] (suc zero))
+
+-- 9.2 hcomp of transport result
+def hcomp_of_transport : Nat :=
+  hcomp Nat [i1 => <i> suc zero] (transport (<i> Nat) zero)
+
+-- 9.3 fill result applied at endpoints, then transported
+def transport_fill_endpoints : Nat :=
+  transport (<i> Nat) (fill Nat [i1 => <i> suc zero] (suc zero) @ i1)
+
+-- 9.4 Nested hcomp
+def nested_hcomp : Nat :=
+  hcomp Nat [i1 => <i> hcomp Nat [i1 => <i> suc zero] (suc zero)] (suc zero)
+
+-- 9.5 Path application of hcomp result
+def hcomp_papp_i0 : Nat :=
+  (hcomp Nat [i1 => <i> suc zero] (suc zero))  -- used as value, not path
+
+-- 9.6 hcomp inside pair construction
+def hcomp_in_pair_fst : Nat :=
+  fst (hcomp (Nat * Nat) [] (zero, zero))
+
+def hcomp_in_pair_snd : Nat :=
+  snd (hcomp (Nat * Nat) [] (zero, zero))
+
+-- 9.7 Fill decomposition with mismatched tubes falls through
+-- (tubes produce different constructors → stuck)
+def fill_mismatch : Nat :=
+  fill Nat [i1 => <i> suc zero] zero @ i1
+
+-- 9.8 Transport composed with fill
+def transport_fill_comp : Nat :=
+  transport (<i> Nat) (fill Nat [] zero @ i1)
+
+-- 9.9 Multi-face fill where tubes agree
+def multi_fill_agree_at0 : Nat :=
+  fill Nat [i0 => <i> zero, i1 => <i> zero] zero @ i0
+
+def multi_fill_agree_at1 : Nat :=
+  fill Nat [i0 => <i> zero, i1 => <i> zero] zero @ i1
+
+-- 9.10 Path type operations
+def path_refl : Path Nat zero zero := <i> zero
+
+def path_at0 : Nat := path_refl @ i0
+def path_at1 : Nat := path_refl @ i1
+
+-- Final main to ensure the file type-checks
+def main : Nat := zero
