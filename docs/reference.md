@@ -34,6 +34,8 @@ The following words are reserved and cannot be used as variable names:
 | ------------- | ------------------------------------------ |
 | `def`         | Define a new constant                      |
 | `inductive`   | Declare an inductive datatype              |
+| `record`      | Declare a record type (sugar for inductive) |
+| `field`       | Field declaration in a record              |
 | `where`       | Begin constructor list in datatype         |
 | `import`      | Import definitions from another file       |
 | `fun`         | Lambda abstraction                         |
@@ -1667,31 +1669,81 @@ the constructor's arguments are substituted for the binders.
 | `transport p x` (PCon) | Point constructor with transported arguments |
 | `transport p x` (SqCon) | Square constructor with transported arguments |
 | `transport p x` (CellCon) | n-dimensional cell constructor with transported arguments |
+| `transport (<i> TLift A m) (lift x)` | `lift (transport (<i> A) x)` (unwrap, transport inner, re-wrap) |
+| `transport (<i> TLower A) (lower x)` | `lower (transport (<i> A) x)` (unwrap, transport inner, re-wrap) |
 
 ### Kan Operation Reductions
 
 | Form | Condition | Reduction |
 | ----- | --------- | --------- |
-| `comp A phi tube base` | `phi = 1` | `tube @ 1` |
-| `comp A phi tube base` | `phi = 0` | `base` |
-| `fill A phi tube base @ i0` | always | `base` |
-| `fill A phi tube base @ i1` | always | `comp A phi tube base` |
-| `fill A phi tube base` | `phi = 1` | `tube` |
-| `fill A phi tube base` | `phi = 0` | `fun j -> base` |
-| `hfill A phi tube base @ i0` | always | `base` |
-| `hfill A phi tube base @ i1` | always | `hcomp A phi tube base` |
-| `hfill A phi tube base` | `phi = 1` | `tube` |
-| `hfill A phi tube base` | `phi = 0` | `fun j -> base` |
+| `hcomp A [phi => tube, ...] base` | empty system | `base` |
+| `hcomp A [phi => tube, ...] base` | top face (phi=1) in system | `tube @ 1` |
+| `hcomp A [phi => tube, ...] base` | all tubes constant & coherent with base | `base` |
+| `comp A [phi => tube, ...] base` | empty system | `base` |
+| `comp A [phi => tube, ...] base` | top face (phi=1) in system | `tube @ 1` |
+| `comp A [phi => tube, ...] base` | all tubes constant & coherent with base | `base` |
+| `fill A [phi => tube, ...] base @ i0` | always | `base` |
+| `fill A [phi => tube, ...] base @ i1` | always | `comp A [phi => tube, ...] base` |
+| `fill A [phi => tube, ...] base` | empty system | `fun j -> base` |
+| `fill A [phi => tube, ...] base` | top face (phi=1) in system | `tube` |
+| `fill A [phi => tube, ...] base` | all tubes constant & coherent with base | `fun j -> base` |
+| `hfill A [phi => tube, ...] base @ i0` | always | `base` |
+| `hfill A [phi => tube, ...] base @ i1` | always | `hcomp A [phi => tube, ...] base` |
+| `hfill A [phi => tube, ...] base` | empty system | `fun j -> base` |
+| `hfill A [phi => tube, ...] base` | top face (phi=1) in system | `tube` |
+| `hfill A [phi => tube, ...] base` | all tubes constant & coherent with base | `fun j -> base` |
 
-### HIT Computation Rules
+**Constant-tube shortcut**: A system is *constant and coherent* when every
+tube satisfies `tube @ i0 ≡ tube @ i1` and `tube @ i0 ≡ base` (i.e., the
+tube is a constant path that agrees with the base). In this case, no
+computation is needed — the result is simply `base` (for `hcomp`/`comp`) or
+the constant path `fun j -> base` (for `fill`/`hfill`).
 
-hcomp/comp/fill/hfill decompose through data type constructors when the
-tube system is compatible (every tube produces the same constructor as the base):
+This optimization applies before type decomposition and is essential for
+correct behavior of papp-through-VHComp reductions at interval endpoints.
+
+### HIT Computation Rules (Data Type Decomposition)
+
+hcomp/comp decompose through data type constructors when the tube system is
+compatible (every tube produces the same constructor as the base).
+fill/hfill decompose through Pi, Sigma, and data types.
+
+#### Data Type Decomposition (hcomp/comp/fill/hfill)
 
 | Form | Condition | Reduction |
 | ----- | --------- | --------- |
-| `hcomp D phi tube (C args)` | all tubes = `C(tube_args)` | `C(hcomp A₁ phi tube₁ args₁, ...)` |
-| `comp D phi tube (C args)` | all tubes = `C(tube_args)` | `C(comp A₁ phi tube₁ args₁, ...)` |
+| `hcomp D [phi => tube, ...] (C args)` | all tubes = `C(tube_args)` | `C(hcomp A₁ [phi => tube₁, ...] args₁, ...)` |
+| `comp D [phi => tube, ...] (C args)` | all tubes = `C(tube_args)` | `C(comp A₁ [phi => tube₁, ...] args₁, ...)` |
+| `fill D [phi => tube, ...] (C args)` | all tubes = `C(tube_args)` | `VPLam(j, C(fill A₁ [phi => tube₁, ...] args₁ @ j, ...))` |
+| `hfill D [phi => tube, ...] (C args)` | all tubes = `C(tube_args)` | `VPLam(j, C(hfill A₁ [phi => tube₁, ...] args₁ @ j, ...))` |
+
+Each constructor argument is composed/filled independently. For fill/hfill,
+the result is a path (PLam) wrapping constructor arguments filled at the
+interval variable.
+
+#### Pi Type Decomposition (fill/hfill)
+
+fill/hfill decompose through Pi types by introducing a lambda that applies
+inner fills at the argument:
+
+| Form | Reduction |
+| ----- | --------- |
+| `fill (Pi x:A. B) [phi => tube, ...] base` | `VPLam(j, VLam(x, fill B [phi => tube@x, ...] (base x) @ j))` |
+| `hfill (Pi x:A. B) [phi => tube, ...] base` | `VPLam(j, VLam(x, hfill B [phi => tube@x, ...] (base x) @ j))` |
+
+The result is a path from `base` to the composed function, where each
+argument position is filled independently.
+
+#### Sigma Type Decomposition (fill/hfill)
+
+fill/hfill decompose through Sigma types by filling each component:
+
+| Form | Reduction |
+| ----- | --------- |
+| `fill (A * B) [phi => tube, ...] base` | `VPLam(j, (fill A [phi => fst(tube), ...] (fst base) @ j, fill B [phi => snd(tube), ...] (snd base) @ j))` |
+| `hfill (A * B) [phi => tube, ...] base` | `VPLam(j, (hfill A [phi => fst(tube), ...] (fst base) @ j, hfill B [phi => snd(tube), ...] (snd base) @ j))` |
+
+Each component is filled independently and the results are paired.
 
 This decomposes the Kan operation through each constructor argument
 independently, transporting each argument through its type.
@@ -1719,6 +1771,7 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                   ["with" "inductive" NAME [<params>] [":" UNIV] "where" <con_list>]*
                 | "inductive" NAME [<params>] [":" UNIV] "where" <con_list>
                   "with" NAME ":" <term> ":=" <term>
+                | "record" NAME [<params>] "where" <field_list>
                 | "def" NAME ":" <term> ":=" <term>
 
 <params>      ::= ("(" NAME ":" <term> ")")*
@@ -1728,6 +1781,8 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | NAME ":" <con_type> "["+ <face> ("," <face>)* "]" "+"
                 | NAME ":" <con_type>  -- ordinary (point) constructor
 <con_type>    ::= <atom> ("->" <atom>)*
+<field_list>  ::= <field> (";" <field>)*
+<field>       ::= "field" NAME ":" <term>
 <UNIV>        ::= "U0" | "U1" | "U2" | ...
 
 <term>        ::= <lambda>
@@ -2100,6 +2155,53 @@ def add : Nat -> Nat -> Nat := fun m n =>
   | zero => n
   | suc m' => suc (add m' n)
 -- add recurses on m', which is a strict subterm of m: OK
+```
+
+### Example 17: Record Types
+
+```
+record Point where
+  field x : Nat
+  field y : Nat
+
+-- Construction via auto-generated constructor mkPoint
+def origin : Point := mkPoint zero zero
+
+-- Field projection via dot notation
+def get_x : Point -> Nat := fun p => p.x
+def get_y : Point -> Nat := fun p => p.y
+
+-- Parameterized record
+record Pair (A : Type) (B : Type) where
+  field fst : A
+  field snd : B
+
+def swap : forall (A : Type) (B : Type), Pair A B -> Pair B A :=
+  fun A B p => mkPair p.snd p.fst
+```
+
+### Example 18: Cubical Stress Test (Section 5 Features)
+
+```
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Face lattice: negation, meet, join
+def face_example : Nat :=
+  hcomp Nat [~i0 /\ i1 => <i> suc zero] zero
+
+-- Multi-face Kan operations
+def multi_hcomp : Nat :=
+  hcomp Nat [i0 => <i> zero, i1 => <i> suc zero] (suc zero)
+
+-- Constant-tube shortcut (all tubes coherent with base → base)
+def const_hcomp : Nat :=
+  hcomp Nat [i1 => <i> suc zero] (suc zero)
+
+-- Transport through Pi type
+def transport_pi : Nat :=
+  (transport (<i> Nat -> Nat) (fun x => suc x)) zero
 ```
 
 ---
