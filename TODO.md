@@ -148,24 +148,28 @@
 ### 5. Cubical-Specific Improvements
 
 - **Face lattice operations** — Better support for:
-  - Face conjunction/disjunction
-  - Face implication
-  - Face negation
-  - Face equivalence checking
+  - [x] Face conjunction/disjunction (`dnf_meet`, `dnf_join` in `interval.rs`)
+  - [x] Face implication (`dnf_leq` in `interval.rs`, used in `cumulativity_check`)
+  - [x] Face negation (`dnf_neg` in `interval.rs`)
+  - [x] Face equivalence checking (`dnf_equiv` in `interval.rs`)
+  - [x] Parser support for `/\`, `\/`, `~` (and Unicode)
+  - [x] Face logic unit tests (De Morgan, absorption, idempotence)
 
 - **Comp/hfill system types** — Full support for:
-  - Multi-face systems in all Kan operations
-  - System compatibility checking
-  - System reduction rules
+  - [x] Multi-face systems in all Kan operations
+  - [x] System compatibility checking (via `dnf_meet` in `check_dt`)
+  - [x] System reduction rules (fill/hfill decomposition)
+  - [x] fill/hfill structural decomposition through Pi/Sigma/data types
 
 - **Transport computation** — Transport should reduce:
-  - Along constant paths (already done)
-  - Along ua (already done)
-  - Through Pi types (partially done)
-  - Through Sigma types (partially done)
-  - Through Path types (partially done)
-  - Through inductive types (not done)
-  - Through record types (not done)
+  - [x] Along constant paths (identity)
+  - [x] Along ua (`equivFwd`)
+  - [x] Through Pi types (non-dep value-level + dep term-level fallback)
+  - [x] Through Sigma types (when x is a pair)
+  - [x] Through Path types (pointwise)
+  - [x] Through inductive types (constant families: VCon, VPCon, VSqCon, VCellCon)
+  - [x] Through record types (via inductive desugaring)
+  - [x] Through Lift/Lower types
 
 ### 6. Performance and Metaprogramming
 

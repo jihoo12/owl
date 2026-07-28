@@ -1672,6 +1672,44 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
                     }
                 }
 
+                // Lift transport: transport (λi. Lift (A i) lvl) (lift v) = lift (transport (λi. A i) v)
+                (Term::TLift(_, _), Term::TLift(_, _)) => {
+                    let i_name = i_name.clone();
+                    match x_ {
+                        Term::TLift(v, lvl) => {
+                            let a_fam = Term::PLam(
+                                i_name.clone(),
+                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                    Term::TLift(a, _) => *a,
+                                    other => other,
+                                }),
+                            );
+                            let inner_transport = Term::TTransport(Box::new(a_fam), v);
+                            Term::TLift(Box::new(inner_transport), lvl)
+                        }
+                        _ => Term::TTransport(Box::new(Term::PLam(i_name, body.clone())), Box::new(x_)),
+                    }
+                }
+
+                // Lower transport: transport (λi. Lower (A i)) (lower v) = lower (transport (λi. A i) v)
+                (Term::TLower(_), Term::TLower(_)) => {
+                    let i_name = i_name.clone();
+                    match x_ {
+                        Term::TLower(v) => {
+                            let a_fam = Term::PLam(
+                                i_name.clone(),
+                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                    Term::TLower(a) => *a,
+                                    other => other,
+                                }),
+                            );
+                            let inner_transport = Term::TTransport(Box::new(a_fam), v);
+                            Term::TLower(Box::new(inner_transport))
+                        }
+                        _ => Term::TTransport(Box::new(Term::PLam(i_name, body.clone())), Box::new(x_)),
+                    }
+                }
+
                 _ => Term::TTransport(
                     Box::new(Term::PLam(i_name.clone(), body.clone())),
                     Box::new(x_),
@@ -2135,12 +2173,227 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
         }
     }
 
-    // Return VFill; do_papp handles endpoint reductions:
-    //   fill _ sys base @ 0 → base
-    //   fill _ sys base @ 1 → comp _ sys base
-    let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
-    record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
-    result
+    // ── Decompose fill for Pi/Sigma/Data types ──
+    // fill returns a PATH, so decomposition wraps inner fills with PApp at interval variable j.
+    // The IClosure body binds j at level 0; inside TAbs, j is at TV(1).
+    {
+        match (&a_fam, &base) {
+            // ── Pi decomposition ──
+            // fill (Π x:A. B) sys (λx. f x) = λj. λx. fill B [sys x] (f x) @ j
+            (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
+                let arg_var = Value::VNeutral(Neutral::NVar(0));
+                let inner_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
+                    let tube_at_arg = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            let tube_at_i = iclos.apply_interval_value(formal_i);
+                            do_apply(globals, global_offset, tube_at_i, arg_var.clone())
+                        }
+                        _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
+                    };
+                    (phi.clone(), tube_at_arg)
+                }).collect();
+                let base_at_arg = base_clos.apply(arg_var.clone());
+                let cod_at_arg = cod_clos.apply(arg_var);
+                let inner = do_fill(globals, global_offset, cod_at_arg, inner_sys, base_at_arg);
+                let inner_term = quote(1, globals, global_offset, inner);
+                let result = Value::VPLam("j".to_string(), IClosure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: Term::TAbs(arg_name.clone(), Box::new(
+                        Term::PApp(Box::new(inner_term), Box::new(Term::TVar(1)))
+                    )),
+                });
+                record_step("fill-pi".into(), "fill (Π _ _) sys f".into(), value_str(globals, global_offset, &result));
+                result
+            }
+
+            // ── Sigma decomposition ──
+            // fill (Σ x:A. B) sys (a, b) = λj. (fill A [fst_sys] a @ j, fill B [snd_sys] b @ j)
+            (Value::VSigma(_, fst_ty, snd_clos), Value::VPair(fst_base, snd_base)) => {
+                let fst_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
+                    let fst_tube = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            let tube_at_i = iclos.apply_interval_value(formal_i);
+                            do_fst(globals, global_offset, tube_at_i)
+                        }
+                        _ => do_fst(globals, global_offset, tube.clone()),
+                    };
+                    let fst_tube_plam = Value::VPLam("_".to_string(), IClosure {
+                        env: vec![],
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, fst_tube),
+                    });
+                    (phi.clone(), fst_tube_plam)
+                }).collect();
+                let fst_fill = do_fill(globals, global_offset, *fst_ty.clone(), fst_sys, (**fst_base).clone());
+
+                let snd_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
+                    let snd_tube = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            let tube_at_i = iclos.apply_interval_value(formal_i);
+                            do_snd(globals, global_offset, tube_at_i)
+                        }
+                        _ => do_snd(globals, global_offset, tube.clone()),
+                    };
+                    let snd_tube_plam = Value::VPLam("_".to_string(), IClosure {
+                        env: vec![],
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, snd_tube),
+                    });
+                    (phi.clone(), snd_tube_plam)
+                }).collect();
+                let snd_fill = do_fill(globals, global_offset,
+                    snd_clos.apply((**fst_base).clone()), snd_sys, (**snd_base).clone());
+
+                let fst_fill_term = quote(1, globals, global_offset, fst_fill);
+                let snd_fill_term = quote(1, globals, global_offset, snd_fill);
+                let result = Value::VPLam("j".to_string(), IClosure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: Term::TPair(
+                        Box::new(Term::PApp(Box::new(fst_fill_term), Box::new(Term::TVar(1)))),
+                        Box::new(Term::PApp(Box::new(snd_fill_term), Box::new(Term::TVar(1)))),
+                    ),
+                });
+                record_step("fill-sigma".into(), "fill (Σ _ _) sys p".into(), value_str(globals, global_offset, &result));
+                result
+            }
+
+            // ── Data type decomposition: push fill through constructor arguments ──
+            (Value::VData(d_name, _), _) => {
+                let (base_con, base_args, base_ivars) = match &base {
+                    Value::VCon(_, name, args) => (name.clone(), args.clone(), vec![]),
+                    Value::VPCon(_, name, args, r) => (name.clone(), args.clone(), vec![(**r).clone()]),
+                    Value::VSqCon(_, name, args, r, s) => (name.clone(), args.clone(), vec![(**r).clone(), (**s).clone()]),
+                    Value::VCellCon(_, name, args, ivars) => (name.clone(), args.clone(), ivars.clone()),
+                    _ => {
+                        let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                        record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let dts = current_dts();
+                let dt = match dts.iter().find(|dt| dt.name == *d_name) {
+                    Some(dt) => dt.clone(),
+                    None => {
+                        let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                        record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let arg_tys = match dt.find_con(&base_con).map(|s| s.arg_tys.clone())
+                    .or_else(|| dt.find_pcon(&base_con).map(|s| s.arg_tys.clone()))
+                    .or_else(|| dt.find_sqcon(&base_con).map(|s| s.arg_tys.clone()))
+                    .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()))
+                {
+                    Some(tys) => tys,
+                    None => {
+                        let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                        record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let n = arg_tys.len();
+                if n == 0 {
+                    // No arguments: fill is a constant path
+                    let result = Value::VPLam("j".to_string(), IClosure {
+                        env: vec![],
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, base.clone()),
+                    });
+                    record_step("fill-data-empty".into(), "fill D [] c".into(), value_str(globals, global_offset, &result));
+                    return result;
+                }
+
+                let mut per_arg_tubes: Vec<Vec<(DNF, Value)>> = vec![vec![]; n];
+                for (phi, tube) in &sys {
+                    let tube_val = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            iclos.apply_interval_value(formal_i)
+                        }
+                        _ => tube.clone(),
+                    };
+
+                    if let Some((_, tube_args, _)) = match_ctor_args(&tube_val, &base_con) {
+                        if tube_args.len() == n {
+                            for (k, tube_arg) in tube_args.iter().enumerate() {
+                                let tube_arg_plam = Value::VPLam("_".to_string(), IClosure {
+                                    env: vec![],
+                                    globals: globals.clone(),
+                                    global_offset,
+                                    body: quote(1, globals, global_offset, (*tube_arg).clone()),
+                                });
+                                per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
+                            }
+                        } else {
+                            let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                            record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                            return result;
+                        }
+                    } else {
+                        let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                        record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                }
+
+                let mut result_arg_terms: Vec<Term> = Vec::new();
+                for k in 0..n {
+                    let mut ty_shifted = arg_tys[k].clone();
+                    for j in (0..=k).rev() {
+                        ty_shifted = shift(1, j as i32, &ty_shifted);
+                    }
+                    for j in 0..k {
+                        let arg_term = quote(0, globals, global_offset, base_args[j].clone());
+                        ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+                    }
+                    let arg_ty = eval_nbe(&[], globals, global_offset, &ty_shifted);
+                    let arg_fill = do_fill(globals, global_offset, arg_ty, per_arg_tubes[k].clone(), base_args[k].clone());
+                    let arg_fill_term = quote(1, globals, global_offset, arg_fill);
+                    result_arg_terms.push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
+                }
+
+                let con_term = match &base {
+                    Value::VCon(_, _, _) => Term::TCon(d_name.clone(), base_con.clone(), result_arg_terms),
+                    Value::VPCon(_, _, _, _) => Term::TPCon(d_name.clone(), base_con.clone(), result_arg_terms, Box::new(quote(1, globals, global_offset, base_ivars[0].clone()))),
+                    Value::VSqCon(_, _, _, _, _) => Term::TSqCon(d_name.clone(), base_con.clone(), result_arg_terms, Box::new(quote(1, globals, global_offset, base_ivars[0].clone())), Box::new(quote(1, globals, global_offset, base_ivars[1].clone()))),
+                    Value::VCellCon(_, _, _, _) => {
+                        let ivar_terms: Vec<Term> = base_ivars.iter().map(|v| quote(1, globals, global_offset, v.clone())).collect();
+                        Term::TCellCon(d_name.clone(), base_con.clone(), result_arg_terms, ivar_terms)
+                    }
+                    _ => unreachable!(),
+                };
+
+                let result = Value::VPLam("j".to_string(), IClosure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: con_term,
+                });
+                record_step("fill-data".into(), format!("fill (λi. {}) ({} ...)", d_name, base_con), value_str(globals, global_offset, &result));
+                result
+            }
+
+            // ── Default: stuck fill ──
+            _ => {
+                let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                result
+            }
+        }
+    }
 }
 
 pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSystem, base: Value) -> Value {
@@ -2168,12 +2421,225 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
         }
     }
 
-    // Return VHFill; do_papp handles endpoint reductions:
-    //   hfill _ sys base @ 0 → base
-    //   hfill _ sys base @ 1 → hcomp _ sys base
-    let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
-    record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
-    result
+    // ── Decompose hfill for Pi/Sigma/Data types ──
+    // hfill returns a PATH, so decomposition wraps inner hfills with PApp at interval variable j.
+    {
+        match (&a_ty, &base) {
+            // ── Pi decomposition ──
+            // hfill (Π x:A. B) sys (λx. f x) = λj. λx. hfill B [sys x] (f x) @ j
+            (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
+                let arg_var = Value::VNeutral(Neutral::NVar(0));
+                let inner_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
+                    let tube_at_arg = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            let tube_at_i = iclos.apply_interval_value(formal_i);
+                            do_apply(globals, global_offset, tube_at_i, arg_var.clone())
+                        }
+                        _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
+                    };
+                    (phi.clone(), tube_at_arg)
+                }).collect();
+                let base_at_arg = base_clos.apply(arg_var.clone());
+                let cod_at_arg = cod_clos.apply(arg_var);
+                let inner = do_hfill(globals, global_offset, cod_at_arg, inner_sys, base_at_arg);
+                let inner_term = quote(1, globals, global_offset, inner);
+                let result = Value::VPLam("j".to_string(), IClosure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: Term::TAbs(arg_name.clone(), Box::new(
+                        Term::PApp(Box::new(inner_term), Box::new(Term::TVar(1)))
+                    )),
+                });
+                record_step("hfill-pi".into(), "hfill (Π _ _) sys f".into(), value_str(globals, global_offset, &result));
+                result
+            }
+
+            // ── Sigma decomposition ──
+            // hfill (Σ x:A. B) sys (a, b) = λj. (hfill A [fst_sys] a @ j, hfill B [snd_sys] b @ j)
+            (Value::VSigma(_, fst_ty, snd_clos), Value::VPair(fst_base, snd_base)) => {
+                let fst_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
+                    let fst_tube = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            let tube_at_i = iclos.apply_interval_value(formal_i);
+                            do_fst(globals, global_offset, tube_at_i)
+                        }
+                        _ => do_fst(globals, global_offset, tube.clone()),
+                    };
+                    let fst_tube_plam = Value::VPLam("_".to_string(), IClosure {
+                        env: vec![],
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, fst_tube),
+                    });
+                    (phi.clone(), fst_tube_plam)
+                }).collect();
+                let fst_fill = do_hfill(globals, global_offset, *fst_ty.clone(), fst_sys, (**fst_base).clone());
+
+                let snd_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
+                    let snd_tube = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            let tube_at_i = iclos.apply_interval_value(formal_i);
+                            do_snd(globals, global_offset, tube_at_i)
+                        }
+                        _ => do_snd(globals, global_offset, tube.clone()),
+                    };
+                    let snd_tube_plam = Value::VPLam("_".to_string(), IClosure {
+                        env: vec![],
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, snd_tube),
+                    });
+                    (phi.clone(), snd_tube_plam)
+                }).collect();
+                let snd_fill = do_hfill(globals, global_offset,
+                    snd_clos.apply((**fst_base).clone()), snd_sys, (**snd_base).clone());
+
+                let fst_fill_term = quote(1, globals, global_offset, fst_fill);
+                let snd_fill_term = quote(1, globals, global_offset, snd_fill);
+                let result = Value::VPLam("j".to_string(), IClosure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: Term::TPair(
+                        Box::new(Term::PApp(Box::new(fst_fill_term), Box::new(Term::TVar(1)))),
+                        Box::new(Term::PApp(Box::new(snd_fill_term), Box::new(Term::TVar(1)))),
+                    ),
+                });
+                record_step("hfill-sigma".into(), "hfill (Σ _ _) sys p".into(), value_str(globals, global_offset, &result));
+                result
+            }
+
+            // ── Data type decomposition: push hfill through constructor arguments ──
+            (Value::VData(d_name, _), _) => {
+                let (base_con, base_args, base_ivars) = match &base {
+                    Value::VCon(_, name, args) => (name.clone(), args.clone(), vec![]),
+                    Value::VPCon(_, name, args, r) => (name.clone(), args.clone(), vec![(**r).clone()]),
+                    Value::VSqCon(_, name, args, r, s) => (name.clone(), args.clone(), vec![(**r).clone(), (**s).clone()]),
+                    Value::VCellCon(_, name, args, ivars) => (name.clone(), args.clone(), ivars.clone()),
+                    _ => {
+                        let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                        record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let dts = current_dts();
+                let dt = match dts.iter().find(|dt| dt.name == *d_name) {
+                    Some(dt) => dt.clone(),
+                    None => {
+                        let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                        record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let arg_tys = match dt.find_con(&base_con).map(|s| s.arg_tys.clone())
+                    .or_else(|| dt.find_pcon(&base_con).map(|s| s.arg_tys.clone()))
+                    .or_else(|| dt.find_sqcon(&base_con).map(|s| s.arg_tys.clone()))
+                    .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()))
+                {
+                    Some(tys) => tys,
+                    None => {
+                        let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                        record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                };
+
+                let n = arg_tys.len();
+                if n == 0 {
+                    let result = Value::VPLam("j".to_string(), IClosure {
+                        env: vec![],
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, base.clone()),
+                    });
+                    record_step("hfill-data-empty".into(), "hfill D [] c".into(), value_str(globals, global_offset, &result));
+                    return result;
+                }
+
+                let mut per_arg_tubes: Vec<Vec<(DNF, Value)>> = vec![vec![]; n];
+                for (phi, tube) in &sys {
+                    let tube_val = match tube {
+                        Value::VPLam(_, iclos) => {
+                            let formal_i = Value::VIntervalVar(0);
+                            iclos.apply_interval_value(formal_i)
+                        }
+                        _ => tube.clone(),
+                    };
+
+                    if let Some((_, tube_args, _)) = match_ctor_args(&tube_val, &base_con) {
+                        if tube_args.len() == n {
+                            for (k, tube_arg) in tube_args.iter().enumerate() {
+                                let tube_arg_plam = Value::VPLam("_".to_string(), IClosure {
+                                    env: vec![],
+                                    globals: globals.clone(),
+                                    global_offset,
+                                    body: quote(1, globals, global_offset, (*tube_arg).clone()),
+                                });
+                                per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
+                            }
+                        } else {
+                            let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                            record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                            return result;
+                        }
+                    } else {
+                        let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                        record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                        return result;
+                    }
+                }
+
+                let mut result_arg_terms: Vec<Term> = Vec::new();
+                for k in 0..n {
+                    let mut ty_shifted = arg_tys[k].clone();
+                    for j in (0..=k).rev() {
+                        ty_shifted = shift(1, j as i32, &ty_shifted);
+                    }
+                    for j in 0..k {
+                        let arg_term = quote(0, globals, global_offset, base_args[j].clone());
+                        ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+                    }
+                    let arg_ty = eval_nbe(&[], globals, global_offset, &ty_shifted);
+                    let arg_fill = do_hfill(globals, global_offset, arg_ty, per_arg_tubes[k].clone(), base_args[k].clone());
+                    let arg_fill_term = quote(1, globals, global_offset, arg_fill);
+                    result_arg_terms.push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
+                }
+
+                let con_term = match &base {
+                    Value::VCon(_, _, _) => Term::TCon(d_name.clone(), base_con.clone(), result_arg_terms),
+                    Value::VPCon(_, _, _, _) => Term::TPCon(d_name.clone(), base_con.clone(), result_arg_terms, Box::new(quote(1, globals, global_offset, base_ivars[0].clone()))),
+                    Value::VSqCon(_, _, _, _, _) => Term::TSqCon(d_name.clone(), base_con.clone(), result_arg_terms, Box::new(quote(1, globals, global_offset, base_ivars[0].clone())), Box::new(quote(1, globals, global_offset, base_ivars[1].clone()))),
+                    Value::VCellCon(_, _, _, _) => {
+                        let ivar_terms: Vec<Term> = base_ivars.iter().map(|v| quote(1, globals, global_offset, v.clone())).collect();
+                        Term::TCellCon(d_name.clone(), base_con.clone(), result_arg_terms, ivar_terms)
+                    }
+                    _ => unreachable!(),
+                };
+
+                let result = Value::VPLam("j".to_string(), IClosure {
+                    env: vec![],
+                    globals: globals.clone(),
+                    global_offset,
+                    body: con_term,
+                });
+                record_step("hfill-data".into(), format!("hfill (λi. {}) ({} ...)", d_name, base_con), value_str(globals, global_offset, &result));
+                result
+            }
+
+            // ── Default: stuck hfill ──
+            _ => {
+                let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                result
+            }
+        }
+    }
 }
 
 pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {

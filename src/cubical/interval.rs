@@ -207,6 +207,11 @@ pub fn dnf_leq(a: &DNF, b: &DNF) -> bool {
     })
 }
 
+/// Check face equivalence: `a ⇔ b` (i.e. `a ⇒ b ∧ b ⇒ a`).
+pub fn dnf_equiv(a: &DNF, b: &DNF) -> bool {
+    dnf_leq(a, b) && dnf_leq(b, a)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +282,116 @@ mod tests {
         );
 
         assert_eq!(dnf.cubes, [consistent].into_iter().collect());
+    }
+
+    // --- Face equivalence tests ---
+
+    #[test]
+    fn equiv_same_is_true() {
+        let v0 = eval_interval(&I::Var(0));
+        assert!(dnf_equiv(&v0, &v0));
+    }
+
+    #[test]
+    fn equiv_different_is_false() {
+        let v0 = eval_interval(&I::Var(0));
+        let v1 = eval_interval(&I::Var(1));
+        assert!(!dnf_equiv(&v0, &v1));
+    }
+
+    #[test]
+    fn equiv_meet_commutative() {
+        // (i0 ∧ i1) ⇔ (i1 ∧ i0)
+        let ab = eval_interval(&I::Meet(Box::new(I::Var(0)), Box::new(I::Var(1))));
+        let ba = eval_interval(&I::Meet(Box::new(I::Var(1)), Box::new(I::Var(0))));
+        assert!(dnf_equiv(&ab, &ba));
+    }
+
+    #[test]
+    fn equiv_join_commutative() {
+        let ab = eval_interval(&I::Join(Box::new(I::Var(0)), Box::new(I::Var(1))));
+        let ba = eval_interval(&I::Join(Box::new(I::Var(1)), Box::new(I::Var(0))));
+        assert!(dnf_equiv(&ab, &ba));
+    }
+
+    // --- De Morgan tests ---
+
+    #[test]
+    fn demorgan_neg_meet() {
+        // ¬(i0 ∧ i1) = ¬i0 ∨ ¬i1
+        let neg_meet = eval_interval(&I::Neg(Box::new(I::Meet(
+            Box::new(I::Var(0)),
+            Box::new(I::Var(1)),
+        ))));
+        let join_negs = eval_interval(&I::Join(
+            Box::new(I::Neg(Box::new(I::Var(0)))),
+            Box::new(I::Neg(Box::new(I::Var(1)))),
+        ));
+        assert!(dnf_equiv(&neg_meet, &join_negs));
+    }
+
+    #[test]
+    fn demorgan_neg_join() {
+        // ¬(i0 ∨ i1) = ¬i0 ∧ ¬i1
+        let neg_join = eval_interval(&I::Neg(Box::new(I::Join(
+            Box::new(I::Var(0)),
+            Box::new(I::Var(1)),
+        ))));
+        let meet_negs = eval_interval(&I::Meet(
+            Box::new(I::Neg(Box::new(I::Var(0)))),
+            Box::new(I::Neg(Box::new(I::Var(1)))),
+        ));
+        assert!(dnf_equiv(&neg_join, &meet_negs));
+    }
+
+    // --- Negation idempotence ---
+
+    #[test]
+    fn neg_idempotent() {
+        // ¬¬i0 = i0
+        let v0 = eval_interval(&I::Var(0));
+        let double_neg = eval_interval(&I::Neg(Box::new(I::Neg(Box::new(I::Var(0))))));
+        assert!(dnf_equiv(&v0, &double_neg));
+    }
+
+    // --- Absorption tests ---
+
+    #[test]
+    fn absorption_meet_join() {
+        // i0 ∧ (i0 ∨ i1) = i0
+        let v0 = eval_interval(&I::Var(0));
+        let result = eval_interval(&I::Meet(
+            Box::new(I::Var(0)),
+            Box::new(I::Join(Box::new(I::Var(0)), Box::new(I::Var(1)))),
+        ));
+        assert!(dnf_equiv(&v0, &result));
+    }
+
+    #[test]
+    fn absorption_join_meet() {
+        // i0 ∨ (i0 ∧ i1) = i0
+        let result = eval_interval(&I::Join(
+            Box::new(I::Var(0)),
+            Box::new(I::Meet(Box::new(I::Var(0)), Box::new(I::Var(1)))),
+        ));
+        let v0 = eval_interval(&I::Var(0));
+        assert!(dnf_equiv(&v0, &result));
+    }
+
+    // --- Top/bot edge cases ---
+
+    #[test]
+    fn equiv_top_top() {
+        assert!(dnf_equiv(&dnf_top(), &dnf_top()));
+    }
+
+    #[test]
+    fn equiv_bot_bot() {
+        assert!(dnf_equiv(&dnf_bot(), &dnf_bot()));
+    }
+
+    #[test]
+    fn equiv_top_not_bot() {
+        assert!(!dnf_equiv(&dnf_top(), &dnf_bot()));
     }
 }

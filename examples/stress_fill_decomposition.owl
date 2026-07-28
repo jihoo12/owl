@@ -1,0 +1,133 @@
+-- stress_fill_decomposition.owl — Fill/hfill structural decomposition tests
+--
+-- Exercises: fill and hfill decomposition through Pi, Sigma, and data types.
+-- Verifies that fill produces correct paths at endpoints (0 and 1) and
+-- that decomposition enables further reductions for nested types.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Fill of constant type (Nat) with empty system
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def fill_const_zero : Nat :=
+  fill Nat [] zero @ i0
+
+def fill_const_zero_1 : Nat :=
+  fill Nat [] zero @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Fill of Pi type
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- fill (Nat -> Nat) [] (fun x => x) decomposes to lambda wrapping inner fill
+def fill_pi_id_at_zero : Nat :=
+  (fill (Nat -> Nat) [] (fun x => x) @ i0) zero
+
+def fill_pi_id_at_one : Nat :=
+  (fill (Nat -> Nat) [] (fun x => x) @ i1) (suc zero)
+
+-- Fill of Pi with non-trivial base
+def fill_pi_suc_at_zero : Nat :=
+  (fill (Nat -> Nat) [] (fun x => suc x) @ i0) zero
+
+def fill_pi_suc_at_one : Nat :=
+  (fill (Nat -> Nat) [] (fun x => suc x) @ i1) (suc zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Fill of Sigma type
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- fill (Nat * Bool) [] (zero, true) decomposes to pair of inner fills
+def fill_sigma_fst : Nat :=
+  fst (fill (Nat * Bool) [] (zero , true) @ i0)
+
+def fill_sigma_snd : Bool :=
+  snd (fill (Nat * Bool) [] (zero , true) @ i0)
+
+def fill_sigma_fst_1 : Nat :=
+  fst (fill (Nat * Bool) [] (zero , true) @ i1)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. Fill of data type (Nat with constructor args)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- fill Nat [] (suc zero) decomposes through suc's argument
+def fill_data_suc_at_zero : Nat :=
+  fill Nat [] (suc zero) @ i0
+
+def fill_data_suc_at_one : Nat :=
+  fill Nat [] (suc zero) @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Fill with bottom face system (same as empty)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def fill_bot_sys : Nat :=
+  fill Nat [0 => <i> zero] zero @ i0
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. hfill decomposition
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hfill_const_zero : Nat :=
+  hfill Nat [] zero @ i0
+
+def hfill_const_zero_1 : Nat :=
+  hfill Nat [] zero @ i1
+
+-- hfill of Pi type
+def hfill_pi_id : Nat :=
+  (hfill (Nat -> Nat) [] (fun x => x) @ i0) zero
+
+def hfill_pi_id_1 : Nat :=
+  (hfill (Nat -> Nat) [] (fun x => x) @ i1) (suc zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Nested fill: fill of Pi returning Sigma
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Fill of a function type that returns a pair
+def fill_nested_fst : Nat :=
+  fst ((fill (Nat -> Nat * Nat) [] (fun x => (x , x)) @ i0) zero)
+
+def fill_nested_snd : Nat :=
+  snd ((fill (Nat -> Nat * Nat) [] (fun x => (x , x)) @ i1) (suc zero))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. Fill of Pi type applied at base and comp endpoints
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- The fill of a Pi type, when applied at i0, should give the base function
+def fill_pi_base : Nat :=
+  (fill (Nat -> Nat) [] (fun x => suc x) @ i0) zero
+
+-- And at i1, should give hcomp (which for empty system is the base)
+def fill_pi_comp : Nat :=
+  (fill (Nat -> Nat) [] (fun x => suc x) @ i1) zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 9. hfill of data type
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def hfill_data_suc : Nat :=
+  hfill Nat [] (suc zero) @ i0
+
+def hfill_data_suc_1 : Nat :=
+  hfill Nat [] (suc zero) @ i1
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 10. Fill of Bool data type
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def fill_bool : Bool :=
+  fill Bool [] true @ i0
+
+def fill_bool_1 : Bool :=
+  fill Bool [] true @ i1
