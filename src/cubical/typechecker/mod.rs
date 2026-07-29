@@ -18,6 +18,10 @@ use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_leq, dnf_meet};
 use crate::cubical::nbe::nbe_eval;
 use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, Term, beta, shift, show_term, subst};
 
+pub fn err_names(ctx: &Ctx) -> Vec<Name> {
+    ctx.iter().map(|(n, _)| n.clone()).collect()
+}
+
 use std::cell::Cell;
 
 // Thread-local flag: when true, skip PLam boundary checks in check_dt.
@@ -78,14 +82,16 @@ pub fn require_equal(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(), TypeE
     crate::debug_log!("require_equal: {} == {}", show_term(&names, expected), show_term(&names, got));
     match definitionally_equal_ctx_r(ctx, expected, got) {
         EtaResult::Equal => Ok(()),
-        EtaResult::NotEqual => Err(TypeError::TypeMismatch(
-            Box::new(nbe_eval(expected)),
-            Box::new(nbe_eval(got)),
-        )),
-        EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted(
-            Box::new(nbe_eval(expected)),
-            Box::new(nbe_eval(got)),
-        )),
+        EtaResult::NotEqual => Err(TypeError::TypeMismatch {
+            expected: Box::new(nbe_eval(expected)),
+            got: Box::new(nbe_eval(got)),
+            names: err_names(ctx),
+        }),
+        EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted {
+            t1: Box::new(nbe_eval(expected)),
+            t2: Box::new(nbe_eval(got)),
+            names: err_names(ctx),
+        }),
     }
 }
 
@@ -93,25 +99,19 @@ pub fn require_equal_endpt(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(),
     match definitionally_equal_ctx_r(ctx, expected, got) {
         EtaResult::Equal => Ok(()),
         EtaResult::NotEqual => {
-            let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
             let ne1 = nbe_eval(expected);
             let ne2 = nbe_eval(got);
-            Err(TypeError::Other(format!(
-                "endpoint mismatch (ctx_depth={}, ctx={:?})\
-                 \n  expected={}  [raw={}]\
-                 \n  got={}  [raw={}]",
-                ctx.len(),
-                ctx.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
-                show_term(&names, &ne1),
-                ne1,
-                show_term(&names, &ne2),
-                ne2,
-            )))
+            Err(TypeError::TypeMismatch {
+                expected: Box::new(ne1),
+                got: Box::new(ne2),
+                names: err_names(ctx),
+            })
         }
-        EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted(
-            Box::new(nbe_eval(expected)),
-            Box::new(nbe_eval(got)),
-        )),
+        EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted {
+            t1: Box::new(nbe_eval(expected)),
+            t2: Box::new(nbe_eval(got)),
+            names: err_names(ctx),
+        }),
     }
 }
 
@@ -125,7 +125,7 @@ fn require_universe_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, T
     let ty = infer_dt(dts, ctx, t)?;
     match nbe_eval(&ty) {
         Term::TUniv(n) => Ok(n),
-        other => Err(TypeError::ExpectedUniverse(other)),
+        other => Err(TypeError::ExpectedUniverse { ty: other, names: err_names(ctx) }),
     }
 }
 
@@ -168,6 +168,11 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
             check_dt(dts, ctx, v, &v_ty)?;
             Ok(n)
         }
+        Term::Meta(_) => {
+            // Metavariable holes are assumed to be types at some level;
+            // they will be solved during checking and the real level checked then.
+            Ok(0)
+        }
         Term::TEquiv(a, b) => {
             let n = type_level_dt(dts, ctx, a)?;
             let m = type_level_dt(dts, ctx, b)?;
@@ -195,7 +200,7 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
                 let ty = infer_dt(dts, ctx, t)?;
                 match nbe_eval(&ty) {
                     Term::TUniv(n) => Ok(n),
-                    other => Err(TypeError::ExpectedUniverse(other)),
+                    other => Err(TypeError::ExpectedUniverse { ty: other, names: err_names(ctx) }),
                 }
             }
         },
@@ -215,7 +220,7 @@ fn check_interval_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<(), TypeEr
     if ty == interval_ty() {
         Ok(())
     } else {
-        Err(TypeError::NotAnInterval(t.clone()))
+        Err(TypeError::NotAnInterval { t: t.clone(), names: err_names(ctx) })
     }
 }
 
@@ -228,7 +233,7 @@ fn require_equiv_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<(Term, Term
     let ty = infer_dt(dts, ctx, t)?;
     match nbe_eval(&ty) {
         Term::TEquiv(a, b) => Ok((nbe_eval(&a), nbe_eval(&b))),
-        other => Err(TypeError::ExpectedEquiv(other)),
+        other => Err(TypeError::ExpectedEquiv { ty: other, names: err_names(ctx) }),
     }
 }
 
@@ -673,7 +678,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                     _ => match nbe_eval(&f_ty) {
                         Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                        other => return Err(TypeError::ExpectedPi(other)),
+                        other => return Err(TypeError::ExpectedPi { ty: other, names: err_names(ctx) }),
                     },
                 };
                 check_dt(dts, ctx, a, &a_ty)?;
@@ -725,7 +730,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         plain => plain,
                     })
                 }
-                other => Err(TypeError::ExpectedPath(other)),
+                other => Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
             },
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
@@ -735,13 +740,13 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         Term::TIntervalTy => Ok(Term::TUniv(0)),
 
         // Lambdas cannot be inferred
-        t @ Term::TAbs(_, _) | t @ Term::PLam(_, _) => Err(TypeError::CannotInfer(t.clone())),
+        t @ Term::TAbs(_, _) | t @ Term::PLam(_, _) => Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) }),
 
         // Tactic blocks cannot be inferred (need type annotation)
-        t @ Term::TBy(_) => Err(TypeError::CannotInfer(t.clone())),
+        t @ Term::TBy(_) => Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) }),
 
         // Unresolved metavariable
-        t @ Term::Meta(_) => Err(TypeError::CannotInfer(t.clone())),
+        Term::Meta(_) => Err(TypeError::Other("cannot infer type of `_`; use a type annotation".to_string())),
 
         // Equiv type
         Term::TEquiv(a, b) => {
@@ -879,7 +884,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     check_dt(dts, ctx, x, &x_ty)?;
                     Ok(ret_ty)
                 }
-                other => Err(TypeError::ExpectedPath(other)),
+                other => Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
             }
         }
 
@@ -1029,7 +1034,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             } else if is_bot_dnf(&phi_) {
                 infer_dt(dts, ctx, a)
             } else {
-                Err(TypeError::CannotInfer(t.clone()))
+                Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) })
             }
         }
 
@@ -1045,7 +1050,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         Term::TFst(p) => match infer_dt(dts, ctx, p) {
             Ok(p_ty) => match nbe_eval(&p_ty) {
                 Term::TSigma(_, a_ty, _) => Ok(nbe_eval(&a_ty)),
-                other => Err(TypeError::ExpectedSigma(other)),
+                other => Err(TypeError::ExpectedSigma { ty: other, names: err_names(ctx) }),
             },
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
@@ -1054,7 +1059,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         Term::TSnd(p) => match infer_dt(dts, ctx, p) {
             Ok(p_ty) => match nbe_eval(&p_ty) {
                 Term::TSigma(_, _, b_ty) => Ok(nbe_eval(&beta(&b_ty, &Term::TFst(p.clone())))),
-                other => Err(TypeError::ExpectedSigma(other)),
+                other => Err(TypeError::ExpectedSigma { ty: other, names: err_names(ctx) }),
             },
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
@@ -1108,7 +1113,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         },
 
         // Pairs cannot be inferred without annotation
-        t @ Term::TPair(_, _) => Err(TypeError::CannotInfer(t.clone())),
+        t @ Term::TPair(_, _) => Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) }),
 
         // hcomp A [phi -> tube, ...] base
         Term::THComp(a_ty, sys, base) => {
@@ -1132,17 +1137,18 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         match nbe_eval(&tube_ty) {
                             Term::TPath(a, u, v) => {
                                 if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_).is_equal() {
-                                    return Err(TypeError::TypeMismatch(
-                                        Box::new(nbe_eval(&a_ty_)),
-                                        Box::new(nbe_eval(&a)),
-                                    ));
+                                    return Err(TypeError::TypeMismatch {
+                                        expected: Box::new(nbe_eval(&a_ty_)),
+                                        got: Box::new(nbe_eval(&a)),
+                                        names: err_names(ctx),
+                                    });
                                 }
                                 check_dt(dts, ctx, &nbe_eval(&u), &a_ty_)?;
                                 check_dt(dts, ctx, &nbe_eval(&v), &a_ty_)?;
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath(other)),
+                            other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
                         }
                     }
                 }
@@ -1184,7 +1190,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath(other)),
+                            other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
                         }
                     }
                 }
@@ -1230,7 +1236,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath(other)),
+                            other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
                         }
                     }
                 }
@@ -1273,17 +1279,18 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         match nbe_eval(&tube_ty) {
                             Term::TPath(a, u, v) => {
                                 if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_).is_equal() {
-                                    return Err(TypeError::TypeMismatch(
-                                        Box::new(nbe_eval(&a_ty_)),
-                                        Box::new(nbe_eval(&a)),
-                                    ));
+                                    return Err(TypeError::TypeMismatch {
+                                        expected: Box::new(nbe_eval(&a_ty_)),
+                                        got: Box::new(nbe_eval(&a)),
+                                        names: err_names(ctx),
+                                    });
                                 }
                                 check_dt(dts, ctx, &nbe_eval(&u), &a_ty_)?;
                                 check_dt(dts, ctx, &nbe_eval(&v), &a_ty_)?;
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath(other)),
+                            other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
                         }
                     }
                 }
@@ -1703,7 +1710,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let scrut_ty = infer_dt(dts, ctx, scrut)?;
             let (d, scrut_params) = match nbe_eval(&scrut_ty) {
                 Term::TData(d, params) => (d, params),
-                other => return Err(TypeError::ExpectedData(other)),
+                other => return Err(TypeError::ExpectedData { ty: other, names: err_names(ctx) }),
             };
             let dt = dts
                 .iter()
@@ -1726,7 +1733,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             let cod_ctx = extend_ctx(x, nbe_eval(&dom), ctx);
                             type_level_dt(dts, &cod_ctx, &cod)?;
                         }
-                        other => return Err(TypeError::ExpectedPi(other)),
+                        other => return Err(TypeError::ExpectedPi { ty: other, names: err_names(ctx) }),
                     }
                 }
             }
@@ -2533,7 +2540,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                 _ => match nbe_eval(ty) {
                     Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                    other => return Err(TypeError::ExpectedPi(other)),
+                    other => return Err(TypeError::ExpectedPi { ty: other, names: err_names(ctx) }),
                 },
             };
             check_dt(
@@ -2552,7 +2559,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                     Term::TPath(a, u, v) => {
                         (a.as_ref().clone(), u.as_ref().clone(), v.as_ref().clone())
                     }
-                    other => return Err(TypeError::ExpectedPath(other)),
+                    other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
                 },
             };
             let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
@@ -2646,7 +2653,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Term::TSigma(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                 _ => match nbe_eval(ty) {
                     Term::TSigma(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                    other => return Err(TypeError::ExpectedSigma(other)),
+                    other => return Err(TypeError::ExpectedSigma { ty: other, names: err_names(ctx) }),
                 },
             };
                             check_dt(dts, ctx, a, &nbe_eval(&a_ty))?;
@@ -2670,10 +2677,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             let (expected_d, expected_params) = match &expected_ty_nf {
                 Term::TData(ed, ep) => {
                     if ed != d {
-                        return Err(TypeError::TypeMismatch(
-                            Box::new(expected_ty_nf.clone()),
-                            Box::new(Term::TData(d.clone(), vec![])),
-                        ));
+                        return Err(TypeError::TypeMismatch {
+                            expected: Box::new(expected_ty_nf.clone()),
+                            got: Box::new(Term::TData(d.clone(), vec![])),
+                            names: err_names(ctx),
+                        });
                     }
                     (ed.clone(), ep.clone())
                 }
@@ -2868,6 +2876,12 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                     }
                 }
             }
+        }
+
+        // Metavariable hole: the expected type is already known.
+        Term::Meta(_) => {
+            let _ = type_level_dt(dts, ctx, ty)?;
+            Ok(())
         }
 
         // Fall through to inference + cumulativity.

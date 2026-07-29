@@ -995,6 +995,11 @@ impl Parser {
             }
         }
 
+        if self.peek_ident() == "_" {
+            self.pos += 1;
+            return Ok(Term::Meta(crate::cubical::nbe::fresh_meta_id()));
+        }
+
         match self.peek().kind.clone() {
             TokenKind::Ident(name) => {
                 self.pos += 1;

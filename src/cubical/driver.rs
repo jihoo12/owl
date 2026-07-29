@@ -369,7 +369,7 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     if !matches!(closed_ty_globals, Term::Meta(_)) {
         match nbe_eval(&infer_with_full_env(env, &closed_ty_nf)?) {
             Term::TUniv(_) => {}
-            other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse(other)))),
+            other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse { ty: other, names: vec![] }))),
         }
     }
 

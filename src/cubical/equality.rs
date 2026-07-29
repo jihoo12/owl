@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::cubical::nbe::nbe_eval;
+use crate::cubical::nbe::{nbe_eval, meta_mentions, try_solve_meta, get_meta_solution};
 use crate::cubical::syntax::{Name, Term, beta, shift};
 use crate::cubical::typechecker::Ctx;
 
@@ -316,6 +316,32 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
 
     if t1 == t2 {
         return Equal;
+    }
+
+    // ------------------------------------------------------------------
+    // Metavariable unification
+    // ------------------------------------------------------------------
+    if let Term::Meta(i) = t1 {
+        // Check if already solved
+        if let Some(solution) = get_meta_solution(*i) {
+            return eta_eq_memo(fuel, ctx, &solution, t2, memo);
+        }
+        if !meta_mentions(*i, t2) {
+            try_solve_meta(*i, t2);
+            return Equal;
+        }
+        // occurs check failed — can't solve
+        return NotEqual;
+    }
+    if let Term::Meta(i) = t2 {
+        if let Some(solution) = get_meta_solution(*i) {
+            return eta_eq_memo(fuel, ctx, t1, &solution, memo);
+        }
+        if !meta_mentions(*i, t1) {
+            try_solve_meta(*i, t1);
+            return Equal;
+        }
+        return NotEqual;
     }
 
     // ------------------------------------------------------------------

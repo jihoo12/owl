@@ -1,19 +1,48 @@
 use std::fmt;
 
-use crate::cubical::syntax::{Name, Term};
+use crate::cubical::syntax::{Name, Term, show_term};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeError {
     UnboundVariable(Name),
-    TypeMismatch(Box<Term>, Box<Term>),
-    ExpectedPi(Term),
-    ExpectedPath(Term),
-    ExpectedUniverse(Term),
-    ExpectedEquiv(Term),
-    ExpectedSigma(Term),
-    NotAnInterval(Term),
-    CannotInfer(Term),
-    EtaFuelExhausted(Box<Term>, Box<Term>),
+    TypeMismatch {
+        expected: Box<Term>,
+        got: Box<Term>,
+        names: Vec<Name>,
+    },
+    ExpectedPi {
+        ty: Term,
+        names: Vec<Name>,
+    },
+    ExpectedPath {
+        ty: Term,
+        names: Vec<Name>,
+    },
+    ExpectedUniverse {
+        ty: Term,
+        names: Vec<Name>,
+    },
+    ExpectedEquiv {
+        ty: Term,
+        names: Vec<Name>,
+    },
+    ExpectedSigma {
+        ty: Term,
+        names: Vec<Name>,
+    },
+    NotAnInterval {
+        t: Term,
+        names: Vec<Name>,
+    },
+    CannotInfer {
+        t: Term,
+        names: Vec<Name>,
+    },
+    EtaFuelExhausted {
+        t1: Box<Term>,
+        t2: Box<Term>,
+        names: Vec<Name>,
+    },
     Other(String),
     UnknownDatatype(Name),
     UnknownConstructor(Name, Name),
@@ -27,9 +56,15 @@ pub enum TypeError {
         msg: String,
     },
     MissingCase(Name),
-    ExpectedData(Term),
+    ExpectedData {
+        ty: Term,
+        names: Vec<Name>,
+    },
     #[allow(dead_code)]
-    PathPNotTypeFamily(Term),
+    PathPNotTypeFamily {
+        ty: Term,
+        names: Vec<Name>,
+    },
     /// Structural recursion guard check failed.
     TerminationViolation {
         datatype: Name,
@@ -74,39 +109,43 @@ impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TypeError::UnboundVariable(x) => write!(f, "  Unbound variable: '{}'", x),
-            TypeError::TypeMismatch(ex, got) => write!(
+            TypeError::TypeMismatch { expected, got, names } => write!(
                 f,
                 "  Type mismatch\n    expected : {}\n    got      : {}",
-                ex, got
+                show_term(names, expected),
+                show_term(names, got),
             ),
-            TypeError::ExpectedPi(ty) => write!(f, "  Expected a Π-type, but found:\n    {}", ty),
-            TypeError::ExpectedPath(ty) => {
-                write!(f, "  Expected a Path type, but found:\n    {}", ty)
+            TypeError::ExpectedPi { ty, names } => {
+                write!(f, "  Expected a Π-type, but found:\n    {}", show_term(names, ty))
             }
-            TypeError::ExpectedUniverse(ty) => {
-                write!(f, "  Expected a universe U_n, but found:\n    {}", ty)
+            TypeError::ExpectedPath { ty, names } => {
+                write!(f, "  Expected a Path type, but found:\n    {}", show_term(names, ty))
             }
-            TypeError::ExpectedEquiv(ty) => {
-                write!(f, "  Expected an Equiv type, but found:\n    {}", ty)
+            TypeError::ExpectedUniverse { ty, names } => {
+                write!(f, "  Expected a universe U_n, but found:\n    {}", show_term(names, ty))
             }
-            TypeError::ExpectedSigma(ty) => {
-                write!(f, "  Expected a Σ-type, but found:\n    {}", ty)
+            TypeError::ExpectedEquiv { ty, names } => {
+                write!(f, "  Expected an Equiv type, but found:\n    {}", show_term(names, ty))
             }
-            TypeError::NotAnInterval(t) => write!(
+            TypeError::ExpectedSigma { ty, names } => {
+                write!(f, "  Expected a Σ-type, but found:\n    {}", show_term(names, ty))
+            }
+            TypeError::NotAnInterval { t, names } => write!(
                 f,
                 "  Expected an interval expression (𝕀), but got:\n    {}",
-                t
+                show_term(names, t),
             ),
-            TypeError::CannotInfer(t) => write!(
+            TypeError::CannotInfer { t, names } => write!(
                 f,
                 "  Cannot infer type of term without annotation:\n    {}\n  \
                      (Tip: use 'check' instead of 'infer', or add a type annotation)",
-                t
+                show_term(names, t),
             ),
-            TypeError::EtaFuelExhausted(t1, t2) => write!(
+            TypeError::EtaFuelExhausted { t1, t2, names } => write!(
                 f,
                 "  Eta-expansion fuel exhausted while comparing:\n    {}\n  and\n    {}",
-                t1, t2
+                show_term(names, t1),
+                show_term(names, t2),
             ),
             TypeError::Other(msg) => write!(f, "  {}", msg),
             TypeError::UnknownDatatype(name) => {
@@ -130,11 +169,11 @@ impl fmt::Display for TypeError {
             TypeError::MissingCase(con) => {
                 write!(f, "  Missing case for constructor '{}'", con)
             }
-            TypeError::ExpectedData(ty) => {
-                write!(f, "  Expected a data type, but found:\n    {}", ty)
+            TypeError::ExpectedData { ty, names } => {
+                write!(f, "  Expected a data type, but found:\n    {}", show_term(names, ty))
             }
-            TypeError::PathPNotTypeFamily(ty) => {
-                write!(f, "  PathP requires a type family, but found:\n    {}", ty)
+            TypeError::PathPNotTypeFamily { ty, names } => {
+                write!(f, "  PathP requires a type family, but found:\n    {}", show_term(names, ty))
             }
             TypeError::TerminationViolation { datatype, case, msg } => {
                 write!(

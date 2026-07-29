@@ -1,9 +1,13 @@
 use crate::cubical::equality::EtaResult;
 use crate::cubical::nbe::nbe_eval;
-use crate::cubical::syntax::{Datatype, Name, Term, beta, shift};
+use crate::cubical::syntax::{Datatype, Name, Term, beta, shift, show_term};
 use crate::cubical::typechecker::{Ctx, TypeError, infer_dt};
 
 use super::equality::definitionally_equal_ctx_r;
+fn names_from_ctx(ctx: &Ctx) -> Vec<Name> {
+    ctx.iter().map(|(n, _)| n.clone()).collect()
+}
+
 
 // ---------------------------------------------------------------------------
 // PendingGoal — deferred goal transformations
@@ -449,7 +453,12 @@ impl<'a> TacticEngine<'a> {
                             current_ty = nbe_eval(&b);
                             self.intro_names.push(name.clone());
                         }
-                        other => return Err(TypeError::ExpectedPi(other)),
+                        other => {
+                            let mut combined = self.tactic_ctx.clone();
+                            combined.extend_from_slice(outer_ctx);
+                            let names = names_from_ctx(&combined);
+                            return Err(TypeError::ExpectedPi { ty: other, names });
+                        }
                     }
                 }
 
@@ -471,14 +480,22 @@ impl<'a> TacticEngine<'a> {
                         self.result = Some(term.clone());
                         Ok(())
                     }
-                    EtaResult::NotEqual => Err(TypeError::TypeMismatch(
-                        Box::new(expected_nf),
-                        Box::new(inferred_nf),
-                    )),
-                    EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted(
-                        Box::new(expected_nf),
-                        Box::new(inferred_nf),
-                    )),
+                    EtaResult::NotEqual => {
+                        let names = names_from_ctx(&combined_ctx);
+                        Err(TypeError::TypeMismatch {
+                            expected: Box::new(expected_nf),
+                            got: Box::new(inferred_nf),
+                            names,
+                        })
+                    },
+                    EtaResult::Exhausted => {
+                        let names = names_from_ctx(&combined_ctx);
+                        Err(TypeError::EtaFuelExhausted {
+                            t1: Box::new(expected_nf),
+                            t2: Box::new(inferred_nf),
+                            names,
+                        })
+                    },
                 }
             }
 
@@ -530,13 +547,20 @@ impl<'a> TacticEngine<'a> {
                                  function type : {}\n  codomain      : {}\n  goal         : {}",
                                 f_ty_nf, b_nf, goal_nf,
                             ))),
-                            EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted(
-                                Box::new(goal_nf),
-                                Box::new(b_nf),
-                            )),
+                            EtaResult::Exhausted => {
+                                let names = names_from_ctx(&combined_ctx);
+                                Err(TypeError::EtaFuelExhausted {
+                                    t1: Box::new(goal_nf),
+                                    t2: Box::new(b_nf),
+                                    names,
+                                })
+                            },
                         }
                     }
-                    other => Err(TypeError::ExpectedPi(other)),
+                    other => {
+                        let names = names_from_ctx(&combined_ctx);
+                        Err(TypeError::ExpectedPi { ty: other, names })
+                    }
                 }
             }
 
@@ -563,13 +587,20 @@ impl<'a> TacticEngine<'a> {
                                  left  : {}\n  right : {}",
                                 u_nf, v_nf,
                             ))),
-                            EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted(
-                                Box::new(u_nf),
-                                Box::new(v_nf),
-                            )),
+                            EtaResult::Exhausted => {
+                                let names = names_from_ctx(&combined_ctx);
+                                Err(TypeError::EtaFuelExhausted {
+                                    t1: Box::new(u_nf),
+                                    t2: Box::new(v_nf),
+                                    names,
+                                })
+                            },
                         }
                     }
-                    other => Err(TypeError::ExpectedPath(other)),
+                    other => {
+                        let names = names_from_ctx(&combined_ctx);
+                        Err(TypeError::ExpectedPath { ty: other, names })
+                    }
                 }
             }
 
@@ -581,7 +612,12 @@ impl<'a> TacticEngine<'a> {
                         self.goal_ty = Term::TPath(a, Box::new(*v), Box::new(*u));
                         Ok(())
                     }
-                    other => Err(TypeError::ExpectedPath(other)),
+                    other => {
+                        let mut combined = self.tactic_ctx.clone();
+                        combined.extend_from_slice(outer_ctx);
+                        let names = names_from_ctx(&combined);
+                        Err(TypeError::ExpectedPath { ty: other, names })
+                    }
                 }
             }
 
@@ -595,7 +631,12 @@ impl<'a> TacticEngine<'a> {
                         self.goal_ty = nbe_eval(&a_ty);
                         Ok(())
                     }
-                    other => Err(TypeError::ExpectedSigma(other)),
+                    other => {
+                        let mut combined = self.tactic_ctx.clone();
+                        combined.extend_from_slice(outer_ctx);
+                        let names = names_from_ctx(&combined);
+                        Err(TypeError::ExpectedSigma { ty: other, names })
+                    }
                 }
             }
 
@@ -662,10 +703,13 @@ impl<'a> TacticEngine<'a> {
                         }
                         Ok(())
                     }
-                    other => Err(TypeError::Other(format!(
-                        "constructor: goal must be an inductive type, got {}",
-                        other,
-                    ))),
+                    other => {
+                        let names = names_from_ctx(&combined_ctx);
+                        Err(TypeError::Other(format!(
+                            "constructor: goal must be an inductive type, got {}",
+                            show_term(&names, &other),
+                        )))
+                    }
                 }
             }
 
@@ -930,7 +974,12 @@ impl<'a> TacticEngine<'a> {
                         });
                         Ok(())
                     }
-                    other => Err(TypeError::ExpectedPath(other)),
+                    other => {
+                        let mut combined = self.tactic_ctx.clone();
+                        combined.extend_from_slice(outer_ctx);
+                        let names = names_from_ctx(&combined);
+                        Err(TypeError::ExpectedPath { ty: other, names })
+                    }
                 }
             }
 
