@@ -5,7 +5,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::cubical::env::{Env, apply_globals, check_with_full_env, infer_with_full_env};
-use crate::cubical::nbe::{Globals, Neutral, Value, eval_nbe, nbe_eval, nbe_eval_with_globals};
+use crate::cubical::nbe::{Globals, Neutral, Scope, Value, eval_nbe, nbe_eval, nbe_eval_with_globals, zonk};
 use crate::cubical::parser::{Decl, ProgramParser};
 use crate::cubical::syntax::{Name, Term};
 use crate::cubical::typechecker::{Ctx, TypeError};
@@ -140,7 +140,7 @@ fn build_definition_values(env: &Env) -> Globals {
     // placeholder has been replaced.
     for index in (0..env.defs.len()).rev() {
         let (_, _, value) = &env.defs[index];
-        globals.borrow_mut()[index] = eval_nbe(&[], &globals, index, value);
+        globals.borrow_mut()[index] = eval_nbe(&Scope::empty(), &globals, index, value);
     }
     globals
 }
@@ -155,8 +155,8 @@ fn normalize_definition(env: &Env, name: &str) -> RunOutput {
     let globals = build_definition_values(env);
     RunOutput {
         name: name.clone(),
-        ty: ty.clone(),
-        value: nbe_eval_with_globals(value, &globals, index),
+        ty: zonk(ty),
+        value: zonk(&nbe_eval_with_globals(value, &globals, index)),
         global_names: env.defs.iter().map(|(name, _, _)| name.clone()).collect(),
     }
 }
@@ -198,6 +198,7 @@ fn process_file_source(
     last_def: &mut Option<RunOutput>,
 ) -> Result<(), RunError> {
     let mut parser = ProgramParser::new(source)?;
+    crate::cubical::nbe::clear_nbe_cache();
     while let Some(decl) = parser.next_decl()? {
         match decl {
             Decl::Import { path } => {
@@ -220,6 +221,7 @@ fn process_file_source(
                 *last_def = Some(process_def(&name, &ty, &val, env, by_wf)?);
             }
         }
+        crate::cubical::nbe::clear_nbe_cache();
     }
     Ok(())
 }
@@ -353,6 +355,7 @@ fn process_data_with_func(
 }
 
 fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -> Result<RunOutput, RunError> {
+    crate::cubical::nbe::clear_nbe_cache();
     crate::debug_log!("process_def '{}':", name);
     if by_wf {
         crate::cubical::typechecker::termination::set_skip_guard(true);
@@ -360,12 +363,14 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     let closed_ty_globals = apply_globals(&env.defs, ty);
     let closed_val = val.clone();
 
-    // Normalize only for the universe-level check; keep the original
-    // structure (e.g., Glue types) intact for body checking.
+    // If the type annotation is a `_` hole, skip the universe-level check;
+    // it will be solved during body typechecking.
     let closed_ty_nf = nbe_eval(&closed_ty_globals);
-    match nbe_eval(&infer_with_full_env(env, &closed_ty_nf)?) {
-        Term::TUniv(_) => {}
-        other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse(other)))),
+    if !matches!(closed_ty_globals, Term::Meta(_)) {
+        match nbe_eval(&infer_with_full_env(env, &closed_ty_nf)?) {
+            Term::TUniv(_) => {}
+            other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse(other)))),
+        }
     }
 
     // Resolve any tactic blocks in the value before typechecking.
@@ -397,8 +402,8 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     result?;
     let output = RunOutput {
         name: name.clone(),
-        ty: closed_ty_globals.clone(),
-        value: nbe_eval(&resolved_val),
+        ty: zonk(&closed_ty_globals),
+        value: zonk(&nbe_eval(&resolved_val)),
         global_names: env.defs.iter().map(|(n, _, _)| n.clone()).collect(),
     };
 

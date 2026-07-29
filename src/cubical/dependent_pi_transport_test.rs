@@ -9,7 +9,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::cubical::nbe::{eval_nbe, nbe_eval, Globals, Value};
+    use crate::cubical::nbe::{eval_nbe, nbe_eval, Globals, Scope, Value};
     use crate::cubical::syntax::Term;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -48,7 +48,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         // Constant family → transport is identity → result should be the original lambda
         match result {
             Value::VLam(_, _) => {}
@@ -86,7 +86,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         // Should produce a TAbs (reduced), not a stuck TTransport
         match &result {
             Value::VLam(_, _) => {}
@@ -126,7 +126,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         // Should reduce to TAbs, not stay stuck
         assert!(
             !matches!(&result, Value::VTransport(_, _)),
@@ -168,7 +168,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         assert!(
             !matches!(&result, Value::VTransport(_, _)),
             "dependent Pi transport should reduce, got stuck: {:?}",
@@ -220,7 +220,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         assert!(
             !matches!(&result, Value::VTransport(_, _)),
             "deeply dependent Pi transport should reduce, got stuck: {:?}",
@@ -267,7 +267,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         // Should reduce to a nested TAbs
         assert!(
             matches!(&result, Value::VLam(_, _)),
@@ -304,7 +304,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         // Should reduce
         assert!(
             !matches!(&result, Value::VTransport(_, _)),
@@ -462,7 +462,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         // Should reduce to a function (TAbs/VLam)
         assert!(
             matches!(&result, Value::VLam(_, _)),
@@ -499,7 +499,7 @@ mod tests {
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
-        let result = eval_nbe(&[], &globals, 0, &term);
+        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
         assert!(
             matches!(&result, Value::VLam(_, _)),
             "expected VLam, got: {:?}",

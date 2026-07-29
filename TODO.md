@@ -174,14 +174,14 @@
 ### 6. Performance and Metaprogramming
 
 - **Normalization improvements** —
-  - Sharing in NbE
+  - [x] Sharing in NbE — `Scope` persistent environment replaces `Vec<Value>` for env passing. Rc-linked segments make `Scope::extend` O(1) and `Scope::clone` cheap. 17 internal function signatures changed from `&[Value]` to `&Scope`. Closure application uses `Scope::extend` (single allocation) instead of `vec![v] + extend_from_slice` (two allocations + copy). `do_elim` uses `Scope::chain` for env2 construction.
   - Incremental normalization
-  - Memoization
+  - [x] Memoization — `NBE_EVAL_CACHE` caches `nbe_eval` results for terms without metavariables
 
 - **Type checking improvements** —
-  - Constraint-based type inference
-  - Bidirectional type checking
-  - Pattern unification
+  - [x] Constraint-based type inference — `Meta` term variant, `fresh_meta_id`, zonk substitution
+  - Bidirectional type checking 
+  - [x] Pattern unification — `try_solve_meta` with occurs check (`meta_mentions`), `solve_meta`/`get_meta_solution`
 
 - **Metaprogramming** —
   - Reflection API

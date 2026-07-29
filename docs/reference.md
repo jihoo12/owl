@@ -1632,6 +1632,16 @@ Owl uses **Normalisation by Evaluation (NbE)** to compute with terms.
 This approach correctly handles variable binding (via closures) and ensures
 strong normalisation for the core calculus.
 
+### Environment Sharing
+
+Evaluation environments use a persistent `Scope` type — an `Rc`-linked chain
+of value segments — instead of copying `Vec<Value>` at every binder. This
+makes `extend` (adding a single innermost binding) O(1) rather than O(n),
+and `clone` shares the existing segment chain via reference counting.
+Closure application uses `Scope::extend` (one allocation) instead of
+`vec![v] + extend_from_slice` (two allocations plus a full copy of the
+existing environment).
+
 ### Beta Reduction
 
 ```
