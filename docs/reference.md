@@ -86,6 +86,7 @@ The following words are reserved and cannot be used as variable names:
 | `Next`        | Coinductive delay constructor              |
 | `Force`       | Coinductive delay destructor               |
 | `by_wf`       | Well-founded recursion annotation          |
+| `as`          | As-pattern in match cases (contextual)     |
 
 ### Symbols and Operators
 
@@ -292,6 +293,16 @@ The constructor is automatically named `mk` followed by the record name
 
 **Field access** uses dot notation: `r.field`. Chained projections work:
 `r.field1.field2`.
+
+**Record update** uses `{ field = value }` syntax:
+
+```
+r { field = new_value }
+```
+
+This produces a new record with the specified fields replaced. Multiple
+fields can be updated at once: `r { f1 = v1, f2 = v2 }`. Fields not mentioned
+retain their original values.
 
 **Example:**
 
@@ -887,6 +898,116 @@ The scrutinee can be a bare name (resolved from scope) or an arbitrary term.
 The `return` clause specifies the **motive** (dependent return type). The
 motive is a function from the matched type to a type family.
 
+### Pattern Variants
+
+Match cases support several pattern forms:
+
+#### Ordinary Patterns
+
+Each case matches a constructor name followed by binders that are bound to
+the constructor's arguments:
+
+```
+match n return Nat with
+  | zero => zero
+  | suc m' => suc (suc m')
+```
+
+#### Wildcard Pattern
+
+A single underscore `_` as a binder discards the argument:
+
+```
+match n return Nat with
+  | zero => zero
+  | suc _ => zero
+```
+
+#### As-Patterns
+
+An as-pattern binds the full constructor value to a name using `as`:
+
+```
+match n return Nat with
+  | zero => n
+  | suc m as x => x       -- x is bound to suc m (the entire value)
+```
+
+The as-name is available alongside the constructor's binders. In the example
+above, `x` is the full `suc m` value, while `m` is the inner Nat. This is
+useful for recursive calls where you need both the original value and its
+inner components.
+
+As-patterns can be combined with or-patterns:
+
+```
+match n return Nat with
+  | zero as x | suc m as x => x
+```
+
+#### Record Patterns
+
+Record patterns destructure records by field name using `{ field = binder }`
+syntax:
+
+```
+record Pair (A : U0) (B : U0) where
+  field fst : A
+  field snd : B
+
+def swap_pair : ∀ A B, Pair A B -> Pair B A :=
+  fun A B p => match p return Pair B A with
+    | mkPair { fst = x, snd = y } => mkPair y x
+```
+
+Each field specifies a binder that receives that field's value. Field binders
+are in order of field declaration. As-patterns may follow the record pattern:
+
+```
+  | mkPair { fst = x, snd = y } as p => mkPair p.snd p.fst
+```
+
+#### Or-Patterns
+
+Multiple patterns can share the same body using `|`:
+
+```
+match n return Nat with
+  | zero | suc _ => zero
+```
+
+The patterns must match at the same column (indentation). The body is shared;
+the binders from the last pattern are used.
+
+### Record Update
+
+Records can be updated using `{ field = value }` syntax on an existing record
+expression:
+
+```
+def set_fst : ∀ A B, Pair A B -> A -> Pair A B :=
+  fun A B p a => p { fst = a }
+```
+
+The expression `p { fst = a }` produces a new record with `fst` replaced by
+`a` and all other fields unchanged. Multiple fields can be updated:
+
+```
+p { fst = a, snd = b }
+```
+
+### Elimination Semantics
+
+The match expression is desugared to the core eliminator form:
+
+```
+elim[M] { case1 | case2 | ... } scrutinee
+```
+
+where `M` is the motive function. Reduction occurs when the scrutinee is a
+constructor value: the matching case body is selected and its binders are
+substituted with the constructor's arguments.
+
 ### Examples
 
 Simple match:
@@ -905,17 +1026,14 @@ match n return Nat with
   | suc m' => add m' m'
 ```
 
-### Elimination Semantics
-
-The match expression is desugared to the core eliminator form:
+Match with as-pattern:
 
 ```
-elim[M] { case1 | case2 | ... } scrutinee
+def as_succ_of : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero => suc n
+  | suc m as x => suc (suc m)
 ```
-
-where `M` is the motive function. Reduction occurs when the scrutinee is a
-constructor value: the matching case body is selected and its binders are
-substituted with the constructor's arguments.
 
 ---
 
@@ -1812,7 +1930,8 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
 <meet>        ::= <tilde> ("/\ " <tilde>)*
 <tilde>       ::= "~" <tilde> | <papp>
 <papp>        ::= <app> ("@" <tilde>)*             -- path application
-<app>         ::= <prefix_or_atom>+
+<app>         ::= <prefix_or_atom>+ <record_update>?
+<record_update> ::= "{" NAME "=" <term> ("," NAME "=" <term>)* "}"
 
 <prefix_or_atom>
               ::= "fst" <prefix_or_atom>           -- first projection
@@ -1849,8 +1968,13 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
 
 <match>       ::= "match" NAME "return" <term> "with" <cases>
                 | "match" <term> "return" <term> "with" <cases>
-<cases>       ::= ("|" NAME <binders> "=>" <term>)+
-<binders>     ::= NAME*
+<cases>       ::= (<case>)+
+<case>        ::= "|" <pattern> ("|" <pattern>)* "=>" <term>
+<pattern>     ::= NAME <binders> ["as" NAME]
+                | NAME "{" <field_pats> "}" ["as" NAME]
+                | NAME
+<field_pats>  ::= NAME "=" <binders> ("," NAME "=" <binders>)*
+<binders>     ::= NAME* | "_"
 
 <lam_binders> ::= NAME+ | ("(" NAME+ ":" <term> ")")+
 

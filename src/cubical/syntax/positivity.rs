@@ -143,6 +143,13 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             Ok(())
         }
         Term::TProj(_, r) => check_positivity_in(target, r, negative),
+        Term::TRecordUpdate(r, updates) => {
+            check_positivity_in(target, r, negative)?;
+            for (_, e) in updates {
+                check_positivity_in(target, e, negative)?;
+            }
+            Ok(())
+        }
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
             check_positivity_in(target, a, negative)
         }

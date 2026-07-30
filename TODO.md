@@ -140,10 +140,12 @@
   - Record update syntax
 
 - **Pattern matching improvements** —
+  - [x] Wildcard patterns (`_` binder that discards the argument)
   - [x] Nested patterns (fixed termination checker infinite recursion)
-  - Or-patterns
-  - As-patterns
-  - Record patterns
+  - [x] Or-patterns (`| pat1 | pat2 => body`)
+  - [x] As-patterns (`con binders as name => body`)
+  - [x] Record patterns (`{ field = binder, ... }` syntax for matching records)
+  - Nested constructor patterns — `suc (suc zero)` matching on literal 2 (requires full pattern AST)
 
 ### 5. Cubical-Specific Improvements
 

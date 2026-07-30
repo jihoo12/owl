@@ -153,6 +153,7 @@ pub enum Value {
     VFst(Box<Value>),
     VSnd(Box<Value>),
     VProj(Name, Box<Value>),
+    VRecordUpdate(Box<Value>, Vec<(Name, Value)>),
     VDelay(Box<Value>),
     VNext(Box<Value>),
     VForce(Box<Value>),
@@ -437,6 +438,30 @@ pub fn eval_nbe(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) 
         Term::TFst(p) => do_fst(globals, global_offset, eval_nbe(env, globals, global_offset, p)),
         Term::TSnd(p) => do_snd(globals, global_offset, eval_nbe(env, globals, global_offset, p)),
         Term::TProj(field, r) => do_proj(field, eval_nbe(env, globals, global_offset, r)),
+        Term::TRecordUpdate(r, updates) => {
+            let r_val = eval_nbe(env, globals, global_offset, r);
+            let updates_val: Vec<(Name, Value)> = updates.iter()
+                .map(|(f, e)| (f.clone(), eval_nbe(env, globals, global_offset, e)))
+                .collect();
+            // Eagerly desugar when the record evaluates to a VCon.
+            if let Value::VCon(ref dt, ref con, ref args) = r_val {
+                let dts = current_dts();
+                if let Some(dt_sig) = dts.iter().find(|d| &d.name == dt) {
+                    if let Some(field_names) = &dt_sig.field_names {
+                        let mut new_args = args.clone();
+                        for (field, val) in &updates_val {
+                            if let Some(idx) = field_names.iter().position(|f| f == field) {
+                                if idx < new_args.len() {
+                                    new_args[idx] = val.clone();
+                                }
+                            }
+                        }
+                        return Value::VCon(dt.clone(), con.clone(), new_args);
+                    }
+                }
+            }
+            Value::VRecordUpdate(Box::new(r_val), updates_val)
+        }
         Term::TData(d, params) => Value::VData(
             d.clone(),
             params.iter().map(|p| eval_nbe(env, globals, global_offset, p)).collect(),
@@ -764,6 +789,25 @@ pub fn do_snd(globals: &Globals, global_offset: usize, p: Value) -> Value {
 
 pub fn do_proj(field: &str, r: Value) -> Value {
     match r {
+        // Desugar record update on projection: (r { x = v }).y → r.y when field != x
+        Value::VRecordUpdate(r_inner, ref updates) => {
+            if let Value::VCon(ref dt, _, ref args) = *r_inner.as_ref() {
+                let dts = current_dts();
+                if let Some(dt_sig) = dts.iter().find(|d| &d.name == dt) {
+                    if let Some(field_names) = &dt_sig.field_names {
+                        if let Some((_, val)) = updates.iter().find(|(f, _)| f == field) {
+                            return val.clone();
+                        }
+                        if let Some(idx) = field_names.iter().position(|n| n == field) {
+                            if idx < args.len() {
+                                return args[idx].clone();
+                            }
+                        }
+                    }
+                }
+            }
+            Value::VProj(field.to_string(), Box::new(Value::VRecordUpdate(r_inner, updates.clone())))
+        }
         Value::VCon(_, _, ref args) => {
             let dts = current_dts();
             if let Some(dt) = dts.iter().find(|dt| {
@@ -792,7 +836,11 @@ pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &Scope, glo
     match scrut {
         Value::VCon(ref data, ref con, ref args) => match cases.iter().find(|case| case.con == *con) {
             Some(case) => {
-                let env2 = env.chain(args.iter().rev().cloned().collect());
+                let mut env2_values: Vec<Value> = args.iter().rev().cloned().collect();
+                if case.as_name.is_some() {
+                    env2_values.insert(0, Value::VCon(data.clone(), con.clone(), args.clone()));
+                }
+                let env2 = env.chain(env2_values);
                 let result = eval_nbe(&env2, globals, global_offset, &case.body);
                 record_step("elim-con".into(), format!("elim _ [{}] ({} {})", con, data, con), value_str(globals, global_offset, &result));
                 result
@@ -1018,6 +1066,9 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TFst(p) => uses_var_at_level(p, level),
         Term::TSnd(p) => uses_var_at_level(p, level),
         Term::TProj(_, r) => uses_var_at_level(r, level),
+        Term::TRecordUpdate(r, updates) => {
+            uses_var_at_level(r, level) || updates.iter().any(|(_, e)| uses_var_at_level(e, level))
+        }
         Term::TUniv(_) | Term::TProp | Term::TSSet | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => false,
         Term::TLift(a, _) => uses_var_at_level(a, level),
         Term::TLower(a) => uses_var_at_level(a, level),
@@ -2791,6 +2842,10 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
         Value::VFst(p) => Term::TFst(Box::new(quote(size, globals, global_offset, *p))),
         Value::VSnd(p) => Term::TSnd(Box::new(quote(size, globals, global_offset, *p))),
         Value::VProj(field, r) => Term::TProj(field, Box::new(quote(size, globals, global_offset, *r))),
+        Value::VRecordUpdate(r, updates) => Term::TRecordUpdate(
+            Box::new(quote(size, globals, global_offset, *r)),
+            updates.iter().map(|(f, e)| (f.clone(), quote(size, globals, global_offset, e.clone()))).collect(),
+        ),
         Value::VPath(a, u, v) => Term::TPath(
             Box::new(quote(size, globals, global_offset, *a)),
             Box::new(quote(size, globals, global_offset, *u)),
@@ -3020,11 +3075,13 @@ fn quote_cases(size: usize, globals: &Globals, global_offset: usize, cases: Vec<
             binders: case.binders.clone(),
             body: Box::new(normalize_under_binders(
                 size,
-                case.binders.len(),
+                case.binders.len() + if case.as_name.is_some() { 1 } else { 0 },
                 globals,
                 global_offset,
                 &case.body,
             )),
+            as_name: case.as_name,
+            record_bindings: case.record_bindings,
         })
         .collect()
 }
@@ -3242,6 +3299,9 @@ pub fn meta_mentions(id: i32, t: &Term) -> bool {
         Term::TPair(a, b) => meta_mentions(id, a) || meta_mentions(id, b),
         Term::TFst(p) | Term::TSnd(p) | Term::TProj(_, p) | Term::TLift(p, _) | Term::TLower(p)
         | Term::TDelay(p) | Term::TNext(p) | Term::TForce(p) => meta_mentions(id, p),
+        Term::TRecordUpdate(r, updates) => {
+            meta_mentions(id, r) || updates.iter().any(|(_, e)| meta_mentions(id, e))
+        }
         Term::TData(_, params) => params.iter().any(|p| meta_mentions(id, p)),
         Term::TCon(_, _, args) => args.iter().any(|a| meta_mentions(id, a)),
         Term::TPCon(_, _, args, r) => args.iter().any(|a| meta_mentions(id, a)) || meta_mentions(id, r),
@@ -3333,6 +3393,13 @@ fn term_children_mut(t: &mut Term) -> Vec<&mut Term> {
         Term::TFst(p) | Term::TSnd(p) | Term::TLift(p, _) | Term::TLower(p)
         | Term::TDelay(p) | Term::TNext(p) | Term::TForce(p) => vec![p.as_mut()],
         Term::TProj(_, p) => vec![p.as_mut()],
+        Term::TRecordUpdate(r, updates) => {
+            let mut children: Vec<&mut Term> = vec![r.as_mut()];
+            for (_, e) in updates.iter_mut() {
+                children.push(e);
+            }
+            children
+        }
         Term::TData(_, params) => params.iter_mut().collect(),
         Term::TCon(_, _, args) => args.iter_mut().collect(),
         Term::TPCon(_, _, args, r) => {
@@ -3405,6 +3472,13 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         Term::TPair(a, b) => vec![a.as_ref(), b.as_ref()],
         Term::TFst(p) | Term::TSnd(p) | Term::TProj(_, p) | Term::TLift(p, _) | Term::TLower(p)
         | Term::TDelay(p) | Term::TNext(p) | Term::TForce(p) => vec![p.as_ref()],
+        Term::TRecordUpdate(r, updates) => {
+            let mut children: Vec<&Term> = vec![r.as_ref()];
+            for (_, e) in updates.iter() {
+                children.push(e);
+            }
+            children
+        }
         Term::TData(_, params) => params.iter().collect(),
         Term::TCon(_, _, args) => args.iter().collect(),
         Term::TPCon(_, _, args, r) => {

@@ -367,6 +367,8 @@ impl<'a> TacticEngine<'a> {
                                 con: cn.clone(),
                                 binders,
                                 body: Box::new(body),
+                                as_name: None,
+                                record_bindings: None,
                             }
                         })
                         .collect();

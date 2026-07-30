@@ -52,7 +52,8 @@ pub fn check_guard(
     cases: &[ElimCase],
 ) -> GuardStatus {
     for case in cases {
-        let binder_count = case.binders.len();
+        let binder_count = case.binders.len()
+            + if case.as_name.is_some() { 1 } else { 0 };
         if let Err(msg) = check_body_guard(d, &case.body, binder_count) {
             return GuardStatus::Violation {
                 case: case.con.clone(),
@@ -237,6 +238,15 @@ fn check_body_guard(
 
         // Record projection — recurse into the record term.
         Term::TProj(_, r) => check_body_guard(d, r, binder_count),
+
+        // Record update — recurse into record and update values.
+        Term::TRecordUpdate(r, updates) => {
+            check_body_guard(d, r, binder_count)?;
+            for (_, e) in updates {
+                check_body_guard(d, e, binder_count)?;
+            }
+            Ok(())
+        }
 
         // Coinduction — recurse into subterms.
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {

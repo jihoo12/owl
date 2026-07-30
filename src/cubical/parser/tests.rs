@@ -246,6 +246,29 @@ fn parses_match_dependent_return_type() {
     }
 }
 
+#[test]
+fn parses_or_patterns() {
+    let src = "match n return Nat with | zero | suc m => z";
+    let mut parser = Parser::new(Lexer::new(src).lex().unwrap());
+    parser.global_env = vec![
+        "z".to_string(),
+        "Nat".to_string(),
+        "n".to_string(),
+    ];
+    let term = parser.parse_term().unwrap();
+    match term {
+        Term::TElim(_, cases, scrut) => {
+            assert_eq!(*scrut, Term::TVar(2));
+            assert_eq!(cases.len(), 2);
+            assert_eq!(cases[0].con, "zero");
+            assert_eq!(cases[0].binders, Vec::<String>::new());
+            assert_eq!(cases[1].con, "suc");
+            assert_eq!(cases[1].binders, vec!["m".to_string()]);
+        }
+        _ => panic!("expected match to desugar to eliminator"),
+    }
+}
+
 fn parse_let_with_globals(src: &str, globals: &[&str]) -> Term {
     let mut parser = Parser::new(Lexer::new(src).lex().unwrap());
     parser.global_env = globals.iter().map(|s| s.to_string()).collect();

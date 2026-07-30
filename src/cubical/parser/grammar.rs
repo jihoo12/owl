@@ -796,6 +796,26 @@ impl Parser {
                 break;
             }
         }
+        // Record update syntax: `expr { field = value, ... }`
+        if self.consume(&TokenKind::LBrace) {
+            let mut updates = Vec::new();
+            if !self.at(&TokenKind::RBrace) {
+                let saved_stop_at_comma = self.stop_at_comma;
+                self.stop_at_comma = true;
+                loop {
+                    let field = self.expect_ident("expected field name in record update")?;
+                    self.expect(TokenKind::Equals, format!("expected '=' after field '{}' in record update", field))?;
+                    let value = self.parse_term()?;
+                    updates.push((field, value));
+                    if !self.consume(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.stop_at_comma = saved_stop_at_comma;
+            }
+            self.expect(TokenKind::RBrace, "expected '}' after record update fields")?;
+            term = Term::TRecordUpdate(Box::new(term), updates);
+        }
         Ok(term)
     }
 
@@ -1224,62 +1244,159 @@ impl Parser {
         let mut cases = Vec::new();
         self.consume(&TokenKind::Pipe);
         loop {
-            let con = self.expect_ident("expected constructor name in eliminator case")?;
-            let mut binders = Vec::new();
-            while let TokenKind::Ident(name) = self.peek().kind.clone() {
-                if name == "=>" {
+            // Collect one or more or-patterns before =>.
+            // Each pattern is `constructor binders...`, separated by | at the same column.
+            // Supports as-patterns (`con binders as name`) and record patterns (`{ f = b }`).
+            let mut pats: Vec<(Name, Vec<Name>)> = Vec::new();
+            let mut as_name: Option<Name> = None;
+            let mut record_bindings: Option<Vec<(Name, Name)>> = None;
+            loop {
+                if self.at(&TokenKind::LBrace) {
+                    // Record pattern: { field = binder, ... }
+                    // Typechecker will desugar to constructor pattern once the datatype is known.
+                    let mut bindings = Vec::new();
+                    self.consume(&TokenKind::LBrace);
+                    if !self.at(&TokenKind::RBrace) {
+                        loop {
+                            let field = self
+                                .expect_ident("expected field name in record pattern")?;
+                            self.expect(
+                                TokenKind::Equals,
+                                format!(
+                                    "expected '=' after field '{}' in record pattern",
+                                    field
+                                ),
+                            )?;
+                            let binder = self
+                                .expect_ident("expected binder name in record pattern")?;
+                            bindings.push((field, binder));
+                            if !self.consume(&TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(
+                        TokenKind::RBrace,
+                        "expected '}' after record pattern fields",
+                    )?;
+                    record_bindings = Some(bindings);
+                    pats.push(("".to_string(), Vec::new()));
+                } else {
+                    let con = self.expect_ident("expected constructor name or record pattern in eliminator case")?;
+                    let mut binders = Vec::new();
+                    while let TokenKind::Ident(name) = self.peek().kind.clone() {
+                        if name == "=>" || name == "|" || name == "as" {
+                            break;
+                        }
+                        self.pos += 1;
+                        binders.push(name);
+                    }
+                    pats.push((con, binders));
+                }
+
+                // Check for as-pattern: ... as name (after binders, before => or |)
+                if self.consume_ident("as") {
+                    let as_n = self
+                        .expect_ident("expected name after 'as' in as-pattern")?;
+                    as_name = Some(as_n);
+                    break; // as-pattern ends the pattern group
+                }
+
+                // Check for or-pattern separator
+                if self.at(&TokenKind::Pipe) && self.peek().col >= my_col {
+                    self.consume(&TokenKind::Pipe);
+                } else {
                     break;
                 }
-                self.pos += 1;
-                binders.push(name);
             }
+
             if self.consume(&TokenKind::FatArrow) || self.consume(&TokenKind::Arrow) {
-                // Determine the type of constructor:
-                // - plain constructor: no interval binders
-                // - path constructor: last binder is the interval variable
-                // - square constructor: last TWO binders are interval variables
-                // - cell constructor: last `dim` binders are interval variables
-                let cell_dim = self.is_cell_constructor_case(&con);
-                let is_sqcon = self.is_square_constructor_case(&con);
-                let is_path_con = self
-                    .find_constructor(&con)
-                    .is_some_and(|(_, is_path)| is_path);
-                let (ord_binders, ivar_binders) = if let Some(dim) = cell_dim {
-                    if binders.len() >= dim {
-                        let split = binders.len() - dim;
+                let body_box: Box<Term>;
+                if let Some(ref bindings) = record_bindings {
+                    // Record pattern: push field binders to env, parse body, pop binders.
+                    let binder_names: Vec<Name> = bindings.iter().map(|(_, b)| b.clone()).collect();
+                    for b in binder_names.iter() {
+                        self.term_env.insert(0, b.clone());
+                    }
+                    if let Some(ref as_n) = as_name {
+                        self.term_env.insert(0, as_n.clone());
+                    }
+                    body_box = Box::new(self.parse_term()?);
+                    if as_name.is_some() {
+                        self.term_env.remove(0);
+                    }
+                    for _ in &binder_names {
+                        self.term_env.remove(0);
+                    }
+                    cases.push(ElimCase {
+                        con: "".to_string(),
+                        binders: binder_names,
+                        body: body_box,
+                        as_name,
+                        record_bindings: record_bindings.clone(),
+                    });
+                } else {
+                    let (last_con, binders) = pats.last().unwrap();
+                    // Determine the type of constructor:
+                    // - plain constructor: no interval binders
+                    // - path constructor: last binder is the interval variable
+                    // - square constructor: last TWO binders are interval variables
+                    // - cell constructor: last `dim` binders are interval variables
+                    let cell_dim = self.is_cell_constructor_case(last_con);
+                    let is_sqcon = self.is_square_constructor_case(last_con);
+                    let is_path_con = self
+                        .find_constructor(last_con)
+                        .is_some_and(|(_, is_path)| is_path);
+                    let (ord_binders, ivar_binders) = if let Some(dim) = cell_dim {
+                        if binders.len() >= dim {
+                            let split = binders.len() - dim;
+                            (&binders[..split], &binders[split..])
+                        } else {
+                            (&binders[..], &[] as &[String])
+                        }
+                    } else if is_sqcon && binders.len() >= 2 {
+                        let split = binders.len() - 2;
+                        (&binders[..split], &binders[split..])
+                    } else if is_path_con && !binders.is_empty() && !is_sqcon {
+                        let split = binders.len() - 1;
                         (&binders[..split], &binders[split..])
                     } else {
                         (&binders[..], &[] as &[String])
+                    };
+
+                    for binder in ord_binders.iter() {
+                        self.term_env.insert(0, binder.clone());
                     }
-                } else if is_sqcon && binders.len() >= 2 {
-                    let split = binders.len() - 2;
-                    (&binders[..split], &binders[split..])
-                } else if is_path_con && !binders.is_empty() && !is_sqcon {
-                    let split = binders.len() - 1;
-                    (&binders[..split], &binders[split..])
-                } else {
-                    (&binders[..], &[] as &[String])
-                };
-                for binder in ord_binders.iter() {
-                    self.term_env.insert(0, binder.clone());
+                    for iv in ivar_binders {
+                        self.ivar_env.insert(0, iv.clone());
+                        self.term_env.insert(0, "".to_string());
+                    }
+                    if let Some(ref as_n) = as_name {
+                        self.term_env.insert(0, as_n.clone());
+                    }
+                    let body = self.parse_term()?;
+                    if as_name.is_some() {
+                        self.term_env.remove(0);
+                    }
+                    for _ in ivar_binders {
+                        self.term_env.remove(0);
+                        self.ivar_env.remove(0);
+                    }
+                    for _ in ord_binders {
+                        self.term_env.remove(0);
+                    }
+
+                    body_box = Box::new(body);
+                    for (con, binders) in pats {
+                        cases.push(ElimCase {
+                            con,
+                            binders,
+                            body: body_box.clone(),
+                            as_name: as_name.clone(),
+                            record_bindings: None,
+                        });
+                    }
                 }
-                for iv in ivar_binders {
-                    self.ivar_env.insert(0, iv.clone());
-                    self.term_env.insert(0, "".to_string());
-                }
-                let body = self.parse_term()?;
-                for _ in ord_binders {
-                    self.term_env.remove(0);
-                }
-                for _ in ivar_binders {
-                    self.term_env.remove(0);
-                    self.ivar_env.remove(0);
-                }
-                cases.push(ElimCase {
-                    con,
-                    binders,
-                    body: Box::new(body),
-                });
             } else {
                 return Err(self.error_here("expected '=>' after eliminator case binders"));
             }
@@ -1425,6 +1542,10 @@ impl Parser {
             && let TokenKind::Ident(name) = &self.peek().kind
                 && name == "field" {
                     return false;
+        }
+        if let TokenKind::Ident(name) = &self.peek().kind
+            && name == "return" {
+                return false;
         }
         matches!(
             &self.peek().kind,

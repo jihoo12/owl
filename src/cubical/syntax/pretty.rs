@@ -231,6 +231,13 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             format!("by {}", tactic_strs.join("; "))
         }
         Term::TProj(field, r) => format!("{}.{}", show_term(env, r), field),
+        Term::TRecordUpdate(r, updates) => {
+            let fields: Vec<String> = updates
+                .iter()
+                .map(|(f, e)| format!("{} = {}", f, show_term(env, e)))
+                .collect();
+            format!("{} {{ {} }}", show_term(env, r), fields.join(", "))
+        }
         Term::TDelay(a) => format!("Delay {}", show_term(env, a)),
         Term::TNext(a) => format!("Next {}", show_term(env, a)),
         Term::TForce(a) => format!("Force {}", show_term(env, a)),

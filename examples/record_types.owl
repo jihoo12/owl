@@ -21,3 +21,11 @@ record Pair (A : Type) (B : Type) where
   field snd : B
 
 def pair_nat : Pair Nat Nat := mkPair Nat.zero Nat.zero
+
+-- Record update syntax
+def origin_x_updated : Point := origin { x = suc (suc zero) }
+
+def origin_both_updated : Point := origin { x = suc zero, y = suc (suc zero) }
+
+-- Check that record update preserves other fields
+def get_y_after_x_update : Nat := (origin { x = suc zero }).y

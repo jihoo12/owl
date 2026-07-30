@@ -1,0 +1,148 @@
+-- stress_as_patterns.owl — Stress test for as-patterns
+-- As-pattern syntax: con binders as name => body
+-- Name is bound to the full constructor application in the body.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+inductive List where
+  | nil : List
+  | cons : Nat -> List -> List
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Basic as-pattern
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- As-pattern with zero-arg constructor
+def as_zero : Nat :=
+  match zero return Nat with
+  | zero as x => x
+
+-- As-pattern with one-arg constructor
+def as_suc_val : Nat :=
+  match (suc zero) return Nat with
+  | suc n as x => x
+
+-- As-pattern returns the whole value from the case body
+def as_identity : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero as x => x
+  | suc m as x => x
+
+-- As-pattern in non-trivial body (use as-bound value in larger expr)
+def as_succ_of : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero as x => suc x
+  | suc m as x => suc (suc x)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. As-pattern with or-patterns
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- As-pattern combined with or-pattern (shared as_name)
+def as_or_shared : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero | suc m as x => x
+
+-- Each case has its own as-pattern (separate cases)
+def as_each_case : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero as x => x
+  | suc m as x => x
+
+-- Or-pattern with as-pattern, body uses as-bound value
+def as_or_body_uses_as : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero | suc m as x => suc x
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. As-pattern in recursive functions
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Recursive identity using as-pattern
+def as_rec_id : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero as x => x
+  | suc m as x => suc (as_rec_id m)
+
+-- Compute double using as-pattern
+def as_rec_double : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero as x => x
+  | suc m as x => suc (suc (as_rec_double m))
+
+-- As-pattern used only in some cases
+def as_some_cases : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero => suc zero
+  | suc m as x => x
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. As-pattern in projection / expression context
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- As-pattern inside a projection argument
+def as_proj_arg : Nat :=
+  match (suc (suc zero)) return Nat with
+  | suc n as x => x
+
+-- As-pattern value passed to function
+def as_arg_to_fn : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero as x => suc x
+  | suc m as x => suc m
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. As-pattern with multiple binders
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- As-pattern with two actual binders
+inductive PairNat where
+  | mkPair : Nat -> Nat -> PairNat
+
+def as_two_binders : PairNat -> Nat := fun p =>
+  match p return Nat with
+  | mkPair a b as x => a
+
+def as_two_binders_full : PairNat -> PairNat := fun p =>
+  match p return PairNat with
+  | mkPair a b as x => x
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. As-pattern with Boolean constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def as_bool_id : Bool -> Bool := fun b =>
+  match b return Bool with
+  | true as x => x
+  | false as x => x
+
+def as_bool_to_nat : Bool -> Nat := fun b =>
+  match b return Nat with
+  | true as x => zero
+  | false as x => suc zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Verification: compute values to check correctness
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def verify_as_zero : Nat := as_zero                              -- = 0
+def verify_as_suc : Nat := as_suc_val                            -- = 1
+def verify_as_identity_zero : Nat := as_identity zero            -- = 0
+def verify_as_identity_suc : Nat := as_identity (suc (suc zero)) -- = 2
+def verify_as_succ_of_zero : Nat := as_succ_of zero              -- = 1
+def verify_as_succ_of_suc : Nat := as_succ_of (suc zero)         -- = 3
+def verify_as_or_shared_zero : Nat := as_or_shared zero          -- = 0
+def verify_as_or_shared_suc : Nat := as_or_shared (suc zero)    -- = 1
+def verify_as_rec_id_3 : Nat := as_rec_id (suc (suc (suc zero))) -- = 3
+def verify_as_rec_double_2 : Nat := as_rec_double (suc (suc zero)) -- = 4
+def verify_as_proj : Nat := as_proj_arg                          -- = 2
+def verify_as_bool_id_true : Bool := as_bool_id true             -- = true
+def verify_as_bool_id_false : Bool := as_bool_id false           -- = false
+
+def main : Nat := verify_as_rec_id_3

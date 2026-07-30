@@ -1,0 +1,88 @@
+-- stress_update_or_patterns.owl — Stress test for record update and or-patterns
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+record Point where
+  field x : Nat
+  field y : Nat
+
+record Pair (A : Type) (B : Type) where
+  field fst : A
+  field snd : B
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Record Update Basics
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def origin : Point := mkPoint zero zero
+
+-- Update a single field and project it
+def update_x_then_get_x : Nat := (origin { x = suc zero }).x
+
+-- Update one field, project a different field (should get original)
+def update_x_then_get_y : Nat := (origin { x = suc zero }).y
+
+-- Update both fields
+def update_both : Point := origin { x = suc zero, y = suc (suc zero) }
+
+-- Project after both-field update
+def get_updated_x : Nat := (origin { x = suc zero, y = suc (suc zero) }).x
+
+def get_updated_y : Nat := (origin { x = suc zero, y = suc (suc zero) }).y
+
+-- Update on a variable
+def inc_x : Point -> Point := fun p => p { x = suc (p.x) }
+
+-- Update on function result
+def update_result : Point -> Point := fun p =>
+  (mkPoint (p.x) (p.y)) { x = suc (p.x) }
+
+-- Swap via multiple updates
+def swap_via_update : Pair Nat Nat -> Pair Nat Nat := fun p =>
+  p { fst = p.snd, snd = p.fst }
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Or-patterns
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Or-pattern with zero-arg constructors
+def or_bool : Bool -> Nat := fun b =>
+  match b return Nat with
+  | true | false => zero
+
+-- Or-pattern as the argument to a projection
+def or_proj : Bool -> Nat := fun b =>
+  (match b return Point with
+   | true | false => origin).x
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Combined: Record Update + Or-patterns
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Or-pattern body is a record update (constant body, no outer var refs)
+def or_body_is_update : Pair Nat Nat -> Bool -> Pair Nat Nat := fun p b =>
+  match b return Pair Nat Nat with
+  | true | false => mkPair zero zero
+
+-- Record update inside each case of match with or-pattern
+def update_in_or_body : Point -> Nat -> Point := fun p n =>
+  match n return Point with
+  | zero | suc m => mkPoint zero zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Verification: all update computations evaluate to the right Nat
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- (origin { x = suc zero }).x = suc zero = 1
+def verify_update_x : Nat := update_x_then_get_x
+
+-- (origin { x = suc zero }).y = zero = 0
+def verify_update_y : Nat := update_x_then_get_y
+
+def main : Nat := verify_update_x

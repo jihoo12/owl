@@ -8,3 +8,7 @@ def add : Nat -> Nat -> Nat := fun m n =>
   | suc m' => suc (add m' n)
 
 def main : Nat := add (suc (suc zero)) (suc (suc zero))
+
+def zero_or_suc : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero | suc m => zero

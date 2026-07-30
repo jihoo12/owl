@@ -117,6 +117,10 @@ pub enum Term {
     /// with a single constructor, so this is semantically an eliminator that
     /// selects the appropriate constructor argument.
     TProj(Name, Box<Term>),
+    /// Record update: `TRecordUpdate(record, [(field, value), ...])`.
+    /// Desugars to a constructor application with the specified fields replaced
+    /// by new values while the rest are projected from the original record.
+    TRecordUpdate(Box<Term>, Vec<(Name, Term)>),
 
     // -- Coinduction ---------------------------------------------------------
     /// Delay type former: `Delay A` is the type of delayed computations.
@@ -158,6 +162,13 @@ pub struct ElimCase {
     pub con: Name,
     pub binders: Vec<Name>,
     pub body: Box<Term>,
+    /// As-pattern: `con binders as name => body`
+    /// `name` is bound to the full constructor application in the body.
+    pub as_name: Option<Name>,
+    /// Record pattern: `{ field = binder, ... }` in place of constructor + binders.
+    /// When set, `con` and `binders` may be empty/synthetic; the typechecker
+    /// desugars this to a constructor pattern once the datatype is known.
+    pub record_bindings: Option<Vec<(Name, Name)>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -479,6 +490,8 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
                     con: case.con.clone(),
                     binders: case.binders.clone(),
                     body: b(shift(d, c + case.binders.len() as i32, &case.body)),
+                    as_name: case.as_name.clone(),
+                    record_bindings: case.record_bindings.clone(),
                 })
                 .collect(),
             b(shift(d, c, scrut)),
@@ -491,6 +504,10 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
                 .collect(),
         ),
         Term::TProj(field, r) => Term::TProj(field.clone(), b(shift(d, c, r))),
+        Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
+            b(shift(d, c, r)),
+            updates.iter().map(|(f, e)| (f.clone(), shift(d, c, e))).collect(),
+        ),
         Term::TDelay(a) => Term::TDelay(b(shift(d, c, a))),
         Term::TNext(a) => Term::TNext(b(shift(d, c, a))),
         Term::TForce(a) => Term::TForce(b(shift(d, c, a))),
@@ -650,6 +667,8 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                         con: case.con.clone(),
                         binders: case.binders.clone(),
                         body: b(subst(j + n, &s1, &case.body)),
+                        as_name: case.as_name.clone(),
+                        record_bindings: case.record_bindings.clone(),
                     }
                 })
                 .collect(),
@@ -663,6 +682,10 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                 .collect(),
         ),
         Term::TProj(field, r) => Term::TProj(field.clone(), b(subst(j, s, r))),
+        Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
+            b(subst(j, s, r)),
+            updates.iter().map(|(f, e)| (f.clone(), subst(j, s, e))).collect(),
+        ),
         Term::TDelay(a) => Term::TDelay(b(subst(j, s, a))),
         Term::TNext(a) => Term::TNext(b(subst(j, s, a))),
         Term::TForce(a) => Term::TForce(b(subst(j, s, a))),
@@ -786,6 +809,13 @@ pub fn max_var(t: &Term) -> i32 {
         Term::Meta(_) => -1,
         Term::TBy(_) => -1,
         Term::TProj(_, r) => max_var(r),
+        Term::TRecordUpdate(r, updates) => {
+            let mut m = max_var(r);
+            for (_, e) in updates {
+                m = m.max(max_var(e));
+            }
+            m
+        }
         Term::TDelay(a) => max_var(a),
         Term::TNext(a) => max_var(a),
         Term::TForce(a) => max_var(a),

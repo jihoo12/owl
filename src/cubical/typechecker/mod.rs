@@ -401,6 +401,8 @@ pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
                         con: c.con.clone(),
                         binders: c.binders.clone(),
                         body: Box::new(go(&c.body, n, val)),
+                        as_name: c.as_name.clone(),
+                        record_bindings: c.record_bindings.clone(),
                     })
                     .collect(),
                 Box::new(go(scrut, n, val)),
@@ -466,6 +468,8 @@ fn shift_cases(cases: &[ElimCase], d: i32) -> Vec<ElimCase> {
             con: case.con.clone(),
             binders: case.binders.clone(),
             body: Box::new(shift(d, case.binders.len() as i32, &case.body)),
+            as_name: case.as_name.clone(),
+            record_bindings: case.record_bindings.clone(),
         })
         .collect()
 }
@@ -1112,6 +1116,37 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
 
+        // Record update: r { field1 = e1, field2 = e2 }
+        Term::TRecordUpdate(r, updates) => {
+            let r_ty = infer_dt(dts, ctx, r)?;
+            match nbe_eval(&r_ty) {
+                Term::TData(dname, params) => {
+                    let dt = dts.iter().find(|dt| dt.name == dname)
+                        .ok_or_else(|| TypeError::UnknownDatatype(dname.clone()))?;
+                    let field_names = dt.field_names.as_ref()
+                        .ok_or_else(|| TypeError::Other(format!("'{}' is not a record type", dname)))?;
+                    let con_sig = dt.cons.first()
+                        .ok_or_else(|| TypeError::Other(format!("record '{}' has no constructor", dname)))?;
+                    let n = params.len() as i32;
+                    for (field_name, new_val) in updates {
+                        let idx = field_names.iter().position(|f| f == field_name)
+                            .ok_or_else(|| TypeError::Other(format!("field '{}' not found in record '{}'", field_name, dname)))?;
+                        let mut field_ty = con_sig.arg_tys[idx].clone();
+                        for (pi, param_val) in params.iter().enumerate() {
+                            let db_idx = n - 1 - (pi as i32);
+                            field_ty = subst(db_idx, param_val, &field_ty);
+                        }
+                        check_dt(dts, ctx, new_val, &nbe_eval(&field_ty))?;
+                    }
+                    Ok(r_ty)
+                }
+                other => Err(TypeError::Other(format!(
+                    "record update expected a record type, got: {}",
+                    show_term(&err_names(ctx), &other)
+                ))),
+            }
+        }
+
         // Pairs cannot be inferred without annotation
         t @ Term::TPair(_, _) => Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) }),
 
@@ -1717,6 +1752,41 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 .find(|dt| dt.name == d)
                 .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
 
+            // Desugar record patterns: convert `{ field = binder }` to constructor pattern.
+            let cases_owned: Vec<ElimCase> = {
+                let mut buf = Vec::with_capacity(cases.len());
+                for case in cases.iter() {
+                    if let Some(ref bindings) = case.record_bindings {
+                        if let Some(ref field_names) = dt.field_names {
+                            let con_name = &dt.cons[0].name;
+                            let binders: Vec<Name> = field_names
+                                .iter()
+                                .map(|f| {
+                                    bindings
+                                        .iter()
+                                        .find(|(bf, _)| bf == f)
+                                        .map(|(_, b)| b.clone())
+                                        .unwrap_or_else(|| "_".to_string())
+                                })
+                                .collect();
+                            buf.push(ElimCase {
+                                con: con_name.clone(),
+                                binders,
+                                body: case.body.clone(),
+                                as_name: case.as_name.clone(),
+                                record_bindings: None,
+                            });
+                        } else {
+                            buf.push(case.clone());
+                        }
+                    } else {
+                        buf.push(case.clone());
+                    }
+                }
+                buf
+            };
+            let cases: &[ElimCase] = &cases_owned;
+
             // Verify motive has type Π(_:TData(d, params)).C where C is a well-formed type.
             let motive_dom = Term::TData(d.clone(), scrut_params.clone());
             match motive.as_ref() {
@@ -1740,15 +1810,18 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
 
             // Helper: substitute determined params into a constructor's arg_tys.
             // For parameterized types, arg_tys reference params via de Bruijn
-            // indices (TVar(0) for first param). We substitute the scrutinee's
-            // parameter values to get concrete arg types.
+            // indices.  In the datatype scope [B, A] (two params, B=TVar(0), A=TVar(1))
+            // the first param A is at TVar(num_params-1) and the last param B at TVar(0).
+            // We substitute the scrutinee's parameter values to get concrete arg types.
             fn subst_params(arg_tys: &[Term], params: &[Term]) -> Vec<Term> {
+                let num_params = params.len();
                 arg_tys
                     .iter()
                     .map(|ty| {
                         let mut t = ty.clone();
-                        for p in params.iter().rev() {
-                            t = beta(&t, p);
+                        for (k, p) in params.iter().enumerate() {
+                            let target = (num_params - 1 - k) as i32;
+                            t = subst(target, p, &t);
                         }
                         t
                     })
@@ -1798,23 +1871,33 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let mut case_ctx = ctx.clone();
                 let mut con_args_in_ctx: Vec<Term> = Vec::new();
                 for (k, binder_name) in case.binders.iter().enumerate() {
-                    let arg_ty = con_args_in_ctx
-                        .iter()
-                        .rev()
-                        .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
+                    // Shift the arg type by k to account for previously pushed binders.
+                    let mut arg_ty = shift(k as i32, 0, &subst_arg_tys[k]);
+                    // Substitute previous constructor args into dependent arg types.
+                    for a in con_args_in_ctx.iter().rev() {
+                        arg_ty = subst(0, a, &arg_ty);
+                    }
                     let arg_ty_ev = nbe_eval(&arg_ty);
                     let depth = k as i32;
                     con_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
                     case_ctx = extend_ctx(binder_name.clone(), arg_ty_ev, &case_ctx);
                 }
 
+                // As-pattern: bind the full constructor value to the as_name.
+                let extra_shift = if case.as_name.is_some() { 1i32 } else { 0i32 };
+                if let Some(ref as_n) = case.as_name {
+                    let as_ty = nbe_eval(&Term::TData(d.clone(), scrut_params.clone()));
+                    case_ctx = extend_ctx(as_n.clone(), as_ty, &case_ctx);
+                }
+
                 // Expected type: motive applied to TCon(d, c, params, all binders as vars).
                 let arity = subst_arg_tys.len();
+                let arity_i32 = arity as i32;
                 let con_term_args: Vec<Term> = (0..arity)
-                    .map(|k| Term::TVar((arity - 1 - k) as i32))
+                    .map(|k| Term::TVar((arity - 1 - k) as i32 + extra_shift))
                     .collect();
                 let scrut_as_con = Term::TCon(d.clone(), con_sig.name.clone(), con_term_args);
-                let shifted_motive = shift((arity) as i32, 0, motive);
+                let shifted_motive = shift(arity_i32 + extra_shift, 0, motive);
                 let expected_ty = nbe_eval(&Term::TApp(
                     Box::new(shifted_motive),
                     Box::new(scrut_as_con),
