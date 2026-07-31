@@ -1,6 +1,8 @@
 # TODO.md — Remaining improvements for owl
 
-## Done
+> The checklist below is the live status tracker (`[x]` = done, `[ ]` = open).
+
+## Completed (implementation log)
 
 - [x] PathP (dependent path types) — Added as syntactic sugar over TPath. `PathP (<i> A i) u v` parses to `TPath(PLam("i", A i), u, v)`. Type families work correctly with endpoint checking.
 
@@ -69,7 +71,7 @@
 
 ### 2. Type Theory Features
 
-- **Universe polymorphism** — Already has stratified U0, U1, U2...
+- [x] **Universe polymorphism** — Stratified U0, U1, U2...
 
 - [x] **Universe lifting/lowering** — `TLower`/`TLift` for moving terms between universe levels.
 
@@ -77,9 +79,9 @@
 
 - [x] **SSet (strict sets)** — `TSSet` at U1, predicative.
 
-- **Cumulativity** — `A : U_n` and `U_n : U_m` when `n <= m`. Currently basic, could be extended with:
-  - Cumulativity for Sigma/Pi types
-  - Cumulativity for record types
+- [x] **Cumulativity** — `A : U_n` and `U_n : U_m` when `n <= m` (basic, universe-level). Extend with:
+  - [ ] Cumulativity for Sigma/Pi types
+  - [ ] Cumulativity for record types
 
 - [x] **Cumulativity for inductive types** — `TData(d, ps) <= TData(d, ps')` with covariant parameter checking.
 
@@ -99,7 +101,7 @@
 
 - [x] **HIT computation rules** — hcomp/comp/fill/hfill decompose through data type constructors when the tube system is compatible (all tubes produce the same constructor). `match_ctor_args` helper extracts constructor args from VCon/VPCon/VSqCon/VCellCon. Per-argument tube systems built by applying each tube at formal interval variable. Argument type instantiation follows `transport_data_con` pattern.
 
-- **HIT elimination improvements** — Better support for:
+- [x] **HIT elimination improvements** — Better support for:
   - [x] Nested pattern matching on HITs — Fixed termination checker: `motive_targets_datatype` now recognizes `TData(d, _)` directly (not just `TApp(f, TData(d, _))`). `check_body_guard` else branch decomposes TElim subterms instead of recursing through `check_body_guard_deep`. See `stress_hit_elimination.owl` for 4-level nested match tests.
   - [x] Dependent elimination with complex motives — Fixed oscillation in `check_dt`: added 2-cycle detection (`nf == *t`) with retry using double-reduced term to break the loop. Removed debug instrumentation.
   - [x] Higher-dimensional pattern matching — CellCon boundary coherence: `apply_literal` for interval substitution with `strip_n_plams`/`shift(-n)` for PLam context. `TCellCon` case in `apply_literal` + `reduce_pcon_endpoints_dt`. SqCon endpoint reduction via `find_sqcon` fallback in PApp case (face_j0/j1 for first interval, face_i0/i1 for second). TPCon/TSqCon/TCellCon ↔ PApp(TCon) structural congruence in `eta_eq`. `torus_id.owl` and `stress_hits_cells.owl` pass.
@@ -114,30 +116,27 @@
   - [ ] Interactive REPL proof sessions with per-tactic goal display (`:proof` / `:goals` / `:admit` / `:done`)
 
 - **Better error messages** — More detailed type mismatch errors:
-  - Show normalized expected/got types (done for TypeMismatch)
-  - ~~Point to exact location of mismatch~~ (partial: shows term + type in debug scope)
-  - Suggest possible fixes (done for CannotInfer tip)
+  - [x] Show normalized expected/got types (done for TypeMismatch)
+  - [ ] Point to exact location of mismatch (partial: shows term + type in debug scope)
+  - [x] Suggest possible fixes (done for CannotInfer tip)
 
-- **Decision procedures** — Automated proving for:
-  - Propositional equality (reflexivity, symmetry, transitivity)
-  - Arithmetic (for Nat/Int types)
-  - Ring/field solver
+- [ ] **Decision procedures** — Automated proving: propositional equality (reflexivity, symmetry, transitivity), arithmetic (Nat/Int), ring/field solver
 
-- **Omega / Linear arithmetic** — Decision procedure for linear arithmetic over Nat/Int.
+- [ ] **Omega / Linear arithmetic** — Decision procedure for linear arithmetic over Nat/Int.
 
-- **Ring solver** — Decision procedure for ring identities.
+- [ ] **Ring solver** — Decision procedure for ring identities.
 
 - **Import system improvements** —
-  - Qualified imports (`import M as mod`)
-  - Selective imports (`import M only [x, y]`)
-  - Unification of same-name imports
+  - [ ] Qualified imports (`import M as mod`)
+  - [ ] Selective imports (`import M only [x, y]`)
+  - [ ] Unification of same-name imports
 
 - **Module system** — Namespaces for organizing definitions:
-  - `module M where ...`
-  - Module parameters
-  - Module instantiation
+  - [ ] `module M where ...`
+  - [ ] Module parameters
+  - [ ] Module instantiation
 
-- **Record types** — Named sigma types with projections:
+- [x] **Record types** — Named sigma types with projections:
   - [x] `record R where field x : A; field y : B` (desugars to single-constructor inductive)
   - [x] Automatic projection functions (`r.field` syntax, chained projections)
   - [x] Parameterized records (`record Pair (A : Type) (B : Type) where ...`)
@@ -150,11 +149,11 @@
   - [x] Or-patterns (`| pat1 | pat2 => body`)
   - [x] As-patterns (`con binders as name => body`)
   - [x] Record patterns (`{ field = binder, ... }` syntax for matching records)
-  - Nested constructor patterns — `suc (suc zero)` matching on literal 2 (requires full pattern AST)
+  - [ ] Nested constructor patterns — `suc (suc zero)` matching on literal 2 (requires full pattern AST)
 
 ### 5. Cubical-Specific Improvements
 
-- **Face lattice operations** — Better support for:
+- [x] **Face lattice operations** — Better support for:
   - [x] Face conjunction/disjunction (`dnf_meet`, `dnf_join` in `interval.rs`)
   - [x] Face implication (`dnf_leq` in `interval.rs`, used in `cumulativity_check`)
   - [x] Face negation (`dnf_neg` in `interval.rs`)
@@ -162,13 +161,13 @@
   - [x] Parser support for `/\`, `\/`, `~` (and Unicode)
   - [x] Face logic unit tests (De Morgan, absorption, idempotence)
 
-- **Comp/hfill system types** — Full support for:
+- [x] **Comp/hfill system types** — Full support for:
   - [x] Multi-face systems in all Kan operations
   - [x] System compatibility checking (via `dnf_meet` in `check_dt`)
   - [x] System reduction rules (fill/hfill decomposition)
   - [x] fill/hfill structural decomposition through Pi/Sigma/data types
 
-- **Transport computation** — Transport should reduce:
+- [x] **Transport computation** — Transport reduces:
   - [x] Along constant paths (identity)
   - [x] Along ua (`equivFwd`)
   - [x] Through Pi types (non-dep value-level + dep term-level fallback)
@@ -182,23 +181,23 @@
 
 - **Normalization improvements** —
   - [x] Sharing in NbE — `Scope` persistent environment replaces `Vec<Value>` for env passing. Rc-linked segments make `Scope::extend` O(1) and `Scope::clone` cheap. 17 internal function signatures changed from `&[Value]` to `&Scope`. Closure application uses `Scope::extend` (single allocation) instead of `vec![v] + extend_from_slice` (two allocations + copy). `do_elim` uses `Scope::chain` for env2 construction.
-  - Incremental normalization
+  - [ ] Incremental normalization
   - [x] Memoization — `NBE_EVAL_CACHE` caches `nbe_eval` results for terms without metavariables
 
 - **Type checking improvements** —
   - [x] Constraint-based type inference — `Meta` term variant, `fresh_meta_id`, zonk substitution
-  - Bidirectional type checking 
+  - [ ] Bidirectional type checking
   - [x] Pattern unification — `try_solve_meta` with occurs check (`meta_mentions`), `solve_meta`/`get_meta_solution`
 
 - **Metaprogramming** —
-  - Reflection API
-  - Tactic language
-  - Custom tactics
-  - Proof automation
+  - [ ] Reflection API
+  - [x] Tactic language — built-in tactics (`by t1; t2; ...`), see `docs/reference.md`
+  - [ ] Custom tactics
+  - [ ] Proof automation
 
 ### 7. Library and Ecosystem
 
-- **Standard library** — Cubical equivalents of:
+- [ ] **Standard library** — Cubical equivalents of:
   - Data types (Nat, Int, List, Vector, etc.)
   - Algebra (groups, rings, fields, modules)
   - Order theory (posets, lattices)
@@ -206,7 +205,7 @@
   - Category theory (functors, natural transformations)
 
 - **Documentation** —
-  - Tutorial / Getting started guide
-  - API reference
-  - Example gallery
-  - Comparison with other cubical systems (Agda cubical, cubicaltt)
+  - [ ] Tutorial / Getting started guide
+  - [ ] API reference
+  - [ ] Example gallery
+  - [ ] Comparison with other cubical systems (Agda cubical, cubicaltt)
