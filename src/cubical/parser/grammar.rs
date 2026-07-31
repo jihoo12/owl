@@ -1020,6 +1020,17 @@ impl Parser {
             return Ok(Term::Meta(crate::cubical::nbe::fresh_meta_id()));
         }
 
+        if self.at(&TokenKind::Question) {
+            // Hole: `?` (anonymous) or `?name` (named).
+            self.pos += 1;
+            let id = crate::cubical::nbe::fresh_meta_id();
+            if let TokenKind::Ident(name) = self.peek().kind.clone() {
+                self.pos += 1;
+                crate::cubical::nbe::set_meta_name(id, name);
+            }
+            return Ok(Term::Meta(id));
+        }
+
         match self.peek().kind.clone() {
             TokenKind::Ident(name) => {
                 self.pos += 1;
@@ -1549,7 +1560,7 @@ impl Parser {
         }
         matches!(
             &self.peek().kind,
-            TokenKind::Ident(_) | TokenKind::Int(_) | TokenKind::LParen
+            TokenKind::Ident(_) | TokenKind::Int(_) | TokenKind::LParen | TokenKind::Question
         )
     }
 
@@ -1858,6 +1869,7 @@ fn describe(kind: &TokenKind) -> String {
         TokenKind::RBracket => "']'".to_string(),
         TokenKind::Equals => "'='".to_string(),
         TokenKind::Semicolon => "';'".to_string(),
+        TokenKind::Question => "'?'".to_string(),
         TokenKind::String(s) => format!("\"{}\"", s),
         TokenKind::Eof => "end of input".to_string(),
     }

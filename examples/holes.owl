@@ -1,0 +1,55 @@
+-- holes.owl — hole-driven development with ?name / ? / _ holes
+--
+-- A hole is an incomplete proof term. Owl either solves it automatically
+-- (when the hole is constrained by unification) or reports it as an error.
+--
+-- Run with:  owl run examples/holes.owl
+--
+-- NOTE: a definition that leaves a hole unsolved is REJECTED. The holes
+-- below are either solved by the typechecker or filled before `main`.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- ─── 1. Type holes are solved by unification ─────────────────────────────
+--
+-- The annotation `?ty` is a hole. The body `zero` forces it to be Nat.
+
+def answer : ?ty := zero
+
+-- ─── 2. Named holes in subterms ──────────────────────────────────────────
+--
+-- The hole is still expected to be Nat, but nothing constrains its value,
+-- so leaving it open is an error. Fill it in:
+--
+--   def next : Nat := suc ?n          -- ERROR: unsolved hole ?n
+--
+-- The error message lists the hole and its expected type:
+--
+--   Unsolved holes remain in this definition:
+--     ?n : Nat
+--
+-- Filling the hole makes the definition complete:
+
+def next : Nat := suc (zero)
+
+-- ─── 3. Anonymous holes (_ and ?) ────────────────────────────────────────
+--
+--   def bad : Nat := _               -- ERROR: unsolved hole ?_0 : Nat
+--   def bad : Nat := ?               -- ERROR: unsolved hole ?_1 : Nat
+--
+-- Anonymous holes are numbered in the error message so they can be
+-- identified even without a name.
+
+-- ─── 4. Holes alongside tactics ──────────────────────────────────────────
+--
+-- A `by` block that finishes the proof is exactly a way to fill a hole:
+
+def zero_by_tactic : Nat := by exact zero
+
+-- ─── 5. Every definition must be complete ────────────────────────────────
+--
+-- A hole in the final definition is rejected before `main` runs.
+
+def main : Nat := next

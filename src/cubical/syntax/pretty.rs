@@ -225,7 +225,12 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
                 show_term(env, scrut)
             )
         }
-        Term::Meta(i) => format!("?{}", i),
+        Term::Meta(i) => {
+            match crate::cubical::nbe::get_meta_name(*i) {
+                Some(name) => format!("?{}", name),
+                None => format!("?_{}", i),
+            }
+        }
         Term::TBy(tactics) => {
             let tactic_strs: Vec<String> = tactics.iter().map(|t| show_tactic(env, t)).collect();
             format!("by {}", tactic_strs.join("; "))

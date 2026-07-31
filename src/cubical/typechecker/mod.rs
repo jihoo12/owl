@@ -750,7 +750,25 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         t @ Term::TBy(_) => Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) }),
 
         // Unresolved metavariable
-        Term::Meta(_) => Err(TypeError::Other("cannot infer type of `_`; use a type annotation".to_string())),
+        Term::Meta(id) => {
+            let name = crate::cubical::nbe::get_meta_name(*id)
+                .map(|n| format!("?{}", n))
+                .unwrap_or_else(|| format!("?_{}", id));
+            let expected = crate::cubical::nbe::get_meta_expected(*id);
+            match expected {
+                Some(ty) => Err(TypeError::Other(format!(
+                    "cannot infer type of hole {}; expected type is {}\n  \
+                     (Tip: fill the hole with a term, or place it where the \
+                     expected type is known)",
+                    name,
+                    show_term(&err_names(ctx), &ty),
+                ))),
+                None => Err(TypeError::Other(format!(
+                    "cannot infer type of hole {}; use a type annotation",
+                    name,
+                ))),
+            }
+        }
 
         // Equiv type
         Term::TEquiv(a, b) => {
@@ -2962,7 +2980,9 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
         }
 
         // Metavariable hole: the expected type is already known.
-        Term::Meta(_) => {
+        Term::Meta(id) => {
+            let expected_nf = nbe_eval(ty);
+            crate::cubical::nbe::set_meta_expected(*id, expected_nf.clone());
             let _ = type_level_dt(dts, ctx, ty)?;
             Ok(())
         }

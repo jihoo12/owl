@@ -102,6 +102,33 @@ fn parses_def_then_data() {
 }
 
 #[test]
+fn parses_named_hole() {
+    let term = parse_term("?goal").unwrap();
+    match term {
+        Term::Meta(id) => {
+            assert_eq!(crate::cubical::nbe::get_meta_name(id), Some("goal".to_string()));
+        }
+        _ => panic!("expected Meta, got {:?}", term),
+    }
+}
+
+#[test]
+fn parses_anonymous_hole() {
+    let term = parse_term("?").unwrap();
+    match term {
+        Term::Meta(_) => {}
+        _ => panic!("expected Meta, got {:?}", term),
+    }
+}
+
+#[test]
+fn pretty_prints_named_hole() {
+    let term = parse_term("?goal").unwrap();
+    let shown = show_term(&[], &term);
+    assert!(shown.contains("?goal"), "got: {}", shown);
+}
+
+#[test]
 fn parses_system_type() {
     let src = "[0 => U0, 1 => U1]";
     let term = parse_term(src).unwrap();

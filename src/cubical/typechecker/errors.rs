@@ -71,6 +71,12 @@ pub enum TypeError {
         case: Name,
         msg: String,
     },
+    /// The definition still contains unsolved holes (`?`, `?name`, or `_`).
+    /// Each entry is `(meta_id, hole_name_if_any, expected_type_if_known)`.
+    UnsolvedHoles {
+        metas: Vec<(i32, Name, Option<Term>)>,
+        names: Vec<Name>,
+    },
 }
 
 /// Wrapper that attaches definition context to a TypeError.
@@ -180,6 +186,33 @@ impl fmt::Display for TypeError {
                     f,
                     "  Termination violation in '{}' case of '{}':\n    {}",
                     case, datatype, msg
+                )
+            }
+            TypeError::UnsolvedHoles { metas, names } => {
+                writeln!(f, "  Unsolved holes remain in this definition:")?;
+                for (id, hole_name, expected) in metas {
+                    let display = if hole_name.is_empty() {
+                        format!("?_{}", id)
+                    } else {
+                        format!("?{}", hole_name)
+                    };
+                    match expected {
+                        Some(ty) => writeln!(
+                            f,
+                            "    {} : {}",
+                            display,
+                            show_term(names, ty),
+                        )?,
+                        None => writeln!(
+                            f,
+                            "    {} : <no expected type known>",
+                            display,
+                        )?,
+                    }
+                }
+                write!(
+                    f,
+                    "  (fill each hole or provide a complete proof before the definition is accepted)"
                 )
             }
         }

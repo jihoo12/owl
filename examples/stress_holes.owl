@@ -1,0 +1,93 @@
+-- stress_holes.owl — stress test for holes (?name, ?, _)
+--
+-- Exercises: type-annotation holes solved by unification, holes in pair
+-- components, function codomains, path endpoints, match return types,
+-- nested Σ-types, and holes solved by later definitions or by usage.
+--
+-- Every hole here must be filled in by the type checker; a definition with
+-- any remaining unsolved hole is rejected with a `Unsolved holes remain in
+-- this definition:` error.
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc k => suc (add k n)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Top-level type-annotation holes
+--    The expected type is a hole, so it is inferred from the body.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def a : ?t := suc zero
+def e : ?t := a
+def deep : ?t := suc (suc (suc (suc zero)))
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Function codomain holes
+--    The domain is given; the codomain is filled in from the body.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def b : Nat -> ?u := fun y => suc y
+def mk : Nat -> ?t := fun x => zero
+
+-- `chain` is "polymorphic": its parameter type is a hole that is only solved
+-- when the function is applied (because the body uses the parameter).
+
+def chain : ?t -> Nat := fun n => n
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Pair component holes
+--    Either component of a Σ-type may be a hole; the pair checker fills it in.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def c : Nat * ?v := (zero, suc (suc zero))
+def d : ?w * Nat := (suc (suc (suc zero)), zero)
+def sw : Nat -> Nat * ?y := fun x => (x, x)
+def g : Nat -> ?x * Nat := fun x => (x, zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. Nested Σ-types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def inner : Nat -> (Nat * ?p) * Nat := fun x => ((x, x), zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Path endpoint holes
+--    The endpoint type of a Path may be a hole (here solved to Nat).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def q : Nat -> Path ?z zero zero := fun x => <i> zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. Match holes
+--    Both the match return type and the surrounding codomain can be holes.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def mm : Nat -> ?t := fun n => match n return Nat with | zero => zero | suc k => suc k
+def mh : Nat -> Nat := fun n => match n return ?r with | zero => zero | suc k => suc k
+def frombool : Bool -> ?t := fun b => match b return ?r with | true => zero | false => suc zero
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. Σ-type with a function component
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def sigf : Nat -> ?t * (Nat -> Nat) := fun x => (x, fun y => suc y)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 8. Solved holes flow into real computation
+--    main = add (frombool false) (fst (g 2)) + add (snd (sw 2)) (chain e)
+--         = add 1 2 + add 2 1 = 3 + 3 = 6
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def main : Nat :=
+  add
+    (add (frombool false) (fst (g (suc (suc zero)))))
+    (add (snd (sw (suc (suc zero)))) (chain e))

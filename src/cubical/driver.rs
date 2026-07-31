@@ -354,6 +354,18 @@ fn process_data_with_func(
     process_def(func_name, func_ty, func_val, env, false)
 }
 
+/// Collect the unsolved holes (with names and expected types) in `t`.
+fn unsolved_hole_report(t: &Term) -> Vec<(i32, Name, Option<Term>)> {
+    crate::cubical::nbe::collect_unsolved_metas(t)
+        .into_iter()
+        .map(|id| {
+            let name = crate::cubical::nbe::get_meta_name(id).unwrap_or_default();
+            let expected = crate::cubical::nbe::get_meta_expected(id);
+            (id, name, expected)
+        })
+        .collect()
+}
+
 fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -> Result<RunOutput, RunError> {
     crate::cubical::nbe::clear_nbe_cache();
     crate::debug_log!("process_def '{}':", name);
@@ -400,6 +412,19 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
         crate::cubical::typechecker::termination::set_skip_guard(false);
     }
     result?;
+
+    // Unsolved-hole check: a definition may not leave `?` / `_` holes open.
+    let mut metas = unsolved_hole_report(&zonk(&resolved_val));
+    metas.extend(unsolved_hole_report(&zonk(&closed_ty_globals)));
+    if !metas.is_empty() {
+        let names: Vec<Name> = env.defs.iter().map(|(n, _, _)| n.clone()).collect();
+        return Err(RunError::Type(Box::new(ContextualError::with_def(
+            name,
+            TypeError::UnsolvedHoles { metas, names },
+        )
+        .inner)));
+    }
+
     let output = RunOutput {
         name: name.clone(),
         ty: zonk(&closed_ty_globals),
@@ -719,6 +744,50 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def bad : Nat := by transitivity",
         );
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn unsolved_named_hole_is_reported() {
+        let err = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def x : Nat := ?hole",
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Unsolved holes"), "msg: {}", msg);
+        assert!(msg.contains("?hole"), "msg: {}", msg);
+        assert!(msg.contains("Nat"), "msg: {}", msg);
+    }
+
+    #[test]
+    fn unsolved_underscore_hole_is_reported() {
+        let err = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def x : Nat := _",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Unsolved holes"));
+    }
+
+    #[test]
+    fn hole_inside_term_is_reported() {
+        let err = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def x : Nat := suc ?n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("?n"));
+    }
+
+    #[test]
+    fn type_hole_solved_by_unification() {
+        let output = run_str(
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
+             def x : ?ty := zero\n\
+             def main : Nat := x",
+        )
+        .expect("type hole should be solved by unification");
+        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
     }
 
     #[test]

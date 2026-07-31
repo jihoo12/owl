@@ -20,6 +20,8 @@ thread_local! {
     static CURRENT_DTS: std::cell::RefCell<Vec<Datatype>> = std::cell::RefCell::new(Vec::new());
     static NBE_EVAL_CACHE: std::cell::RefCell<HashMap<Term, Term>> = std::cell::RefCell::new(HashMap::new());
     static METAVAR_SOLUTIONS: std::cell::RefCell<Vec<Option<Term>>> = std::cell::RefCell::new(Vec::new());
+    static META_NAMES: std::cell::RefCell<Vec<Option<Name>>> = std::cell::RefCell::new(Vec::new());
+    static META_EXPECTED: std::cell::RefCell<Vec<Option<Term>>> = std::cell::RefCell::new(Vec::new());
 }
 
 /// Set the current datatype definitions for the duration of evaluation.
@@ -3238,8 +3240,43 @@ pub fn fresh_meta_id() -> i32 {
         let mut store = s.borrow_mut();
         let id = store.len() as i32;
         store.push(None);
+        META_NAMES.with(|n| n.borrow_mut().push(None));
+        META_EXPECTED.with(|e| e.borrow_mut().push(None));
         id
     })
+}
+
+/// Register a display name for a hole (from `?name` syntax).
+/// Anonymous holes (`_`, `?`) have no name.
+pub fn set_meta_name(id: i32, name: Name) {
+    META_NAMES.with(|n| {
+        if id >= 0 && (id as usize) < n.borrow().len() {
+            n.borrow_mut()[id as usize] = Some(name);
+        }
+    });
+}
+
+pub fn get_meta_name(id: i32) -> Option<Name> {
+    if id < 0 { return None; }
+    META_NAMES.with(|n| n.borrow().get(id as usize).and_then(|o| o.clone()))
+}
+
+/// Record the expected type of a hole as discovered by `check_dt`.
+/// Only meaningful while the hole is unsolved.
+pub fn set_meta_expected(id: i32, ty: Term) {
+    META_EXPECTED.with(|e| {
+        if id >= 0 && (id as usize) < e.borrow().len() {
+            let mut store = e.borrow_mut();
+            if store[id as usize].is_none() {
+                store[id as usize] = Some(ty);
+            }
+        }
+    });
+}
+
+pub fn get_meta_expected(id: i32) -> Option<Term> {
+    if id < 0 { return None; }
+    META_EXPECTED.with(|e| e.borrow().get(id as usize).and_then(|o| o.clone()))
 }
 
 pub fn solve_meta(id: i32, solution: Term) {
@@ -3259,6 +3296,8 @@ pub fn get_meta_solution(id: i32) -> Option<Term> {
 
 pub fn clear_metavars() {
     METAVAR_SOLUTIONS.with(|s| s.borrow_mut().clear());
+    META_NAMES.with(|n| n.borrow_mut().clear());
+    META_EXPECTED.with(|e| e.borrow_mut().clear());
 }
 
 pub fn clear_nbe_cache() {
@@ -3507,6 +3546,29 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         Term::TBy(_) => vec![],
     }
 }
+
+/// Collect the ids of every unsolved hole (`Term::Meta` with no solution)
+/// appearing in `t`.
+pub fn collect_unsolved_metas(t: &Term) -> Vec<i32> {
+    fn walk(t: &Term, out: &mut Vec<i32>) {
+        match t {
+            Term::Meta(i) => {
+                if get_meta_solution(*i).is_none() && !out.contains(i) {
+                    out.push(*i);
+                }
+            }
+            _ => {
+                for child in term_children_ref(t) {
+                    walk(child, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(t, &mut out);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

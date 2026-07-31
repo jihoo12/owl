@@ -106,6 +106,7 @@ The following words are reserved and cannot be used as variable names:
 | `:`       | Type annotation                    | --            |
 | `;`       | Tactic separator                   | --            |
 | `\|`      | Match case separator               | --            |
+| `?`       | Hole prefix (`?name` / `?`)        | prefix        |
 
 ### Interval Literals
 
@@ -361,6 +362,37 @@ def id : forall (A : U0), A -> A := by intro A x; exact x
 
 The tactic block must be preceded by the full type annotation so that the
 tactics know what goal to solve. See [Tactic Mode](#9-tactic-mode).
+
+### Holes (incomplete proofs)
+
+A **hole** is an incomplete proof term, written `?name`, `?`, or `_`. Holes
+are placeholders that Owl either solves automatically or reports as errors:
+
+```
+def answer : ?ty := zero      -- ?ty is solved to Nat by unification
+def next : Nat := suc zero    -- a complete definition
+```
+
+- `?name` is a named hole; `?` and `_` are anonymous holes. Anonymous holes
+  are numbered in error messages (`?_0`, `?_1`, ...) so they can be
+  distinguished.
+- A hole in a **type annotation** is solved by unification when the body
+  constrains it (`def x : ?ty := zero` gives `x : Nat`).
+- A hole in a **value position** is solved when the type checker compares it
+  against a concrete type; otherwise it must be filled manually.
+
+A definition that still contains an unsolved hole is **rejected**. Owl
+reports every unsolved hole together with its expected type:
+
+```
+owl: type error:
+  Unsolved holes remain in this definition:
+    ?n : Nat
+  (fill each hole or provide a complete proof before the definition is accepted)
+```
+
+This lets you sketch a proof with holes and fill them incrementally, knowing
+exactly which goals remain open.
 
 ### Entry Point
 

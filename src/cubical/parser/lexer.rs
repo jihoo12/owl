@@ -31,6 +31,8 @@ pub(super) enum TokenKind {
     RBracket,
     Equals,
     Semicolon,
+    /// Hole prefix: `?` or `?name` (incomplete-proof holes).
+    Question,
     String(String),
     Eof,
 }
@@ -195,6 +197,10 @@ impl<'a> Lexer<'a> {
                     tokens.push(tok(TokenKind::Ident(ch.to_string()), line, col));
                 }
                 '"' => tokens.push(self.lex_string(line, col)?),
+                '?' => {
+                    self.bump();
+                    tokens.push(tok(TokenKind::Question, line, col));
+                }
                 c if c.is_ascii_digit() => tokens.push(self.lex_int(line, col)?),
                 c if is_ident_start(c) => tokens.push(self.lex_ident(line, col)),
                 other => return Err(err(format!("unexpected character '{}'", other), line, col)),

@@ -106,7 +106,12 @@
 
 ### 4. Proof Assistant Features
 
-- **Interactive mode / Hole-driven development** — `?hole` syntax for incomplete proofs. Tactic mode fills holes.
+- **Interactive mode / Hole-driven development** — `?name`, `?`, and `_` hole syntax for incomplete proofs. Type holes are solved by unification; value holes are tracked with their expected types. Definitions that leave holes unsolved are rejected with a full list of open goals (`UnsolvedHoles` error). See `examples/holes.owl` and `docs/reference.md`.
+  - [x] `?name` / `?` hole syntax (named holes; `_` remains anonymous)
+  - [x] Expected-type tracking for holes (`check_dt` records the goal type)
+  - [x] `UnsolvedHoles` error reporting every open goal with its type
+  - [x] Type-annotation holes solved by unification (`def x : ?ty := zero` gives `x : Nat`)
+  - [ ] Interactive REPL proof sessions with per-tactic goal display (`:proof` / `:goals` / `:admit` / `:done`)
 
 - **Better error messages** — More detailed type mismatch errors:
   - Show normalized expected/got types (done for TypeMismatch)
@@ -137,7 +142,7 @@
   - [x] Automatic projection functions (`r.field` syntax, chained projections)
   - [x] Parameterized records (`record Pair (A : Type) (B : Type) where ...`)
   - [x] Constructor auto-named `mk<RecordName>` (e.g. `mkPair`)
-  - Record update syntax
+  - [x] Record update syntax
 
 - **Pattern matching improvements** —
   - [x] Wildcard patterns (`_` binder that discards the argument)
