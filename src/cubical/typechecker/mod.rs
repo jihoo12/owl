@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 
 pub mod errors;
 pub mod termination;
-pub use errors::TypeError;
+pub use errors::{TypeError, err_pos};
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
@@ -86,11 +86,13 @@ pub fn require_equal(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(), TypeE
             expected: Box::new(nbe_eval(expected)),
             got: Box::new(nbe_eval(got)),
             names: err_names(ctx),
+            pos: err_pos(ctx, got),
         }),
         EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted {
             t1: Box::new(nbe_eval(expected)),
             t2: Box::new(nbe_eval(got)),
             names: err_names(ctx),
+            pos: err_pos(ctx, got),
         }),
     }
 }
@@ -105,12 +107,14 @@ pub fn require_equal_endpt(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(),
                 expected: Box::new(ne1),
                 got: Box::new(ne2),
                 names: err_names(ctx),
+                pos: err_pos(ctx, got),
             })
         }
         EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted {
             t1: Box::new(nbe_eval(expected)),
             t2: Box::new(nbe_eval(got)),
             names: err_names(ctx),
+            pos: err_pos(ctx, got),
         }),
     }
 }
@@ -125,7 +129,11 @@ fn require_universe_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, T
     let ty = infer_dt(dts, ctx, t)?;
     match nbe_eval(&ty) {
         Term::TUniv(n) => Ok(n),
-        other => Err(TypeError::ExpectedUniverse { ty: other, names: err_names(ctx) }),
+        other => Err(TypeError::ExpectedUniverse {
+            ty: other.clone(),
+            names: err_names(ctx),
+            pos: err_pos(ctx, t),
+        }),
     }
 }
 
@@ -200,7 +208,11 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
                 let ty = infer_dt(dts, ctx, t)?;
                 match nbe_eval(&ty) {
                     Term::TUniv(n) => Ok(n),
-                    other => Err(TypeError::ExpectedUniverse { ty: other, names: err_names(ctx) }),
+                    other => Err(TypeError::ExpectedUniverse {
+                        ty: other,
+                        names: err_names(ctx),
+                        pos: err_pos(ctx, t),
+                    }),
                 }
             }
         },
@@ -220,7 +232,11 @@ fn check_interval_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<(), TypeEr
     if ty == interval_ty() {
         Ok(())
     } else {
-        Err(TypeError::NotAnInterval { t: t.clone(), names: err_names(ctx) })
+        Err(TypeError::NotAnInterval {
+            t: t.clone(),
+            names: err_names(ctx),
+            pos: err_pos(ctx, t),
+        })
     }
 }
 
@@ -233,7 +249,11 @@ fn require_equiv_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<(Term, Term
     let ty = infer_dt(dts, ctx, t)?;
     match nbe_eval(&ty) {
         Term::TEquiv(a, b) => Ok((nbe_eval(&a), nbe_eval(&b))),
-        other => Err(TypeError::ExpectedEquiv { ty: other, names: err_names(ctx) }),
+        other => Err(TypeError::ExpectedEquiv {
+            ty: other,
+            names: err_names(ctx),
+            pos: err_pos(ctx, t),
+        }),
     }
 }
 
@@ -682,7 +702,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                     _ => match nbe_eval(&f_ty) {
                         Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                        other => return Err(TypeError::ExpectedPi { ty: other, names: err_names(ctx) }),
+                        other => return Err(TypeError::ExpectedPi {
+                            ty: other,
+                            names: err_names(ctx),
+                            pos: err_pos(ctx, f),
+                        }),
                     },
                 };
                 check_dt(dts, ctx, a, &a_ty)?;
@@ -734,7 +758,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         plain => plain,
                     })
                 }
-                other => Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
+                other => Err(TypeError::ExpectedPath {
+                    ty: other,
+                    names: err_names(ctx),
+                    pos: err_pos(ctx, p),
+                }),
             },
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
@@ -744,10 +772,18 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         Term::TIntervalTy => Ok(Term::TUniv(0)),
 
         // Lambdas cannot be inferred
-        t @ Term::TAbs(_, _) | t @ Term::PLam(_, _) => Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) }),
+        t @ Term::TAbs(_, _) | t @ Term::PLam(_, _) => Err(TypeError::CannotInfer {
+            t: t.clone(),
+            names: err_names(ctx),
+            pos: err_pos(ctx, t),
+        }),
 
         // Tactic blocks cannot be inferred (need type annotation)
-        t @ Term::TBy(_) => Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) }),
+        t @ Term::TBy(_) => Err(TypeError::CannotInfer {
+            t: t.clone(),
+            names: err_names(ctx),
+            pos: err_pos(ctx, t),
+        }),
 
         // Unresolved metavariable
         Term::Meta(id) => {
@@ -906,7 +942,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     check_dt(dts, ctx, x, &x_ty)?;
                     Ok(ret_ty)
                 }
-                other => Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
+                other => Err(TypeError::ExpectedPath {
+                    ty: other,
+                    names: err_names(ctx),
+                    pos: err_pos(ctx, p),
+                }),
             }
         }
 
@@ -1056,7 +1096,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             } else if is_bot_dnf(&phi_) {
                 infer_dt(dts, ctx, a)
             } else {
-                Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) })
+                Err(TypeError::CannotInfer {
+                    t: t.clone(),
+                    names: err_names(ctx),
+                    pos: err_pos(ctx, t),
+                })
             }
         }
 
@@ -1072,7 +1116,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         Term::TFst(p) => match infer_dt(dts, ctx, p) {
             Ok(p_ty) => match nbe_eval(&p_ty) {
                 Term::TSigma(_, a_ty, _) => Ok(nbe_eval(&a_ty)),
-                other => Err(TypeError::ExpectedSigma { ty: other, names: err_names(ctx) }),
+                other => Err(TypeError::ExpectedSigma {
+                    ty: other,
+                    names: err_names(ctx),
+                    pos: err_pos(ctx, p),
+                }),
             },
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
@@ -1081,7 +1129,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         Term::TSnd(p) => match infer_dt(dts, ctx, p) {
             Ok(p_ty) => match nbe_eval(&p_ty) {
                 Term::TSigma(_, _, b_ty) => Ok(nbe_eval(&beta(&b_ty, &Term::TFst(p.clone())))),
-                other => Err(TypeError::ExpectedSigma { ty: other, names: err_names(ctx) }),
+                other => Err(TypeError::ExpectedSigma {
+                    ty: other,
+                    names: err_names(ctx),
+                    pos: err_pos(ctx, p),
+                }),
             },
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
@@ -1140,7 +1192,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             match nbe_eval(&r_ty) {
                 Term::TData(dname, params) => {
                     let dt = dts.iter().find(|dt| dt.name == dname)
-                        .ok_or_else(|| TypeError::UnknownDatatype(dname.clone()))?;
+                        .ok_or_else(|| TypeError::UnknownDatatype { name: dname.clone(), pos: err_pos(ctx, r) })?;
                     let field_names = dt.field_names.as_ref()
                         .ok_or_else(|| TypeError::Other(format!("'{}' is not a record type", dname)))?;
                     let con_sig = dt.cons.first()
@@ -1166,7 +1218,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         }
 
         // Pairs cannot be inferred without annotation
-        t @ Term::TPair(_, _) => Err(TypeError::CannotInfer { t: t.clone(), names: err_names(ctx) }),
+        t @ Term::TPair(_, _) => Err(TypeError::CannotInfer {
+            t: t.clone(),
+            names: err_names(ctx),
+            pos: err_pos(ctx, t),
+        }),
 
         // hcomp A [phi -> tube, ...] base
         Term::THComp(a_ty, sys, base) => {
@@ -1194,6 +1250,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                         expected: Box::new(nbe_eval(&a_ty_)),
                                         got: Box::new(nbe_eval(&a)),
                                         names: err_names(ctx),
+                                        pos: err_pos(ctx, &tube),
                                     });
                                 }
                                 check_dt(dts, ctx, &nbe_eval(&u), &a_ty_)?;
@@ -1201,7 +1258,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
+                            other => return Err(TypeError::ExpectedPath {
+                                ty: other,
+                                names: err_names(ctx),
+                                pos: err_pos(ctx, &tube),
+                            }),
                         }
                     }
                 }
@@ -1243,7 +1304,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
+                            other => return Err(TypeError::ExpectedPath {
+                                ty: other,
+                                names: err_names(ctx),
+                                pos: err_pos(ctx, &tube),
+                            }),
                         }
                     }
                 }
@@ -1289,7 +1354,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
+                            other => return Err(TypeError::ExpectedPath {
+                                ty: other,
+                                names: err_names(ctx),
+                                pos: err_pos(ctx, &tube),
+                            }),
                         }
                     }
                 }
@@ -1299,13 +1368,8 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 sys.clone(),
                 base.clone(),
             );
-            let a_fam_s = shift(1, 0, a_fam);
-            let body_ty = match &a_fam_s {
-                Term::PLam(_, b) => nbe_eval(&beta(b, &Term::TVar(0))),
-                _ => shift(1, 0, &a_at0),
-            };
             Ok(Term::TPath(
-                Box::new(Term::PLam("j".to_string(), Box::new(body_ty))),
+                Box::new(shift(1, 0, &a_fam_)),
                 Box::new(nbe_eval(base)),
                 Box::new(nbe_eval(&comp_result)),
             ))
@@ -1336,6 +1400,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                         expected: Box::new(nbe_eval(&a_ty_)),
                                         got: Box::new(nbe_eval(&a)),
                                         names: err_names(ctx),
+                                        pos: err_pos(ctx, &tube),
                                     });
                                 }
                                 check_dt(dts, ctx, &nbe_eval(&u), &a_ty_)?;
@@ -1343,7 +1408,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
+                            other => return Err(TypeError::ExpectedPath {
+                                ty: other,
+                                names: err_names(ctx),
+                                pos: err_pos(ctx, &tube),
+                            }),
                         }
                     }
                 }
@@ -1372,7 +1441,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let dt = dts
                 .iter()
                 .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
 
             // If the datatype has a universe-level annotation, use it directly
             // for the fully-applied case.
@@ -1482,7 +1551,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let dt = dts
                 .iter()
                 .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
             // Check if this is an ordinary constructor.
             if let Some(sig) = dt.find_con(c) {
                 let num_params = dt.params.len();
@@ -1513,7 +1582,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     Box::new(nbe_eval(&face1)),
                 ))
             } else {
-                Err(TypeError::UnknownConstructor(d.clone(), c.clone()))
+                Err(TypeError::UnknownConstructor { datatype: d.clone(), con: c.clone(), pos: err_pos(ctx, t) })
             }
         }
 
@@ -1522,15 +1591,16 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let dt = dts
                 .iter()
                 .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
             let sig = dt
                 .find_pcon(pc)
-                .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), pc.clone()))?;
+                .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: pc.clone(), pos: err_pos(ctx, t) })?;
             if args.len() != sig.arity() {
                 return Err(TypeError::WrongNumberOfArgs {
                     con: pc.clone(),
                     expected: sig.arity(),
                     got: args.len(),
+                    pos: err_pos(ctx, t),
                 });
             }
             let num_params = dt.params.len();
@@ -1550,15 +1620,16 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let dt = dts
                 .iter()
                 .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
             let sig = dt
                 .find_sqcon(sc)
-                .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), sc.clone()))?;
+                .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: sc.clone(), pos: err_pos(ctx, t) })?;
             if args.len() != sig.arity() {
                 return Err(TypeError::WrongNumberOfArgs {
                     con: sc.clone(),
                     expected: sig.arity(),
                     got: args.len(),
+                    pos: err_pos(ctx, t),
                 });
             }
             let num_params = dt.params.len();
@@ -1640,15 +1711,16 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let dt = dts
                 .iter()
                 .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
             let sig = dt
                 .find_cellcon(cc)
-                .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), cc.clone()))?;
+                .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: cc.clone(), pos: err_pos(ctx, t) })?;
             if args.len() != sig.arity() {
                 return Err(TypeError::WrongNumberOfArgs {
                     con: cc.clone(),
                     expected: sig.arity(),
                     got: args.len(),
+                    pos: err_pos(ctx, t),
                 });
             }
             let dim = ivars.len();
@@ -1657,6 +1729,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     con: cc.clone(),
                     expected: sig.dimension(),
                     got: dim,
+                    pos: err_pos(ctx, t),
                 });
             }
             let num_params = dt.params.len();
@@ -1763,12 +1836,16 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let scrut_ty = infer_dt(dts, ctx, scrut)?;
             let (d, scrut_params) = match nbe_eval(&scrut_ty) {
                 Term::TData(d, params) => (d, params),
-                other => return Err(TypeError::ExpectedData { ty: other, names: err_names(ctx) }),
+                other => return Err(TypeError::ExpectedData {
+                    ty: other,
+                    names: err_names(ctx),
+                    pos: err_pos(ctx, scrut),
+                }),
             };
             let dt = dts
                 .iter()
                 .find(|dt| dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, scrut) })?;
 
             // Desugar record patterns: convert `{ field = binder }` to constructor pattern.
             let cases_owned: Vec<ElimCase> = {
@@ -1821,7 +1898,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             let cod_ctx = extend_ctx(x, nbe_eval(&dom), ctx);
                             type_level_dt(dts, &cod_ctx, &cod)?;
                         }
-                        other => return Err(TypeError::ExpectedPi { ty: other, names: err_names(ctx) }),
+                        other => return Err(TypeError::ExpectedPi {
+                            ty: other,
+                            names: err_names(ctx),
+                            pos: err_pos(ctx, motive),
+                        }),
                     }
                 }
             }
@@ -1868,7 +1949,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let case = cases
                     .iter()
                     .find(|c| c.con == con_sig.name)
-                    .ok_or_else(|| TypeError::MissingCase(con_sig.name.clone()))?;
+                    .ok_or_else(|| TypeError::MissingCase { con: con_sig.name.clone(), pos: err_pos(ctx, scrut) })?;
 
                 // Substitute params into arg_tys for this constructor.
                 let subst_arg_tys = subst_params(&con_sig.arg_tys, &scrut_params);
@@ -1881,6 +1962,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             subst_arg_tys.len(),
                             case.binders.len()
                         ),
+                        pos: err_pos(ctx, scrut),
                     });
                 }
 
@@ -1928,7 +2010,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let case = cases
                     .iter()
                     .find(|c| c.con == pcon_sig.name)
-                    .ok_or_else(|| TypeError::MissingCase(pcon_sig.name.clone()))?;
+                    .ok_or_else(|| TypeError::MissingCase { con: pcon_sig.name.clone(), pos: err_pos(ctx, scrut) })?;
 
                 let subst_arg_tys = subst_params(&pcon_sig.arg_tys, &scrut_params);
 
@@ -1943,6 +2025,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             subst_arg_tys.len(),
                             case.binders.len()
                         ),
+                        pos: err_pos(ctx, scrut),
                     });
                 }
 
@@ -2044,7 +2127,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let case = cases
                     .iter()
                     .find(|c| c.con == sqcon_sig.name)
-                    .ok_or_else(|| TypeError::MissingCase(sqcon_sig.name.clone()))?;
+                    .ok_or_else(|| TypeError::MissingCase { con: sqcon_sig.name.clone(), pos: err_pos(ctx, scrut) })?;
 
                 let subst_arg_tys = subst_params(&sqcon_sig.arg_tys, &scrut_params);
 
@@ -2059,6 +2142,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             subst_arg_tys.len(),
                             case.binders.len()
                         ),
+                        pos: err_pos(ctx, scrut),
                     });
                 }
 
@@ -2175,7 +2259,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let case = cases
                     .iter()
                     .find(|c| c.con == cellcon_sig.name)
-                    .ok_or_else(|| TypeError::MissingCase(cellcon_sig.name.clone()))?;
+                    .ok_or_else(|| TypeError::MissingCase { con: cellcon_sig.name.clone(), pos: err_pos(ctx, scrut) })?;
 
                 let subst_arg_tys = subst_params(&cellcon_sig.arg_tys, &scrut_params);
                 let dim = cellcon_sig.dimension();
@@ -2192,6 +2276,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             dim,
                             case.binders.len()
                         ),
+                        pos: err_pos(ctx, scrut),
                     });
                 }
 
@@ -2352,6 +2437,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             datatype: d.clone(),
                             case,
                             msg,
+                            pos: err_pos(ctx, scrut),
                         });
                     }
                 }
@@ -2641,7 +2727,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                 _ => match nbe_eval(ty) {
                     Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                    other => return Err(TypeError::ExpectedPi { ty: other, names: err_names(ctx) }),
+                    other => return Err(TypeError::ExpectedPi {
+                        ty: other,
+                        names: err_names(ctx),
+                        pos: err_pos(ctx, t),
+                    }),
                 },
             };
             check_dt(
@@ -2660,7 +2750,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                     Term::TPath(a, u, v) => {
                         (a.as_ref().clone(), u.as_ref().clone(), v.as_ref().clone())
                     }
-                    other => return Err(TypeError::ExpectedPath { ty: other, names: err_names(ctx) }),
+                    other => return Err(TypeError::ExpectedPath {
+                        ty: other,
+                        names: err_names(ctx),
+                        pos: err_pos(ctx, t),
+                    }),
                 },
             };
             let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
@@ -2754,7 +2848,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Term::TSigma(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                 _ => match nbe_eval(ty) {
                     Term::TSigma(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                    other => return Err(TypeError::ExpectedSigma { ty: other, names: err_names(ctx) }),
+                    other => return Err(TypeError::ExpectedSigma {
+                        ty: other,
+                        names: err_names(ctx),
+                        pos: err_pos(ctx, t),
+                    }),
                 },
             };
                             check_dt(dts, ctx, a, &nbe_eval(&a_ty))?;
@@ -2782,6 +2880,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                             expected: Box::new(expected_ty_nf.clone()),
                             got: Box::new(Term::TData(d.clone(), vec![])),
                             names: err_names(ctx),
+                            pos: err_pos(ctx, t),
                         });
                     }
                     (ed.clone(), ep.clone())
@@ -2791,13 +2890,14 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             let dt = dts
                 .iter()
                 .find(|dt| dt.name == expected_d)
-                .ok_or_else(|| TypeError::UnknownDatatype(expected_d.clone()))?;
+                .ok_or_else(|| TypeError::UnknownDatatype { name: expected_d.clone(), pos: err_pos(ctx, t) })?;
             if let Some(sig) = dt.find_con(c) {
                 if args.len() != sig.arity() {
                     return Err(TypeError::WrongNumberOfArgs {
                         con: c.clone(),
                         expected: sig.arity(),
                         got: args.len(),
+                        pos: err_pos(ctx, t),
                     });
                 }
                 // Substitute known params from the expected type into arg_tys,
@@ -2817,7 +2917,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 let inferred = infer_dt(dts, ctx, &Term::TCon(d.clone(), c.clone(), args.clone()))?;
                 require_equal(ctx, &expected_ty_nf, &nbe_eval(&inferred))
             } else {
-                Err(TypeError::UnknownConstructor(expected_d.clone(), c.clone()))
+                Err(TypeError::UnknownConstructor { datatype: expected_d.clone(), con: c.clone(), pos: err_pos(ctx, t) })
             }
         }
 
@@ -2836,14 +2936,15 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             if let Term::TData(ed, _) = &expected_nf {
                 if ed == d {
                     let dt_ = dts.iter().find(|dt| &dt.name == d)
-                        .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                        .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
                     let sig = dt_.find_sqcon(sc)
-                        .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), sc.clone()))?;
+                        .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: sc.clone(), pos: err_pos(ctx, t) })?;
                     if args.len() != sig.arity() {
                         return Err(TypeError::WrongNumberOfArgs {
                             con: sc.clone(),
                             expected: sig.arity(),
                             got: args.len(),
+                            pos: err_pos(ctx, t),
                         });
                     }
                     check_interval(ctx, r)?;
@@ -2860,14 +2961,15 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             if let Term::TData(ed, _) = &expected_nf {
                 if ed == d {
                     let dt_ = dts.iter().find(|dt| &dt.name == d)
-                        .ok_or_else(|| TypeError::UnknownDatatype(d.clone()))?;
+                        .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
                     let sig = dt_.find_cellcon(cc)
-                        .ok_or_else(|| TypeError::UnknownConstructor(d.clone(), cc.clone()))?;
+                        .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: cc.clone(), pos: err_pos(ctx, t) })?;
                     if args.len() != sig.arity() {
                         return Err(TypeError::WrongNumberOfArgs {
                             con: cc.clone(),
                             expected: sig.arity(),
                             got: args.len(),
+                            pos: err_pos(ctx, t),
                         });
                     }
                     if ivars.len() != sig.dimension() {
@@ -2875,6 +2977,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                             con: cc.clone(),
                             expected: sig.dimension(),
                             got: ivars.len(),
+                            pos: err_pos(ctx, t),
                         });
                     }
                     for iv in ivars {

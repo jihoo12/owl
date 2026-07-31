@@ -20,6 +20,7 @@ use lexer::{Lexer, TokenKind};
 use std::fmt;
 
 use crate::cubical::syntax::{Datatype, Name, Term};
+use crate::cubical::typechecker::errors::Pos;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -103,6 +104,7 @@ impl ProgramParser {
         if self.parser.at(&TokenKind::Eof) {
             return Ok(None);
         }
+        self.parser.decl_positions.clear();
         let decl = if self.parser.consume_ident("def") {
             self.parser.parse_def()?
         } else if self.parser.consume_ident("inductive") {
@@ -132,6 +134,13 @@ impl ProgramParser {
             Decl::Import { .. } => {}
         }
         Ok(Some(decl))
+    }
+
+    /// Collect the name-position table accumulated while parsing the most
+    /// recent declaration, for use by the typechecker's error reporting.
+    /// Drains the parser's internal buffer.
+    pub fn take_decl_positions(&mut self) -> Vec<(Name, Pos, bool)> {
+        std::mem::take(&mut self.parser.decl_positions)
     }
 }
 

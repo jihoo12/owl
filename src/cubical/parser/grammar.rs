@@ -6,6 +6,7 @@ use super::lexer::{err, Token, TokenKind};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
 use crate::cubical::syntax::{CellConSig, ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift};
+use crate::cubical::typechecker::errors::Pos;
 
 pub(super) struct Parser {
     tokens: Vec<Token>,
@@ -14,6 +15,11 @@ pub(super) struct Parser {
     pub(super) ivar_env: Vec<Name>,
     pub(super) global_env: Vec<Name>,
     pub(super) datatypes: Vec<Datatype>,
+    /// `(name, source position, is_introduction)` for every variable name
+    /// observed while parsing the current top-level declaration, in source
+    /// order. The driver installs this into the typechecker's thread-local
+    /// table so type errors can point back at the offending variable.
+    pub(super) decl_positions: Vec<(Name, Pos, bool)>,
     /// When true, `starts_atom` treats the keyword `with` as a stop token.
     stop_at_with: bool,
     /// When true, `starts_atom` treats the keyword `in` as a stop token.
@@ -36,6 +42,7 @@ impl Parser {
             ivar_env: Vec::new(),
             global_env: Vec::new(),
             datatypes: Vec::new(),
+            decl_positions: Vec::new(),
             stop_at_with: false,
             stop_at_in: false,
             stop_at_by_wf: false,
@@ -51,6 +58,8 @@ impl Parser {
 
     pub(super) fn parse_def(&mut self) -> Result<Decl, ParseError> {
         let name = self.expect_ident("expected definition name")?;
+        let (line, col) = self.token_pos();
+        self.record_name_pos(&name, line, col, true);
         self.expect(
             TokenKind::Colon,
             format!("expected ':' after definition name '{}'", name),
@@ -1421,7 +1430,19 @@ impl Parser {
         Ok(cases)
     }
 
-    fn resolve_ident(&self, name: Name) -> Result<Term, ParseError> {
+    /// Source position of the most recently consumed token.
+    fn token_pos(&self) -> (usize, usize) {
+        let tok = &self.tokens[self.pos - 1];
+        (tok.line, tok.col)
+    }
+
+    /// Record a variable name occurrence for the current declaration so the
+    /// typechecker can attach a source position to errors involving it.
+    fn record_name_pos(&mut self, name: &Name, line: usize, col: usize, is_introduction: bool) {
+        self.decl_positions.push((name.clone(), Pos { line, col }, is_introduction));
+    }
+
+    fn resolve_ident(&mut self, name: Name) -> Result<Term, ParseError> {
         if name == "Type" {
             return Ok(Term::TUniv(0));
         }
@@ -1443,13 +1464,17 @@ impl Parser {
         if let Some(level) = parse_universe(&name) {
             return Ok(Term::TUniv(level));
         }
+        let (line, col) = self.token_pos();
         if let Some(idx) = self.term_env.iter().position(|n| n == &name) {
+            self.record_name_pos(&name, line, col, false);
             return Ok(Term::TVar(idx as i32));
         }
         if let Some(idx) = self.global_env.iter().position(|n| n == &name) {
+            self.record_name_pos(&name, line, col, false);
             return Ok(Term::TVar((self.term_env.len() + idx) as i32));
         }
         if let Some(idx) = self.ivar_env.iter().position(|n| n == &name) {
+            self.record_name_pos(&name, line, col, false);
             return Ok(Term::TInterval(I::Var(idx as i32)));
         }
         if let Some((dt, is_path)) = self.find_constructor(&name) {

@@ -51,6 +51,8 @@
 
 - [x] Safe `CURRENT_DTS` — Replaced `Cell<Option<*const [Datatype]>>` raw pointer with `RefCell<Vec<Datatype>>` in thread-local. Eliminates all `unsafe` from `nbe/mod.rs`.
 
+- [x] Type errors point at the offending variable — The parser records the source position of every variable use (and each definition name) while parsing, exposing them via `ProgramParser::take_decl_positions`. The driver accumulates these across the whole program and installs them into the typechecker's thread-local `DECL_NAME_POS` table before checking each declaration. `err_pos` (the `pos` fields on `TypeError` variants) now resolves the most-local de Bruijn variable of the offending term to a real `line:col`, so messages print e.g. `Expected a Π-type, but found: Nat  at 5:43`.
+
 ---
 
 ## Remaining — Cubical Type Theory Completeness
@@ -117,7 +119,7 @@
 
 - **Better error messages** — More detailed type mismatch errors:
   - [x] Show normalized expected/got types (done for TypeMismatch)
-  - [ ] Point to exact location of mismatch (partial: shows term + type in debug scope)
+  - [x] Point to exact location of mismatch — `at line:col` attached to errors via `err_pos` (parser records variable positions, driver installs them before typechecking)
   - [x] Suggest possible fixes (done for CannotInfer tip)
 
 - [ ] **Decision procedures** — Automated proving: propositional equality (reflexivity, symmetry, transitivity), arithmetic (Nat/Int), ring/field solver

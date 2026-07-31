@@ -1,7 +1,7 @@
 use crate::cubical::equality::EtaResult;
 use crate::cubical::nbe::nbe_eval;
 use crate::cubical::syntax::{Datatype, Name, Term, beta, shift, show_term};
-use crate::cubical::typechecker::{Ctx, TypeError, infer_dt};
+use crate::cubical::typechecker::{Ctx, TypeError, err_pos, infer_dt};
 
 use super::equality::definitionally_equal_ctx_r;
 fn names_from_ctx(ctx: &Ctx) -> Vec<Name> {
@@ -459,7 +459,7 @@ impl<'a> TacticEngine<'a> {
                             let mut combined = self.tactic_ctx.clone();
                             combined.extend_from_slice(outer_ctx);
                             let names = names_from_ctx(&combined);
-                            return Err(TypeError::ExpectedPi { ty: other, names });
+                            return Err(TypeError::ExpectedPi { ty: other, names, pos: None });
                         }
                     }
                 }
@@ -488,6 +488,7 @@ impl<'a> TacticEngine<'a> {
                             expected: Box::new(expected_nf),
                             got: Box::new(inferred_nf),
                             names,
+                            pos: err_pos(&combined_ctx, term),
                         })
                     },
                     EtaResult::Exhausted => {
@@ -496,6 +497,7 @@ impl<'a> TacticEngine<'a> {
                             t1: Box::new(expected_nf),
                             t2: Box::new(inferred_nf),
                             names,
+                            pos: err_pos(&combined_ctx, term),
                         })
                     },
                 }
@@ -555,13 +557,14 @@ impl<'a> TacticEngine<'a> {
                                     t1: Box::new(goal_nf),
                                     t2: Box::new(b_nf),
                                     names,
+                                    pos: err_pos(&combined_ctx, term),
                                 })
                             },
                         }
                     }
                     other => {
                         let names = names_from_ctx(&combined_ctx);
-                        Err(TypeError::ExpectedPi { ty: other, names })
+                        Err(TypeError::ExpectedPi { ty: other, names, pos: err_pos(&combined_ctx, term) })
                     }
                 }
             }
@@ -595,13 +598,14 @@ impl<'a> TacticEngine<'a> {
                                     t1: Box::new(u_nf),
                                     t2: Box::new(v_nf),
                                     names,
+                                    pos: err_pos(&combined_ctx, &u),
                                 })
                             },
                         }
                     }
                     other => {
                         let names = names_from_ctx(&combined_ctx);
-                        Err(TypeError::ExpectedPath { ty: other, names })
+                        Err(TypeError::ExpectedPath { ty: other, names, pos: None })
                     }
                 }
             }
@@ -618,7 +622,7 @@ impl<'a> TacticEngine<'a> {
                         let mut combined = self.tactic_ctx.clone();
                         combined.extend_from_slice(outer_ctx);
                         let names = names_from_ctx(&combined);
-                        Err(TypeError::ExpectedPath { ty: other, names })
+                        Err(TypeError::ExpectedPath { ty: other, names, pos: None })
                     }
                 }
             }
@@ -637,7 +641,7 @@ impl<'a> TacticEngine<'a> {
                         let mut combined = self.tactic_ctx.clone();
                         combined.extend_from_slice(outer_ctx);
                         let names = names_from_ctx(&combined);
-                        Err(TypeError::ExpectedSigma { ty: other, names })
+                        Err(TypeError::ExpectedSigma { ty: other, names, pos: None })
                     }
                 }
             }
@@ -655,7 +659,7 @@ impl<'a> TacticEngine<'a> {
                             .iter()
                             .find(|d| &d.name == dt_name)
                             .ok_or_else(|| {
-                                TypeError::UnknownDatatype(dt_name.clone())
+                                TypeError::UnknownDatatype { name: dt_name.clone(), pos: err_pos(&combined_ctx, &self.goal_ty) }
                             })?;
 
                         // Pick the constructor
@@ -665,10 +669,11 @@ impl<'a> TacticEngine<'a> {
                             } else if let Some(pcon) = dt.find_pcon(con_name) {
                                 (pcon.name.clone(), pcon.arg_tys.clone())
                             } else {
-                                return Err(TypeError::UnknownConstructor(
-                                    dt_name.clone(),
-                                    con_name.clone(),
-                                ));
+                                return Err(TypeError::UnknownConstructor {
+                                    datatype: dt_name.clone(),
+                                    con: con_name.clone(),
+                                    pos: err_pos(&combined_ctx, &self.goal_ty),
+                                });
                             }
                         } else if let Some(con) = dt.cons.first() {
                             (con.name.clone(), con.arg_tys.clone())
@@ -749,7 +754,7 @@ impl<'a> TacticEngine<'a> {
                     .dts
                     .iter()
                     .find(|d| d.name == dt_name)
-                    .ok_or_else(|| TypeError::UnknownDatatype(dt_name.clone()))?;
+                    .ok_or_else(|| TypeError::UnknownDatatype { name: dt_name.clone(), pos: err_pos(&combined_ctx, &self.goal_ty) })?;
 
                 // Build one subgoal per constructor.
                 let mut goals = Vec::new();
@@ -980,7 +985,7 @@ impl<'a> TacticEngine<'a> {
                         let mut combined = self.tactic_ctx.clone();
                         combined.extend_from_slice(outer_ctx);
                         let names = names_from_ctx(&combined);
-                        Err(TypeError::ExpectedPath { ty: other, names })
+                        Err(TypeError::ExpectedPath { ty: other, names, pos: None })
                     }
                 }
             }
@@ -1026,7 +1031,7 @@ impl<'a> TacticEngine<'a> {
                             .iter()
                             .find(|d| &d.name == dt_name)
                             .ok_or_else(|| {
-                                TypeError::UnknownDatatype(dt_name.clone())
+                                TypeError::UnknownDatatype { name: dt_name.clone(), pos: err_pos(&combined_ctx, &self.goal_ty) }
                             })?;
                         if let Some(con) = dt.cons.iter().find(|c| c.arity() == 0) {
                             self.result = Some(Term::TCon(

@@ -199,30 +199,41 @@ fn process_file_source(
 ) -> Result<(), RunError> {
     let mut parser = ProgramParser::new(source)?;
     crate::cubical::nbe::clear_nbe_cache();
+    // Accumulate name positions across the whole program so globals from
+    // earlier declarations (which may only surface as inferred types) resolve
+    // to a position. Reverse lookup prefers the most recent occurrence.
+    let mut decl_positions = Vec::new();
     while let Some(decl) = parser.next_decl()? {
-        match decl {
-            Decl::Import { path } => {
-                load_import(&path, env, loaded, loading, import_base, last_def)?;
-                parser.sync_from_env(env);
+        decl_positions.extend(parser.take_decl_positions());
+        crate::cubical::typechecker::errors::set_decl_name_positions(decl_positions.clone());
+        let result: Result<(), RunError> = (|| {
+            match decl {
+                Decl::Import { path } => {
+                    load_import(&path, env, loaded, loading, import_base, last_def)?;
+                    parser.sync_from_env(env);
+                }
+                Decl::Data(dt) => {
+                    process_data(&dt, env)?;
+                }
+                Decl::DataMutual(dts) => {
+                    process_data_mutual(&dts, env)?;
+                }
+                Decl::Record(dt) => {
+                    process_data(&dt, env)?;
+                }
+                Decl::DataWithFunc { dt, func_name, func_ty, func_val } => {
+                    process_data_with_func(&dt, &func_name, &func_ty, &func_val, env)?;
+                }
+                Decl::Def { name, ty, val, by_wf } => {
+                    *last_def = Some(process_def(&name, &ty, &val, env, by_wf)?);
+                }
             }
-            Decl::Data(dt) => {
-                process_data(&dt, env)?;
-            }
-            Decl::DataMutual(dts) => {
-                process_data_mutual(&dts, env)?;
-            }
-            Decl::Record(dt) => {
-                process_data(&dt, env)?;
-            }
-            Decl::DataWithFunc { dt, func_name, func_ty, func_val } => {
-                process_data_with_func(&dt, &func_name, &func_ty, &func_val, env)?;
-            }
-            Decl::Def { name, ty, val, by_wf } => {
-                *last_def = Some(process_def(&name, &ty, &val, env, by_wf)?);
-            }
-        }
+            Ok(())
+        })();
+        result?;
         crate::cubical::nbe::clear_nbe_cache();
     }
+    crate::cubical::typechecker::errors::clear_decl_name_positions();
     Ok(())
 }
 
@@ -381,7 +392,7 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     if !matches!(closed_ty_globals, Term::Meta(_)) {
         match nbe_eval(&infer_with_full_env(env, &closed_ty_nf)?) {
             Term::TUniv(_) => {}
-            other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse { ty: other, names: vec![] }))),
+            other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse { ty: other, names: vec![], pos: None }))),
         }
     }
 
