@@ -1,0 +1,34 @@
+-- Cumulativity for Sigma/Pi types and record types (TODO A.1, A.2)
+-- Universe levels are cumulative: a term at U0 is also a term at U1.
+-- This extends structurally to Pi (contravariant domain, covariant codomain),
+-- Sigma (covariant in both) and record / datatype parameters (covariant).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Pi: the domain is contravariant.  A function quantified over a *larger*
+-- domain universe (U1) is a subtype of one quantified over U0, so `id0`
+-- (which works for all A : U1) is usable where only A : U0 is needed.
+def id0 : ∀ (A : U1), A -> A := fun A x => x
+
+def id1 : ∀ (A : U0), A -> A := id0
+
+-- Sigma: components are covariant.
+def pair0 : Σ (B : U0), B -> U0 := (Nat, fun x => Nat)
+
+def pair1 : Σ (B : U1), B -> U1 := pair0
+
+-- Records: desugared to single-constructor inductives, so their parameters
+-- are covariant like datatype parameters.
+record Box (A : Type) where
+  field content : A
+
+def b0 : Box (Σ (B : U0), B -> U0) := mkBox pair0
+
+-- A Box of the U0-sigma can be reused as a Box of the U1-sigma.
+def b1 : Box (Σ (B : U0), B -> U1) := b0 { content = pair0 }
+
+-- Sanity: this is still a well-typed program (entry point).
+-- `fst` of the sigma gives the (boxed) first component `Nat : U0`.
+def done : U0 := fst (b1.content)

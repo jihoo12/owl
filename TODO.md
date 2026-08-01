@@ -55,159 +55,81 @@
 
 ---
 
-## Remaining — Cubical Type Theory Completeness
+## Remaining — Open Items by Category & Priority
 
-### 1. Core Cubical Features
+> Legend: 🔴 High priority · 🟡 Medium priority · 🟢 Low priority
+> (Priority reflects impact on soundness/core usability vs. polish/ecosystem breadth.)
 
-- [x] **Face implication** — `a ⇒ b` (implication between DNF face conditions). Added `dnf_leq` in `interval.rs` for checking whether one face condition implies another.
+### A. Core Type Theory Soundness Gaps 🔴
 
-- [x] **Cofibration subtyping** — `[_ | phi] A <= [_ | psi] A` when `phi <= psi`. Uses `dnf_leq` for face implication checking. Implemented in `cumulativity_check`.
+These extend already-partially-implemented features (cumulativity); until closed, some legal
+subtyping relations are simply not recognized by the checker.
 
-- [x] **Glue type β-reduction** — `VGlueElem(phi, t, a) @ 0 = a`, `VGlueElem(phi, t, a) @ 1 = t`. Path application on glue elements reduces at interval endpoints.
+- [x] **Cumulativity for Sigma/Pi types** — extend the existing universe-level cumulativity check to Σ/Π. Π is contravariant in the domain / covariant in the codomain; Σ is covariant in both. Implemented in `cumulativity_check` (see `src/cubical/typechecker/mod.rs`), with tests in `src/cubical/typechecker/mod.rs` and `src/cubical/parser/tests.rs` and a worked example in `examples/cumulativity_sigma_pi.owl`.
+- [x] **Cumulativity for record types** — extend cumulativity to desugared record (single-constructor) types. Covered by the `TData` (covariant parameters) rule, since records desugar to single-constructor inductives; see `cumulativity_check` and `examples/cumulativity_sigma_pi.owl`.
+- [x] **Variance-aware datatype parameter cumulativity** — the `TData` cumulativity rule now respects per-parameter variance (see `compute_param_variances` in `src/cubical/syntax/positivity.rs`): covariant parameters are checked covariantly, contravariant parameters (occurring only in arrow domains) are checked contravariantly, and invariant parameters (occurring both positively and negatively) require definitional equality. Without this, `Bad U0 ≤ Bad U1` typechecked for a `Bad A` whose parameter occurs negatively. Variance is a least fixed point over the datatype environment, so it propagates through nested datatype applications and mutual definitions. Unit tests in `src/cubical/syntax/positivity.rs` and `src/cubical/typechecker/mod.rs`; integration tests in `src/cubical/parser/tests.rs`.
 
-- [x] **Comp/fill decomposition for data types** — `do_hcomp` and `do_comp` in `nbe/mod.rs` decompose through data type constructors. `match_ctor_args` helper extracts constructor args uniformly from VCon/VPCon/VSqCon/VCellCon. When base is a constructor and all tubes produce the same constructor, pushes Kan operation through each argument independently using type instantiation from constructor signature. `fill`/`hfill` benefit automatically (they call comp/hcomp at i=1). Falls through to stuck if tubes don't match.
+### B. Decision Procedures / Proof Automation 🔴
 
-- [x] **System types as first-class types** — `[phi => a, psi => b]` as a type (not just in comp/hfill). Added `TSystemType(System)` term variant, `VSystemType(DNFSystem)` value, full eval/quote/parser/pretty-printing. Coherence checking via `dnf_meet` on overlapping faces. Parser: `[phi => A, psi => B]` syntax.
+The single highest-leverage category for day-to-day proof productivity — these let users
+discharge routine algebraic/arithmetic goals in one line instead of writing them by hand.
 
-- [x] **Regularity** — `comp A [ ] base` (empty system) reduces to `base`. Empty systems in `hcomp`, `comp`, `fill`, and `hfill` all reduce: `fill` and `hfill` produce constant paths. Empty systems arise when all faces evaluate to ⊥ (e.g. `[0 => ...]`).
+- [ ] **Omega / Linear arithmetic** — decision procedure for linear arithmetic over Nat/Int. *(🔴 — most general-purpose payoff; underlies many other proofs.)*
+- [ ] **Ring solver** — decision procedure for ring identities (normalize + compare polynomial forms). *(🔴 — classic high-value tactic, e.g. Coq/Agda's `ring`.)*
+- [ ] **Group solver** — decision procedure for group identities (associativity, identity, inverses). *(🟡 — narrower scope than ring, useful once ring solver exists.)*
+- [ ] **Field solver** — decision procedure for field identities (ring + division/inverse reasoning). *(🟡 — natural follow-on to ring solver; depends on it.)*
+- [ ] **Decision procedure for propositional equality** — automate reflexivity/symmetry/transitivity chains. *(🟡)*
 
-### 2. Type Theory Features
+### C. Pattern Matching 🟡
 
-- [x] **Universe polymorphism** — Stratified U0, U1, U2...
+- [ ] **Nested constructor patterns** — e.g. `suc (suc zero)` matching a literal 2 (requires a full pattern AST rather than the current flat-binder matching). *(🟡 — meaningful ergonomics win, moderate implementation cost.)*
 
-- [x] **Universe lifting/lowering** — `TLower`/`TLift` for moving terms between universe levels.
+### D. Module & Import System 🟡
 
-- [x] **Impredicative Prop** — `TProp` at U0, closed under Pi/Sigma/Path when both sides are Prop.
+Needed for organizing larger codebases/libraries; not blocking for single-file examples.
 
-- [x] **SSet (strict sets)** — `TSSet` at U1, predicative.
+- [ ] `module M where ...` — basic namespace declaration. *(🟡)*
+- [ ] Module parameters. *(🟢 — depends on basic modules first.)*
+- [ ] Module instantiation. *(🟢 — depends on module parameters.)*
+- [ ] Qualified imports (`import M as mod`). *(🟡)*
+- [ ] Selective imports (`import M only [x, y]`). *(🟢)*
+- [ ] Unification of same-name imports. *(🟢)*
 
-- [x] **Cumulativity** — `A : U_n` and `U_n : U_m` when `n <= m` (basic, universe-level). Extend with:
-  - [ ] Cumulativity for Sigma/Pi types
-  - [ ] Cumulativity for record types
+### E. Proof Assistant UX 🟡
 
-- [x] **Cumulativity for inductive types** — `TData(d, ps) <= TData(d, ps')` with covariant parameter checking.
+- [ ] **Interactive REPL proof sessions** — per-tactic goal display (`:proof` / `:goals` / `:admit` / `:done`). *(🟡 — big quality-of-life improvement once hole/tactic infrastructure already exists.)*
 
-- [x] **Induction-induction** — Mutual inductive types via `with inductive` syntax. Forward references, multi-way mutual blocks.
+### F. Performance & Metaprogramming 🟢
 
-- [x] **Induction-recursion** — Simultaneous datatype + function definition via `with f : T := e` syntax.
+- [ ] **Incremental normalization**. *(🟢 — optimization, not correctness-blocking; current NbE already has sharing + memoization.)*
+- [ ] **Bidirectional type checking**. *(🟡 — could simplify/streamline the existing infer/check split; worth revisiting if elaboration perf becomes an issue.)*
+- [ ] **Reflection API**. *(🟢 — powerful but speculative; no immediate consumer.)*
+- [ ] **Custom tactics**. *(🟢 — depends on the built-in tactic language and likely the reflection API.)*
+- [ ] **Proof automation** (general). *(🟢 — umbrella goal; mostly subsumed by items in section B.)*
 
-- [x] **Termination / Guard checking** — Structural recursion guard via `termination.rs`. Recursive calls must pass a case binder as scrutinee.
+### G. Library & Ecosystem 🟢
 
-- [x] **Well-founded recursion** — `by_wf` annotation on `def` disables structural guard check.
+Breadth-of-content work — valuable but doesn't gate the type theory or tooling itself.
 
-- [x] **Coinduction** — `Delay A` type with `Next` constructor and `Force` destructor.
-
-### 3. HIT Improvements
-
-- [x] **Higher-dimensional HIT cells** — n-dimensional cell constructors via `[[[...]]]` syntax (bracket depth = dimension). `TCellCon(Name, Name, Vec<Term>, Vec<Term>)` in Term enum, `VCellCon`/`NCellApp` in Value/Neutral enums. `CellConSig` stores faces as `Vec<Term>` (2*n entries, innermost-to-outermost). Type inference builds nested `PathP` type. Endpoint reduction in `reduce_pcon_endpoints_dt`. Parser handles multi-`@` application, match case binding, and constructor resolution. `find_constructor` recognizes cell constructors. Example: `examples/cell_constructors.owl`.
-
-- [x] **HIT computation rules** — hcomp/comp/fill/hfill decompose through data type constructors when the tube system is compatible (all tubes produce the same constructor). `match_ctor_args` helper extracts constructor args from VCon/VPCon/VSqCon/VCellCon. Per-argument tube systems built by applying each tube at formal interval variable. Argument type instantiation follows `transport_data_con` pattern.
-
-- [x] **HIT elimination improvements** — Better support for:
-  - [x] Nested pattern matching on HITs — Fixed termination checker: `motive_targets_datatype` now recognizes `TData(d, _)` directly (not just `TApp(f, TData(d, _))`). `check_body_guard` else branch decomposes TElim subterms instead of recursing through `check_body_guard_deep`. See `stress_hit_elimination.owl` for 4-level nested match tests.
-  - [x] Dependent elimination with complex motives — Fixed oscillation in `check_dt`: added 2-cycle detection (`nf == *t`) with retry using double-reduced term to break the loop. Removed debug instrumentation.
-  - [x] Higher-dimensional pattern matching — CellCon boundary coherence: `apply_literal` for interval substitution with `strip_n_plams`/`shift(-n)` for PLam context. `TCellCon` case in `apply_literal` + `reduce_pcon_endpoints_dt`. SqCon endpoint reduction via `find_sqcon` fallback in PApp case (face_j0/j1 for first interval, face_i0/i1 for second). TPCon/TSqCon/TCellCon ↔ PApp(TCon) structural congruence in `eta_eq`. `torus_id.owl` and `stress_hits_cells.owl` pass.
-
-### 4. Proof Assistant Features
-
-- **Interactive mode / Hole-driven development** — `?name`, `?`, and `_` hole syntax for incomplete proofs. Type holes are solved by unification; value holes are tracked with their expected types. Definitions that leave holes unsolved are rejected with a full list of open goals (`UnsolvedHoles` error). See `examples/holes.owl` and `docs/reference.md`.
-  - [x] `?name` / `?` hole syntax (named holes; `_` remains anonymous)
-  - [x] Expected-type tracking for holes (`check_dt` records the goal type)
-  - [x] `UnsolvedHoles` error reporting every open goal with its type
-  - [x] Type-annotation holes solved by unification (`def x : ?ty := zero` gives `x : Nat`)
-  - [ ] Interactive REPL proof sessions with per-tactic goal display (`:proof` / `:goals` / `:admit` / `:done`)
-
-- **Better error messages** — More detailed type mismatch errors:
-  - [x] Show normalized expected/got types (done for TypeMismatch)
-  - [x] Point to exact location of mismatch — `at line:col` attached to errors via `err_pos` (parser records variable positions, driver installs them before typechecking)
-  - [x] Suggest possible fixes (done for CannotInfer tip)
-
-- [ ] **Decision procedures** — Automated proving: propositional equality (reflexivity, symmetry, transitivity), arithmetic (Nat/Int), ring/field solver
-
-- [ ] **Omega / Linear arithmetic** — Decision procedure for linear arithmetic over Nat/Int.
-
-- [ ] **Ring solver** — Decision procedure for ring identities.
-
-- **Import system improvements** —
-  - [ ] Qualified imports (`import M as mod`)
-  - [ ] Selective imports (`import M only [x, y]`)
-  - [ ] Unification of same-name imports
-
-- **Module system** — Namespaces for organizing definitions:
-  - [ ] `module M where ...`
-  - [ ] Module parameters
-  - [ ] Module instantiation
-
-- [x] **Record types** — Named sigma types with projections:
-  - [x] `record R where field x : A; field y : B` (desugars to single-constructor inductive)
-  - [x] Automatic projection functions (`r.field` syntax, chained projections)
-  - [x] Parameterized records (`record Pair (A : Type) (B : Type) where ...`)
-  - [x] Constructor auto-named `mk<RecordName>` (e.g. `mkPair`)
-  - [x] Record update syntax
-
-- **Pattern matching improvements** —
-  - [x] Wildcard patterns (`_` binder that discards the argument)
-  - [x] Nested patterns (fixed termination checker infinite recursion)
-  - [x] Or-patterns (`| pat1 | pat2 => body`)
-  - [x] As-patterns (`con binders as name => body`)
-  - [x] Record patterns (`{ field = binder, ... }` syntax for matching records)
-  - [ ] Nested constructor patterns — `suc (suc zero)` matching on literal 2 (requires full pattern AST)
-
-### 5. Cubical-Specific Improvements
-
-- [x] **Face lattice operations** — Better support for:
-  - [x] Face conjunction/disjunction (`dnf_meet`, `dnf_join` in `interval.rs`)
-  - [x] Face implication (`dnf_leq` in `interval.rs`, used in `cumulativity_check`)
-  - [x] Face negation (`dnf_neg` in `interval.rs`)
-  - [x] Face equivalence checking (`dnf_equiv` in `interval.rs`)
-  - [x] Parser support for `/\`, `\/`, `~` (and Unicode)
-  - [x] Face logic unit tests (De Morgan, absorption, idempotence)
-
-- [x] **Comp/hfill system types** — Full support for:
-  - [x] Multi-face systems in all Kan operations
-  - [x] System compatibility checking (via `dnf_meet` in `check_dt`)
-  - [x] System reduction rules (fill/hfill decomposition)
-  - [x] fill/hfill structural decomposition through Pi/Sigma/data types
-
-- [x] **Transport computation** — Transport reduces:
-  - [x] Along constant paths (identity)
-  - [x] Along ua (`equivFwd`)
-  - [x] Through Pi types (non-dep value-level + dep term-level fallback)
-  - [x] Through Sigma types (when x is a pair)
-  - [x] Through Path types (pointwise)
-  - [x] Through inductive types (constant families: VCon, VPCon, VSqCon, VCellCon)
-  - [x] Through record types (via inductive desugaring)
-  - [x] Through Lift/Lower types
-
-### 6. Performance and Metaprogramming
-
-- **Normalization improvements** —
-  - [x] Sharing in NbE — `Scope` persistent environment replaces `Vec<Value>` for env passing. Rc-linked segments make `Scope::extend` O(1) and `Scope::clone` cheap. 17 internal function signatures changed from `&[Value]` to `&Scope`. Closure application uses `Scope::extend` (single allocation) instead of `vec![v] + extend_from_slice` (two allocations + copy). `do_elim` uses `Scope::chain` for env2 construction.
-  - [ ] Incremental normalization
-  - [x] Memoization — `NBE_EVAL_CACHE` caches `nbe_eval` results for terms without metavariables
-
-- **Type checking improvements** —
-  - [x] Constraint-based type inference — `Meta` term variant, `fresh_meta_id`, zonk substitution
-  - [ ] Bidirectional type checking
-  - [x] Pattern unification — `try_solve_meta` with occurs check (`meta_mentions`), `solve_meta`/`get_meta_solution`
-
-- **Metaprogramming** —
-  - [ ] Reflection API
-  - [x] Tactic language — built-in tactics (`by t1; t2; ...`), see `docs/reference.md`
-  - [ ] Custom tactics
-  - [ ] Proof automation
-
-### 7. Library and Ecosystem
-
-- [ ] **Standard library** — Cubical equivalents of:
+- [ ] **Standard library**:
   - Data types (Nat, Int, List, Vector, etc.)
   - Algebra (groups, rings, fields, modules)
   - Order theory (posets, lattices)
   - Topology (continuous maps, homotopy)
   - Category theory (functors, natural transformations)
+- [ ] **Documentation**:
+  - Tutorial / Getting started guide
+  - API reference
+  - Example gallery
+  - Comparison with other cubical systems (Agda cubical, cubicaltt)
 
-- **Documentation** —
-  - [ ] Tutorial / Getting started guide
-  - [ ] API reference
-  - [ ] Example gallery
-  - [ ] Comparison with other cubical systems (Agda cubical, cubicaltt)
+---
+
+## Suggested Order of Attack
+
+1. 🔴 **Cumulativity for Σ/Π and records** — closes soundness gaps in an already-partial feature; cheap relative to payoff.
+2. 🔴 **Omega (linear arithmetic)** and **Ring solver** — highest-value automation; unlocks Group/Field solvers afterward.
+3. 🟡 **Module system basics** (`module M where`) + **qualified imports** — needed before the standard library work in §G can scale.
+4. 🟡 **Nested constructor patterns** — moderate-cost ergonomics fix, independent of everything else.
+5. 🟡 **Interactive REPL proof sessions** — biggest remaining UX win, builds on existing hole/tactic machinery.
+6. 🟢 Remaining items (Group/Field solver, reflection API, custom tactics, incremental normalization, stdlib, docs) — valuable but can proceed in parallel/opportunistically once the above land.

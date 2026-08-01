@@ -142,6 +142,37 @@ U0 : U1 : U2 : ...
 
 **Cumulativity**: if `n <= m`, then `U_n` is a subtype of `U_m`.
 
+Cumulativity extends structurally to the type formers:
+
+- **Pi (dependent functions)** — contravariant in the domain, covariant in the
+  codomain: `Pi(x : A). B ≤ Pi(x : A'). B'` when `A' ≤ A` and `B ≤ B'`.
+  For example, a function quantified over `A : U1` is usable wherever a
+  function quantified over `A : U0` is expected.
+- **Sigma (dependent pairs)** — covariant in both components:
+  `Sigma(x : A). B ≤ Sigma(x : A'). B'` when `A ≤ A'` and `B ≤ B'`.
+- **Inductive types / records** — covariant in the parameters *only when the
+  parameter is covariant in the datatype*: `T ps ≤ T ps'` requires `ps_i ≤ ps'_i`
+  for every parameter `i` whose occurrences in the constructor argument types
+  are all positive.  Parameters are analyzed for variance (positive, negative,
+  or mixed occurrences, tracked through nested datatype applications and
+  mutual definitions):
+  - covariant parameter → `ps_i ≤ ps'_i`,
+  - contravariant parameter (occurs only in arrow domains) → `ps'_i ≤ ps_i`,
+  - invariant parameter (occurs both positively and negatively) → `ps_i == ps'_i`.
+  Since records desugar to single-constructor inductives with all-positive
+  field occurrences, this gives record cumulativity: a record holding a value
+  at `U0` can be used where the same record holding it at `U1` is expected
+  (e.g. via record update).  A datatype whose parameter occurs negatively,
+  such as `data Bad (A) where | mkb : (A -> Nat) -> Bad A`, is *not*
+  covariant in `A`, so `Bad U0 ≤ Bad U1` is rejected.
+- **Path / Partial** — covariant in the type components; Partial additionally
+  requires the inferred cofibration to imply the expected one.
+
+Subtyping is reflexive: identical terms are always subtypes of themselves,
+which is what lets the recursive checks above close over bound variables and
+neutral terms that appear in dependent positions. See
+`examples/cumulativity_sigma_pi.owl` for worked examples.
+
 **Prop** is an impredicative universe for propositions. `Prop : U0`, and
 `Pi(x:Prop). Prop : Prop` (impredicativity). Prop types can be used as
 motives in eliminators.

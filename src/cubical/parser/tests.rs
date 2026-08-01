@@ -423,6 +423,175 @@ fn cumulativity_pi_types() {
 }
 
 #[test]
+fn cumulativity_sigma_types() {
+    use crate::cubical::driver::run_str;
+    // Σ components are covariant: B -> U0 <= B -> U1, and the first
+    // component's universe is covariant too.
+    run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        def pair0 : Σ (B : U0), B -> U0 := (Nat, fun x => Nat)
+        def up0  : Σ (B : U1), B -> U1 := pair0
+        "#,
+    )
+    .expect("sigma component cumulativity should typecheck");
+
+    // Negative: the components are covariant, not contravariant.
+    let err = run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        def pair1 : Σ (B : U0), B -> U1 := (Nat, fun x => Nat)
+        def bad  : Σ (B : U0), B -> U0 := pair1
+        "#,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("Type mismatch") || err.to_string().contains("not"),
+        "negative sigma cumulativity should fail, got: {err}"
+    );
+}
+
+#[test]
+fn cumulativity_record_types() {
+    use crate::cubical::driver::run_str;
+    // A record holding a Σ at U0 can be coerced (via record update) into a
+    // record holding the same Σ at U1, because record (datatype) parameters
+    // are covariant.
+    run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        record Box (A : Type) where field content : A
+        def pair0 : Σ (B : U0), B -> U0 := (Nat, fun x => Nat)
+        def b0 : Box (Σ (B : U0), B -> U0) := mkBox pair0
+        def b1 : Box (Σ (B : U0), B -> U1) := b0 { content = pair0 }
+        "#,
+    )
+    .expect("record param cumulativity should typecheck");
+
+    // Negative: universes are not contravariant, so this must fail.
+    let err = run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        record Box (A : Type) where field content : A
+        def pair0 : Σ (B : U0), B -> U0 := (Nat, fun x => Nat)
+        def b0 : Box (Σ (B : U0), B -> U0) := mkBox pair0
+        def b1 : Box (Σ (B : U0), B -> U1) := b0 { content = pair0 }
+        def bad : Box (Σ (B : U0), B -> U0) := b1 { content = pair0 }
+        "#,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("Type mismatch") || err.to_string().contains("not"),
+        "negative record cumulativity should fail, got: {err}"
+    );
+}
+
+#[test]
+fn cumulativity_contravariant_datatype() {
+    use crate::cubical::driver::run_str;
+    // Bad (A) with `mkb : (A -> Nat) -> Bad A` is contravariant in A: the
+    // parameter occurs in an arrow domain.  Covariant-only checking would
+    // unsoundly accept `Bad U0 <= Bad U1` (it needs U1 <= U0, which is false).
+    run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        inductive Bad (A : Type) where
+          | mkb : (A -> Nat) -> Bad A
+        def b1 : Bad U1 := mkb (fun x => zero)
+        def good : Bad U0 := b1
+        "#,
+    )
+    .expect("contravariant direction Bad U1 <= Bad U0 should typecheck");
+
+    let err = run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        inductive Bad (A : Type) where
+          | mkb : (A -> Nat) -> Bad A
+        def b0 : Bad U0 := mkb (fun x => zero)
+        def bad : Bad U1 := b0
+        "#,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("Type mismatch") || err.to_string().contains("not"),
+        "Bad U0 <= Bad U1 must be rejected for the contravariant datatype, got: {err}"
+    );
+}
+
+#[test]
+fn cumulativity_invariant_datatype() {
+    use crate::cubical::driver::run_str;
+    // A parameter occurring both positively and negatively makes the datatype
+    // invariant: neither subtyping direction is allowed.
+    let err = run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        inductive BadI (A : Type) where
+          | mkb : A -> (A -> Nat) -> BadI A
+        def c0 : BadI U0 := mkb Nat (fun x => zero)
+        def bad : BadI U1 := c0
+        "#,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("Type mismatch") || err.to_string().contains("not"),
+        "BadI U0 <= BadI U1 must be rejected for the invariant datatype, got: {err}"
+    );
+
+    let err = run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        inductive BadI (A : Type) where
+          | mkb : A -> (A -> Nat) -> BadI A
+        def c1 : BadI U1 := mkb U0 (fun x => zero)
+        def bad : BadI U0 := c1
+        "#,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("Type mismatch") || err.to_string().contains("not"),
+        "BadI U1 <= BadI U0 must be rejected for the invariant datatype, got: {err}"
+    );
+}
+
+#[test]
+fn cumulativity_nested_datatype_variance() {
+    use crate::cubical::driver::run_str;
+    // Foo (A) wraps `Bar A`, and Bar is contravariant in A; Foo inherits the
+    // contravariance through the nested application.
+    run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        inductive Bar (A : Type) where
+          | b : (A -> Nat) -> Bar A
+        inductive Foo (A : Type) where
+          | mk : Bar A -> Foo A
+        def f1 : Foo U1 := mk (b (fun x => zero))
+        def good : Foo U0 := f1
+        "#,
+    )
+    .expect("nested contravariant direction Foo U1 <= Foo U0 should typecheck");
+
+    let err = run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        inductive Bar (A : Type) where
+          | b : (A -> Nat) -> Bar A
+        inductive Foo (A : Type) where
+          | mk : Bar A -> Foo A
+        def f0 : Foo U0 := mk (b (fun x => zero))
+        def bad : Foo U1 := f0
+        "#,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("Type mismatch") || err.to_string().contains("not"),
+        "Foo U0 <= Foo U1 must be rejected (inherited contravariance), got: {err}"
+    );
+}
+
+#[test]
 fn data_universe_annotation_parses() {
     let src = "inductive D : U1 where | mk : D";
     let decls = parse_program(src).unwrap();

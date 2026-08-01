@@ -7,7 +7,7 @@ pub mod pretty;
 pub mod positivity;
 
 pub use pretty::show_term;
-pub use positivity::check_datatype_positivity;
+pub use positivity::{Variance, check_datatype_positivity, compute_param_variances};
 
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top};
 
