@@ -15,7 +15,7 @@ pub use errors::{TypeError, err_pos};
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
 use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_leq, dnf_meet};
-use crate::cubical::nbe::nbe_eval;
+use crate::cubical::nbe::{nbe_eval, nbe_eval_ctx};
 use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, Term, beta, shift, show_term, subst};
 use crate::cubical::syntax::{Variance, compute_param_variances};
 
@@ -53,7 +53,7 @@ pub fn lookup_ctx(i: i32, ctx: &Ctx) -> Result<Term, TypeError> {
     if i < 0 || i as usize >= ctx.len() {
         Err(TypeError::UnboundVariable(format!("#{}", i)))
     } else {
-        Ok(nbe_eval(&shift(i + 1, 0, &ctx[i as usize].1)))
+        Ok(nbe_eval_ctx(ctx.len(), &shift(i + 1, 0, &ctx[i as usize].1)))
     }
 }
 
@@ -66,7 +66,7 @@ pub fn lookup_ctx(i: i32, ctx: &Ctx) -> Result<Term, TypeError> {
 /// and `fst (a, b)` reduces to `a`). We retry inference on the fully
 /// reduced term, and only give up if reduction made no progress.
 fn infer_via_reduction(dts: &[Datatype], ctx: &Ctx, t: &Term, original_err: TypeError) -> Result<Term, TypeError> {
-    let reduced = nbe_eval(t);
+    let reduced = nbe_eval_ctx(ctx.len(), t);
     if reduced == *t {
         Err(original_err)
     } else {
@@ -84,14 +84,14 @@ pub fn require_equal(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(), TypeE
     match definitionally_equal_ctx_r(ctx, expected, got) {
         EtaResult::Equal => Ok(()),
         EtaResult::NotEqual => Err(TypeError::TypeMismatch {
-            expected: Box::new(nbe_eval(expected)),
-            got: Box::new(nbe_eval(got)),
+            expected: Box::new(nbe_eval_ctx(ctx.len(), expected)),
+            got: Box::new(nbe_eval_ctx(ctx.len(), got)),
             names: err_names(ctx),
             pos: err_pos(ctx, got),
         }),
         EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted {
-            t1: Box::new(nbe_eval(expected)),
-            t2: Box::new(nbe_eval(got)),
+            t1: Box::new(nbe_eval_ctx(ctx.len(), expected)),
+            t2: Box::new(nbe_eval_ctx(ctx.len(), got)),
             names: err_names(ctx),
             pos: err_pos(ctx, got),
         }),
@@ -102,8 +102,8 @@ pub fn require_equal_endpt(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(),
     match definitionally_equal_ctx_r(ctx, expected, got) {
         EtaResult::Equal => Ok(()),
         EtaResult::NotEqual => {
-            let ne1 = nbe_eval(expected);
-            let ne2 = nbe_eval(got);
+            let ne1 = nbe_eval_ctx(ctx.len(), expected);
+            let ne2 = nbe_eval_ctx(ctx.len(), got);
             Err(TypeError::TypeMismatch {
                 expected: Box::new(ne1),
                 got: Box::new(ne2),
@@ -112,8 +112,8 @@ pub fn require_equal_endpt(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(),
             })
         }
         EtaResult::Exhausted => Err(TypeError::EtaFuelExhausted {
-            t1: Box::new(nbe_eval(expected)),
-            t2: Box::new(nbe_eval(got)),
+            t1: Box::new(nbe_eval_ctx(ctx.len(), expected)),
+            t2: Box::new(nbe_eval_ctx(ctx.len(), got)),
             names: err_names(ctx),
             pos: err_pos(ctx, got),
         }),
@@ -128,7 +128,7 @@ pub fn require_universe(ctx: &Ctx, t: &Term) -> Result<Level, TypeError> {
 #[allow(dead_code)]
 fn require_universe_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeError> {
     let ty = infer_dt(dts, ctx, t)?;
-    match nbe_eval(&ty) {
+    match nbe_eval_ctx(ctx.len(), &ty) {
         Term::TUniv(n) => Ok(n),
         other => Err(TypeError::ExpectedUniverse {
             ty: other.clone(),
@@ -145,7 +145,7 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
     match t {
         Term::TPi(x, a, b) => {
             let i = type_level_dt(dts, ctx, a)?;
-            let ctx2 = extend_ctx(x.clone(), nbe_eval(a), ctx);
+            let ctx2 = extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), a), ctx);
             let j = type_level_dt(dts, &ctx2, b)?;
             Ok(i.max(j))
         }
@@ -153,24 +153,24 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
             // For PathP-style dependent paths, a may be a PLam (type family).
             // In that case, check that the body of the PLam is well-typed,
             // and verify endpoints against the instantiated family.
-            let n = match nbe_eval(a) {
+            let n = match nbe_eval_ctx(ctx.len(), a) {
                 Term::PLam(_, body) => {
                     // The type family body should be well-typed in a context
                     // with an interval variable. We check that the family
                     // returns values in some universe by checking at i0.
                     let ctx2 = extend_ctx("_i".to_string(), interval_ty(), ctx);
-                    let a_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
+                    let a_at0 = nbe_eval_ctx(ctx2.len(), &beta(&body, &Term::TInterval(I::I0)));
                     type_level_dt(dts, &ctx2, &a_at0)?
                 }
                 _ => type_level_dt(dts, ctx, a)?,
             };
-            let a_ = nbe_eval(a);
+            let a_ = nbe_eval_ctx(ctx.len(), a);
             let u_ty = match &a_ {
-                Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I0))),
+                Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I0))),
                 p => p.clone(),
             };
             let v_ty = match &a_ {
-                Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I1))),
+                Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I1))),
                 p => p.clone(),
             };
             check_dt(dts, ctx, u, &u_ty)?;
@@ -189,11 +189,11 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
         }
         Term::TSigma(x, a, b) => {
             let i = type_level_dt(dts, ctx, a)?;
-            let ctx2 = extend_ctx(x.clone(), nbe_eval(a), ctx);
+            let ctx2 = extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), a), ctx);
             let j = type_level_dt(dts, &ctx2, b)?;
             Ok(i.max(j))
         }
-        _ => match nbe_eval(t) {
+        _ => match nbe_eval_ctx(ctx.len(), t) {
             Term::TProp => Ok(0),   // Prop : U0
             Term::TSSet => Ok(1),   // SSet : U1
             Term::TUniv(n) => Ok(n),
@@ -207,7 +207,7 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
             Term::TIntervalTy => Ok(0),
             _ => {
                 let ty = infer_dt(dts, ctx, t)?;
-                match nbe_eval(&ty) {
+                match nbe_eval_ctx(ctx.len(), &ty) {
                     Term::TUniv(n) => Ok(n),
                     other => Err(TypeError::ExpectedUniverse {
                         ty: other,
@@ -248,8 +248,8 @@ pub fn require_equiv(ctx: &Ctx, t: &Term) -> Result<(Term, Term), TypeError> {
 
 fn require_equiv_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<(Term, Term), TypeError> {
     let ty = infer_dt(dts, ctx, t)?;
-    match nbe_eval(&ty) {
-        Term::TEquiv(a, b) => Ok((nbe_eval(&a), nbe_eval(&b))),
+    match nbe_eval_ctx(ctx.len(), &ty) {
+        Term::TEquiv(a, b) => Ok((nbe_eval_ctx(ctx.len(), &a), nbe_eval_ctx(ctx.len(), &b))),
         other => Err(TypeError::ExpectedEquiv {
             ty: other,
             names: err_names(ctx),
@@ -680,7 +680,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         }
         // Universe lowering: lower A : U_n when A : U_{n+1}
         Term::TLower(a) => {
-            match nbe_eval(a) {
+            match nbe_eval_ctx(ctx.len(), a) {
                 Term::TLift(inner, _m) => {
                     let lvl = type_level_dt(dts, ctx, &inner)?;
                     Ok(Term::TUniv(lvl))
@@ -701,7 +701,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             Ok(f_ty) => {
                 let (a_ty, b_ty) = match &f_ty {
                     Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                    _ => match nbe_eval(&f_ty) {
+                    _ => match nbe_eval_ctx(ctx.len(), &f_ty) {
                         Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                         other => return Err(TypeError::ExpectedPi {
                             ty: other,
@@ -711,7 +711,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     },
                 };
                 check_dt(dts, ctx, a, &a_ty)?;
-                Ok(nbe_eval(&beta(&b_ty, a)))
+                Ok(nbe_eval_ctx(ctx.len(), &beta(&b_ty, a)))
             }
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
@@ -719,28 +719,28 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         // Pi formation: Π(x:A).B : U(max i j)
         Term::TPi(x, a_ty, b_ty) => {
             let i = type_level_dt(dts, ctx, a_ty)?;
-            let ctx2 = extend_ctx(x.clone(), nbe_eval(a_ty), ctx);
+            let ctx2 = extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), a_ty), ctx);
             let j = type_level_dt(dts, &ctx2, b_ty)?;
             Ok(Term::TUniv(i.max(j)))
         }
 
         // Path type: Path A u v : U n
         Term::TPath(a_ty, u, v) => {
-            let n = match nbe_eval(a_ty) {
+            let n = match nbe_eval_ctx(ctx.len(), a_ty) {
                 Term::PLam(_, body) => {
                     let ctx2 = extend_ctx("_i".to_string(), interval_ty(), ctx);
-                    let a_at0 = nbe_eval(&beta(&body, &Term::TInterval(I::I0)));
+                    let a_at0 = nbe_eval_ctx(ctx2.len(), &beta(&body, &Term::TInterval(I::I0)));
                     type_level_dt(dts, &ctx2, &a_at0)?
                 }
                 _ => type_level_dt(dts, ctx, a_ty)?,
             };
-            let a_ty_ = nbe_eval(a_ty);
+            let a_ty_ = nbe_eval_ctx(ctx.len(), a_ty);
             let u_ty = match &a_ty_ {
-                Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I0))),
+                Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I0))),
                 p => p.clone(),
             };
             let v_ty = match &a_ty_ {
-                Term::PLam(_, body) => nbe_eval(&beta(body, &Term::TInterval(I::I1))),
+                Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I1))),
                 p => p.clone(),
             };
             check_dt(dts, ctx, u, &u_ty)?;
@@ -750,12 +750,12 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
 
         // Path application: p @ r
         Term::PApp(p, r) => match infer_dt(dts, ctx, p) {
-            Ok(p_ty) => match nbe_eval(&p_ty) {
+            Ok(p_ty) => match nbe_eval_ctx(ctx.len(), &p_ty) {
                 Term::TPath(a_ty, _, _) => {
                     check_interval_dt(dts, ctx, r)?;
-                    let r_ = nbe_eval(r);
-                    Ok(match nbe_eval(&a_ty) {
-                        Term::PLam(_, body) => nbe_eval(&beta(&body, &r_)),
+                    let r_ = nbe_eval_ctx(ctx.len(), r);
+                    Ok(match nbe_eval_ctx(ctx.len(), &a_ty) {
+                        Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(&body, &r_)),
                         plain => plain,
                     })
                 }
@@ -818,8 +818,8 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         Term::TMkEquiv(a, b, f, g, eta, eps) => {
             type_level_dt(dts, ctx, a)?;
             type_level_dt(dts, ctx, b)?;
-            let a_ = nbe_eval(a);
-            let b_ = nbe_eval(b);
+            let a_ = nbe_eval_ctx(ctx.len(), a);
+            let b_ = nbe_eval_ctx(ctx.len(), b);
             // f : A → B
             check(
                 ctx,
@@ -2726,7 +2726,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
         Term::TAbs(x, body) => {
             let (a_ty, b_ty) = match ty {
                 Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                _ => match nbe_eval(ty) {
+                _ => match nbe_eval_ctx(ctx.len(), ty) {
                     Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                     other => return Err(TypeError::ExpectedPi {
                         ty: other,
@@ -2737,7 +2737,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             };
             check_dt(
                 dts,
-                &extend_ctx(x.clone(), nbe_eval(&a_ty), ctx),
+                &extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), &a_ty), ctx),
                 body,
                 &b_ty,
             )
@@ -2747,7 +2747,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
         Term::PLam(i, body) => {
             let (a_ty, u, v) = match ty {
                 Term::TPath(a, u, v) => (a.as_ref().clone(), u.as_ref().clone(), v.as_ref().clone()),
-                _ => match nbe_eval(ty) {
+                _ => match nbe_eval_ctx(ctx.len(), ty) {
                     Term::TPath(a, u, v) => {
                         (a.as_ref().clone(), u.as_ref().clone(), v.as_ref().clone())
                     }
@@ -2759,10 +2759,10 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 },
             };
             let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
-            let body_ty = match nbe_eval(&a_ty) {
+            let body_ty = match nbe_eval_ctx(ctx.len(), &a_ty) {
                 // a_ty is a type family (PLam): apply it to the freshly-bound
                 // interval variable TVar(0) to get the body's type.
-                Term::PLam(_, b) => nbe_eval(&beta(&b, &Term::TVar(0))),
+                Term::PLam(_, b) => nbe_eval_ctx(ctx2.len(), &beta(&b, &Term::TVar(0))),
                 // a_ty is a constant type: shift it into the extended context.
                 plain => shift(1, 0, &plain),
             };
@@ -2781,17 +2781,17 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                         dts,
                         &apply_literal(&Literal::NegVar(0), body),
                     );
-                    nbe_eval(&shift(-1, 0, &reduced))
+                    nbe_eval_ctx(ctx.len(), &shift(-1, 0, &reduced))
                 };
                 let body_at1 = {
                     let reduced = reduce_pcon_endpoints_dt(
                         dts,
                         &apply_literal(&Literal::Pos(0), body),
                     );
-                    nbe_eval(&shift(-1, 0, &reduced))
+                    nbe_eval_ctx(ctx.len(), &shift(-1, 0, &reduced))
                 };
-                require_equal_endpt(ctx, &nbe_eval(&u), &body_at0)?;
-                require_equal_endpt(ctx, &nbe_eval(&v), &body_at1)?;
+                require_equal_endpt(ctx, &nbe_eval_ctx(ctx.len(), &u), &body_at0)?;
+                require_equal_endpt(ctx, &nbe_eval_ctx(ctx.len(), &v), &body_at1)?;
             }
             check_dt(dts, &ctx2, body, &body_ty)
         }

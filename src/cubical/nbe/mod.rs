@@ -18,6 +18,7 @@ use trace::record_step;
 // without threading `dts` through every NbE function signature.
 thread_local! {
     static CURRENT_DTS: std::cell::RefCell<Vec<Datatype>> = std::cell::RefCell::new(Vec::new());
+    static CURRENT_GLOBALS: std::cell::RefCell<Option<Globals>> = std::cell::RefCell::new(None);
     static NBE_EVAL_CACHE: std::cell::RefCell<HashMap<Term, Term>> = std::cell::RefCell::new(HashMap::new());
     static METAVAR_SOLUTIONS: std::cell::RefCell<Vec<Option<Term>>> = std::cell::RefCell::new(Vec::new());
     static META_NAMES: std::cell::RefCell<Vec<Option<Name>>> = std::cell::RefCell::new(Vec::new());
@@ -35,6 +36,17 @@ pub fn set_current_dts(dts: &[Datatype]) {
 fn current_dts() -> Vec<Datatype> {
     CURRENT_DTS.with(|cell| {
         cell.borrow().clone()
+    })
+}
+
+/// Set the current global definition values used by `nbe_eval_ctx`.
+/// Returns the previously-set value so callers can restore it.
+pub fn set_current_globals(globals: Option<Globals>) -> Option<Globals> {
+    CURRENT_GLOBALS.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let prev = slot.take();
+        *slot = globals;
+        prev
     })
 }
 
@@ -3150,6 +3162,27 @@ pub fn nbe_eval_with_globals(t: &Term, globals: &Globals, global_offset: usize) 
     // The env starts empty — all TVars resolve to globals.
     // Lambdas push binders onto the env during evaluation via do_apply.
     normalize(&Scope::empty(), globals, global_offset, t)
+}
+
+/// Evaluate a term with access to the thread-local global definition values
+/// (set via `set_current_globals`). The first `ctx_len` de Bruijn indices are
+/// treated as local binders and the remainder as global references, matching
+/// the typechecker convention that global definitions sit at the bottom of the
+/// context. Falls back to `nbe_eval` (no globals) when none are set.
+pub fn nbe_eval_ctx(ctx_len: usize, t: &Term) -> Term {
+    let Some(globals) = CURRENT_GLOBALS.with(|cell| cell.borrow().clone()) else {
+        return nbe_eval(t);
+    };
+    let n_globals = globals.borrow().len();
+    let n_local = ctx_len.saturating_sub(n_globals);
+    let mut env = Scope::empty();
+    for g in globals.borrow().iter().rev().cloned() {
+        env = env.extend(g);
+    }
+    for level in 0..n_local {
+        env = env.extend(Value::VNeutral(Neutral::NVar(level)));
+    }
+    quote(n_local, &globals, 0, eval_nbe(&env, &globals, 0, t))
 }
 
 fn do_equiv_fwd(globals: &Globals, global_offset: usize, e: Value, x: Value) -> Value {

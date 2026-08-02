@@ -1,5 +1,5 @@
 use crate::cubical::equality::EtaResult;
-use crate::cubical::nbe::nbe_eval;
+use crate::cubical::nbe::{nbe_eval, nbe_eval_ctx};
 use crate::cubical::syntax::{Datatype, Name, Term, beta, shift, show_term};
 use crate::cubical::typechecker::{Ctx, TypeError, err_pos, infer_dt};
 
@@ -443,16 +443,16 @@ impl<'a> TacticEngine<'a> {
 
         match tactic {
             Tactic::Intro(names) => {
-                let mut current_ty = nbe_eval(&self.goal_ty);
+                let mut current_ty = nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &self.goal_ty);
 
                 for name in names {
                     match current_ty {
                         Term::TPi(_x, a, b) => {
-                            let dom = nbe_eval(&a);
+                            let dom = nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &a);
                             // Use the user-provided name, not the type's binder name,
                             // so that name-based tactics (destruct, assumption) work.
                             self.tactic_ctx.insert(0, (name.clone(), dom));
-                            current_ty = nbe_eval(&b);
+                            current_ty = nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &b);
                             self.intro_names.push(name.clone());
                         }
                         other => {
@@ -994,7 +994,8 @@ impl<'a> TacticEngine<'a> {
             Tactic::Compute => {
                 // Normalize the goal type in place.  This doesn't produce a
                 // proof term; it just simplifies the goal.
-                self.goal_ty = nbe_eval(&self.goal_ty);
+                self.goal_ty =
+                    nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &self.goal_ty);
                 Ok(())
             }
 
@@ -1004,12 +1005,12 @@ impl<'a> TacticEngine<'a> {
                 // endpoints, prove it.
                 let mut combined_ctx = self.tactic_ctx.clone();
                 combined_ctx.extend_from_slice(outer_ctx);
-                let goal_nf = nbe_eval(&self.goal_ty);
+                let goal_nf = nbe_eval_ctx(combined_ctx.len(), &self.goal_ty);
 
                 match goal_nf {
                     Term::TPath(_a, u, v) => {
-                        let u_nf = nbe_eval(&u);
-                        let v_nf = nbe_eval(&v);
+                        let u_nf = nbe_eval_ctx(combined_ctx.len(), &u);
+                        let v_nf = nbe_eval_ctx(combined_ctx.len(), &v);
                         match definitionally_equal_ctx_r(&combined_ctx, &u_nf, &v_nf) {
                             EtaResult::Equal => {
                                 let body = shift(1, 0, &u);
@@ -1102,7 +1103,7 @@ pub fn resolve_tactics(
 ) -> Result<Term, TypeError> {
     match val {
         Term::TBy(tactics) => {
-            let goal_ty = nbe_eval(ty);
+            let goal_ty = nbe_eval_ctx(ctx.len(), ty);
             let mut engine = TacticEngine::new(dts, goal_ty);
             for tac in tactics {
                 engine.run_tactic(tac, ctx)?;

@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::cubical::env::{Env, apply_globals, check_with_full_env, infer_with_full_env};
-use crate::cubical::nbe::{Globals, Neutral, Scope, Value, eval_nbe, nbe_eval, nbe_eval_with_globals, zonk};
+use crate::cubical::env::{Env, check_with_full_env, infer_with_full_env};
+use crate::cubical::nbe::{nbe_eval, nbe_eval_with_globals, zonk};
 use crate::cubical::parser::{Decl, ProgramParser};
 use crate::cubical::syntax::{Name, Term};
 use crate::cubical::typechecker::{Ctx, TypeError};
@@ -131,20 +131,6 @@ fn run_source(root_path: &Path, source: &str) -> Result<RunOutput, RunError> {
     }
 }
 
-fn build_definition_values(env: &Env) -> Globals {
-    let placeholder = Value::VNeutral(Neutral::NVar(0));
-    let globals = std::rc::Rc::new(std::cell::RefCell::new(vec![placeholder; env.defs.len()]));
-
-    // Definitions are stored newest-first, so evaluate oldest-first. The
-    // shared vector also lets closures see their recursive definition once its
-    // placeholder has been replaced.
-    for index in (0..env.defs.len()).rev() {
-        let (_, _, value) = &env.defs[index];
-        globals.borrow_mut()[index] = eval_nbe(&Scope::empty(), &globals, index, value);
-    }
-    globals
-}
-
 fn normalize_definition(env: &Env, name: &str) -> RunOutput {
     let index = env
         .defs
@@ -152,7 +138,7 @@ fn normalize_definition(env: &Env, name: &str) -> RunOutput {
         .position(|(candidate, _, _)| candidate == name)
         .expect("definition selected from environment must exist");
     let (name, ty, value) = &env.defs[index];
-    let globals = build_definition_values(env);
+    let globals = crate::cubical::env::build_definition_values(env);
     RunOutput {
         name: name.clone(),
         ty: zonk(ty),
@@ -383,14 +369,21 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     if by_wf {
         crate::cubical::typechecker::termination::set_skip_guard(true);
     }
-    let closed_ty_globals = apply_globals(&env.defs, ty);
-    let closed_val = val.clone();
+    crate::debug_log!("process_def '{}' raw_ty: {}", name, crate::cubical::syntax::pretty::show_term(&[], ty));
+    // Rebase the raw annotation into the body-check context (own definition
+    // at de Bruijn index 0, older definitions at j+1). We deliberately do NOT
+    // close the annotation by evaluating it against the current definitions'
+    // values: inlining a definition body and re-quoting it re-anchors the
+    // references inside stuck elim case bodies onto the wrong slots (e.g.
+    // `cong_suc`'s body materialized inside `add`'s elim cases). Keeping the
+    // raw references means they are resolved lazily by `nbe_eval_ctx` against
+    // the thread-local globals, where the layout matches.
+    let check_ty = crate::cubical::syntax::shift(1, 0, ty);
 
     // If the type annotation is a `_` hole, skip the universe-level check;
     // it will be solved during body typechecking.
-    let closed_ty_nf = nbe_eval(&closed_ty_globals);
-    if !matches!(closed_ty_globals, Term::Meta(_)) {
-        match nbe_eval(&infer_with_full_env(env, &closed_ty_nf)?) {
+    if !matches!(ty, Term::Meta(_)) {
+        match nbe_eval(&infer_with_full_env(env, ty)?) {
             Term::TUniv(_) => {}
             other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse { ty: other, names: vec![], pos: None }))),
         }
@@ -407,17 +400,21 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     // The parser inserts the current definition's name at global_env[0]
     // before parsing the value, so it is available for self-reference.
     // Mirror that here by pushing the current name+type at the front.
-    global_ctx.insert(0, (name.clone(), closed_ty_globals.clone()));
+    global_ctx.insert(0, (name.clone(), check_ty.clone()));
     let resolved_val = crate::cubical::tactics::resolve_tactics(
         &env.datatypes,
-        &closed_val,
-        &closed_ty_globals,
+        val,
+        &check_ty,
         &global_ctx,
     ).map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)))?;
 
     // Register before checking the body so recursive calls resolve.
-    env.define(name.clone(), closed_ty_globals.clone(), resolved_val.clone());
-    let result = check_with_full_env(env, &resolved_val, &closed_ty_globals)
+    // Store the RAW annotation so that consumers resolving this definition's
+    // type via the stored-ref convention
+    // (`nbe_eval_ctx(ctx.len(), shift(j+1, 0, annotation))`) see a clean,
+    // non-inlined annotation.
+    env.define(name.clone(), ty.clone(), resolved_val.clone());
+    let result = check_with_full_env(env, &resolved_val, &check_ty)
         .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
     if by_wf {
         crate::cubical::typechecker::termination::set_skip_guard(false);
@@ -426,7 +423,7 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
 
     // Unsolved-hole check: a definition may not leave `?` / `_` holes open.
     let mut metas = unsolved_hole_report(&zonk(&resolved_val));
-    metas.extend(unsolved_hole_report(&zonk(&closed_ty_globals)));
+    metas.extend(unsolved_hole_report(&zonk(ty)));
     if !metas.is_empty() {
         let names: Vec<Name> = env.defs.iter().map(|(n, _, _)| n.clone()).collect();
         return Err(RunError::Type(Box::new(ContextualError::with_def(
@@ -438,7 +435,7 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
 
     let output = RunOutput {
         name: name.clone(),
-        ty: zonk(&closed_ty_globals),
+        ty: zonk(ty),
         value: zonk(&nbe_eval(&resolved_val)),
         global_names: env.defs.iter().map(|(n, _, _)| n.clone()).collect(),
     };

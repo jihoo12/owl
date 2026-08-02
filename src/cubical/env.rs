@@ -4,6 +4,7 @@
 //   crate::syntax::{Name, Term, Datatype, shift, subst}
 //   crate::typechecker::{Ctx, TypeError, infer, check, infer_dt, check_dt}
 
+use crate::cubical::nbe::{eval_nbe, set_current_globals, Globals, Neutral, Scope, Value};
 use crate::cubical::syntax::{Datatype, Name, Term, shift, subst};
 use crate::cubical::typechecker::{Ctx, TypeError, check, check_dt, infer, infer_dt};
 
@@ -116,12 +117,35 @@ pub fn check_with_env(genv: &GlobalEnv, t: &Term, ty: &Term) -> Result<(), TypeE
 // Typing with full Env (definitions + datatypes)
 // ---------------------------------------------------------------------------
 
+/// Build the shared vector of global definition values for an environment.
+///
+/// Definitions are stored newest-first, so we evaluate oldest-first; the
+/// shared vector lets closures see their recursive definition once its
+/// placeholder has been replaced.
+pub fn build_definition_values(env: &Env) -> Globals {
+    let placeholder = Value::VNeutral(Neutral::NVar(0));
+    let globals = std::rc::Rc::new(std::cell::RefCell::new(vec![placeholder; env.defs.len()]));
+    for index in (0..env.defs.len()).rev() {
+        let (_, _, value) = &env.defs[index];
+        globals.borrow_mut()[index] = eval_nbe(&Scope::empty(), &globals, index, value);
+    }
+    globals
+}
+
 /// Infer the type of a term in a full `Env`.
 pub fn infer_with_full_env(env: &Env, t: &Term) -> Result<Term, TypeError> {
-    infer_dt(&env.datatypes, &global_ctx(&env.defs), t)
+    let globals = build_definition_values(env);
+    let prev = set_current_globals(Some(globals));
+    let result = infer_dt(&env.datatypes, &global_ctx(&env.defs), t);
+    set_current_globals(prev);
+    result
 }
 
 /// Check a term against a type in a full `Env`.
 pub fn check_with_full_env(env: &Env, t: &Term, ty: &Term) -> Result<(), TypeError> {
-    check_dt(&env.datatypes, &global_ctx(&env.defs), t, ty)
+    let globals = build_definition_values(env);
+    let prev = set_current_globals(Some(globals));
+    let result = check_dt(&env.datatypes, &global_ctx(&env.defs), t, ty);
+    set_current_globals(prev);
+    result
 }
