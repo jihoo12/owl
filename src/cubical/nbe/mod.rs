@@ -3,12 +3,12 @@
 pub mod trace;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
 use crate::cubical::equality::definitionally_equal;
-use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top, eval_interval};
-use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, System, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, show_term, subst};
+use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_top, eval_interval};
+use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, System, Tactic, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, show_term, subst};
 
 use crate::cubical::debug;
 use trace::record_step;
@@ -142,7 +142,10 @@ pub enum Value {
     VSqCon(Name, Name, Vec<Value>, Box<Value>, Box<Value>),
     /// N-dimensional cell constructor value: `VCellCon(dt, con, args, ivars)`.
     VCellCon(Name, Name, Vec<Value>, Vec<Value>),
-    VElim(Box<Value>, Vec<ElimCase>, Box<Value>),
+    /// Stuck eliminator. The trailing `Scope` is the evaluation environment
+    /// at the eliminator's creation site; it is used when re-quoting the
+    /// stored raw case bodies (see `quote_case_body`).
+    VElim(Box<Value>, Vec<ElimCase>, Box<Value>, Scope, usize),
     VGlue(Box<Value>, DNF, Box<Value>),
     VPartial(Box<Value>, Box<Value>),
     VSystemType(DNFSystem),
@@ -199,7 +202,7 @@ pub enum Neutral {
     NCellApp(Box<Neutral>, Vec<Value>),
     NFst(Box<Neutral>),
     NSnd(Box<Neutral>),
-    NElim(Box<Value>, Vec<ElimCase>, Box<Neutral>),
+    NElim(Box<Value>, Vec<ElimCase>, Box<Neutral>, Scope, usize),
     NTransport(Box<Value>, Box<Value>),
     NHComp(Box<Value>, DNFSystem, Box<Value>),
     NComp(Box<Value>, DNFSystem, Box<Value>),
@@ -228,9 +231,245 @@ impl IClosure {
     }
 
     pub fn apply_interval_value(&self, v: Value) -> Value {
-        let env = self.env.extend(v);
-        eval_nbe(&env, &self.globals, self.global_offset, &self.body)
+        match &v {
+            Value::VInterval(i) => {
+                // The closure body references its bound interval variable as
+                // `I::Var(0)` (incrementing under nested PLams). Substitute it
+                // with the applied interval value *before* evaluating; extending
+                // the env is insufficient because eval_nbe's TInterval arm never
+                // resolves interval vars against the env.
+                //
+                // The interval binder occupies a term slot in the parsed body
+                // (the parser pushes a dummy binder for `<i>`), so we must push a
+                // slot onto the env here as well — matching the `VIntervalVar`
+                // and `other` arms below — or term variables inside the body
+                // resolve one binder too high.
+                let body = subst_interval_var(&self.body, 0, i);
+                let env = self.env.extend(Value::VInterval(i.clone()));
+                eval_nbe(&env, &self.globals, self.global_offset, &body)
+            }
+            Value::VIntervalVar(_level) => {
+                let env = self.env.extend(v);
+                eval_nbe(&env, &self.globals, self.global_offset, &self.body)
+            }
+            other => {
+                let env = self.env.extend(other.clone());
+                eval_nbe(&env, &self.globals, self.global_offset, &self.body)
+            }
+        }
     }
+}
+
+/// Structurally substitute interval variable `Var(target)` (the closure's
+/// bound interval variable, incremented under nested PLams) with `val` in a
+/// term. Pure traversal — no re-normalisation; the caller evaluates the result.
+fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
+    fn go_i(i: &I, target: i32, val: &I) -> I {
+        match i {
+            I::Var(k) if *k == target => val.clone(),
+            I::Meet(a, b) => {
+                I::Meet(Box::new(go_i(a, target, val)), Box::new(go_i(b, target, val)))
+            }
+            I::Join(a, b) => {
+                I::Join(Box::new(go_i(a, target, val)), Box::new(go_i(b, target, val)))
+            }
+            I::Neg(a) => I::Neg(Box::new(go_i(a, target, val))),
+            other => other.clone(),
+        }
+    }
+
+    fn go(t: &Term, target: i32, val: &I) -> Term {
+        match t {
+            Term::TInterval(i) => Term::TInterval(go_i(i, target, val)),
+            Term::TCube(DNF { cubes }) => {
+                let subst_lit = |l: &Literal| -> I {
+                    match l {
+                        Literal::Pos(k) => go_i(&I::Var(*k), target, val),
+                        Literal::NegVar(k) => I::Neg(Box::new(go_i(&I::Var(*k), target, val))),
+                    }
+                };
+                let subst_cube = |c: &BTreeSet<Literal>| -> I {
+                    c.iter().fold(I::I1, |acc, l| {
+                        I::Meet(Box::new(subst_lit(l)), Box::new(acc))
+                    })
+                };
+                let combined = cubes.iter().fold(I::I0, |acc, c| {
+                    I::Join(Box::new(subst_cube(c)), Box::new(acc))
+                });
+                Term::TInterval(combined)
+            }
+            Term::TApp(f, a) => Term::TApp(
+                Box::new(go(f, target, val)),
+                Box::new(go(a, target, val)),
+            ),
+            Term::TAbs(x, b) => Term::TAbs(x.clone(), Box::new(go(b, target, val))),
+            Term::TPi(x, a, b) => Term::TPi(
+                x.clone(),
+                Box::new(go(a, target, val)),
+                Box::new(go(b, target, val)),
+            ),
+            Term::TPath(a, u, v) => Term::TPath(
+                Box::new(go(a, target, val)),
+                Box::new(go(u, target, val)),
+                Box::new(go(v, target, val)),
+            ),
+            Term::PLam(x, b) => Term::PLam(x.clone(), Box::new(go(b, target + 1, val))),
+            Term::PApp(p, r) => Term::PApp(
+                Box::new(go(p, target, val)),
+                Box::new(go(r, target, val)),
+            ),
+            Term::THComp(a, sys, base) => Term::THComp(
+                Box::new(go(a, target, val)),
+                sys.iter()
+                    .map(|(phi, t)| (go(phi, target, val), go(t, target, val)))
+                    .collect(),
+                Box::new(go(base, target, val)),
+            ),
+            Term::TComp(a, sys, base) => Term::TComp(
+                Box::new(go(a, target, val)),
+                sys.iter()
+                    .map(|(phi, t)| (go(phi, target, val), go(t, target, val)))
+                    .collect(),
+                Box::new(go(base, target, val)),
+            ),
+            Term::TFill(a, sys, base) => Term::TFill(
+                Box::new(go(a, target, val)),
+                sys.iter()
+                    .map(|(phi, t)| (go(phi, target, val), go(t, target, val)))
+                    .collect(),
+                Box::new(go(base, target, val)),
+            ),
+            Term::THFill(a, sys, base) => Term::THFill(
+                Box::new(go(a, target, val)),
+                sys.iter()
+                    .map(|(phi, t)| (go(phi, target, val), go(t, target, val)))
+                    .collect(),
+                Box::new(go(base, target, val)),
+            ),
+            Term::TEquiv(a, b) => {
+                Term::TEquiv(Box::new(go(a, target, val)), Box::new(go(b, target, val)))
+            }
+            Term::TMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
+                Box::new(go(a, target, val)),
+                Box::new(go(b, target, val)),
+                Box::new(go(f, target, val)),
+                Box::new(go(g, target, val)),
+                Box::new(go(eta, target, val)),
+                Box::new(go(eps, target, val)),
+            ),
+            Term::TEquivFwd(e, x) => Term::TEquivFwd(
+                Box::new(go(e, target, val)),
+                Box::new(go(x, target, val)),
+            ),
+            Term::TUa(e) => Term::TUa(Box::new(go(e, target, val))),
+            Term::TTransport(p, x) => Term::TTransport(
+                Box::new(go(p, target, val)),
+                Box::new(go(x, target, val)),
+            ),
+            Term::TGlue(a, ph, te) => Term::TGlue(
+                Box::new(go(a, target, val)),
+                Box::new(go(ph, target, val)),
+                Box::new(go(te, target, val)),
+            ),
+            Term::TGlueElem(ph, x, a) => Term::TGlueElem(
+                Box::new(go(ph, target, val)),
+                Box::new(go(x, target, val)),
+                Box::new(go(a, target, val)),
+            ),
+            Term::TUnglue(ph, te, g) => Term::TUnglue(
+                Box::new(go(ph, target, val)),
+                Box::new(go(te, target, val)),
+                Box::new(go(g, target, val)),
+            ),
+            Term::TPartial(ph, a) => Term::TPartial(
+                Box::new(go(ph, target, val)),
+                Box::new(go(a, target, val)),
+            ),
+            Term::TSystemType(sys) => Term::TSystemType(
+                sys.iter()
+                    .map(|(phi, a)| (go(phi, target, val), go(a, target, val)))
+                    .collect(),
+            ),
+            Term::TSigma(x, a, b) => Term::TSigma(
+                x.clone(),
+                Box::new(go(a, target, val)),
+                Box::new(go(b, target, val)),
+            ),
+            Term::TPair(a, b) => {
+                Term::TPair(Box::new(go(a, target, val)), Box::new(go(b, target, val)))
+            }
+            Term::TFst(p) => Term::TFst(Box::new(go(p, target, val))),
+            Term::TSnd(p) => Term::TSnd(Box::new(go(p, target, val))),
+            Term::TData(d, params) => Term::TData(
+                d.clone(),
+                params.iter().map(|a| go(a, target, val)).collect(),
+            ),
+            Term::TCon(data, con, args) => Term::TCon(
+                data.clone(),
+                con.clone(),
+                args.iter().map(|a| go(a, target, val)).collect(),
+            ),
+            Term::TPCon(data, con, args, r) => Term::TPCon(
+                data.clone(),
+                con.clone(),
+                args.iter().map(|a| go(a, target, val)).collect(),
+                Box::new(go(r, target, val)),
+            ),
+            Term::TSqCon(data, con, args, r, s) => Term::TSqCon(
+                data.clone(),
+                con.clone(),
+                args.iter().map(|a| go(a, target, val)).collect(),
+                Box::new(go(r, target, val)),
+                Box::new(go(s, target, val)),
+            ),
+            Term::TCellCon(data, con, args, ivars) => Term::TCellCon(
+                data.clone(),
+                con.clone(),
+                args.iter().map(|a| go(a, target, val)).collect(),
+                ivars.iter().map(|a| go(a, target, val)).collect(),
+            ),
+            Term::TElim(motive, cases, scrut) => Term::TElim(
+                Box::new(go(motive, target, val)),
+                cases
+                    .iter()
+                    .map(|c| ElimCase {
+                        con: c.con.clone(),
+                        binders: c.binders.clone(),
+                        body: Box::new(go(&c.body, target, val)),
+                        as_name: c.as_name.clone(),
+                        record_bindings: c.record_bindings.clone(),
+                    })
+                    .collect(),
+                Box::new(go(scrut, target, val)),
+            ),
+            Term::TProj(field, record) => Term::TProj(
+                field.clone(),
+                Box::new(go(record, target, val)),
+            ),
+            Term::TRecordUpdate(record, fields) => Term::TRecordUpdate(
+                Box::new(go(record, target, val)),
+                fields
+                    .iter()
+                    .map(|(f, t)| (f.clone(), go(t, target, val)))
+                    .collect(),
+            ),
+            Term::TDelay(a) => Term::TDelay(Box::new(go(a, target, val))),
+            Term::TNext(a) => Term::TNext(Box::new(go(a, target, val))),
+            Term::TForce(a) => Term::TForce(Box::new(go(a, target, val))),
+            Term::TBy(tactics) => Term::TBy(
+                tactics
+                    .iter()
+                    .map(|tac| match tac {
+                        Tactic::Exact(t) => Tactic::Exact(go(t, target, val)),
+                        other => other.clone(),
+                    })
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    go(t, target, val)
 }
 
 /// Evaluate a term with local variables in `env` and global definitions in `globals`.
@@ -241,6 +480,10 @@ impl IClosure {
 ///   globals[global_offset + (k - env.len())]
 /// UNLESS that is also out of bounds — in which case we create a neutral.
 pub fn eval_nbe(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Value {
+    eval_nbe_inner(env, globals, global_offset, t)
+}
+
+fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Value {
     match t {
         Term::TVar(i) => {
             let i = *i as usize;
@@ -579,7 +822,9 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
                 Box::new(other),
             ),
         },
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NPApp(Box::new(n), Box::new(r))),
+        Value::VNeutral(n) => {
+            Value::VNeutral(Neutral::NPApp(Box::new(n.clone()), Box::new(r.clone())))
+        }
         // hcomp boundary reduction: (hcomp A sys base) @ 0 = base
         //                           (hcomp A sys base) @ 1 = first tube @ 1
         Value::VHComp(a, sys, base) => {
@@ -863,6 +1108,8 @@ pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &Scope, glo
                 Box::new(motive),
                 cases.to_vec(),
                 Box::new(Value::VCon("".into(), con.clone(), args.clone())),
+                env.clone(),
+                global_offset,
             ),
         },
         Value::VPCon(ref data, ref con, ref args, ref r) => match cases.iter().find(|case| case.con == *con) {
@@ -877,6 +1124,8 @@ pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &Scope, glo
                 Box::new(motive),
                 cases.to_vec(),
                 Box::new(Value::VPCon("".into(), con.clone(), args.clone(), r.clone())),
+                env.clone(),
+                global_offset,
             ),
         },
         // Square constructor elimination: body has 2 interval binders.
@@ -895,6 +1144,8 @@ pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &Scope, glo
                 Box::new(motive),
                 cases.to_vec(),
                 Box::new(Value::VSqCon("".into(), con.clone(), args.clone(), r.clone(), s.clone())),
+                env.clone(),
+                global_offset,
             ),
         },
         // N-dimensional cell constructor elimination: body has n interval binders.
@@ -915,10 +1166,12 @@ pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &Scope, glo
                 Box::new(motive),
                 cases.to_vec(),
                 Box::new(Value::VCellCon("".into(), con.clone(), args.clone(), ivars.clone())),
+                env.clone(),
+                global_offset,
             ),
         },
-        Value::VNeutral(n) => stuck_elim(motive, cases, n),
-        other => Value::VElim(Box::new(motive), cases.to_vec(), Box::new(other)),
+        Value::VNeutral(n) => stuck_elim(motive, cases, n, env, global_offset),
+        other => Value::VElim(Box::new(motive), cases.to_vec(), Box::new(other), env.clone(), global_offset),
     }
 }
 
@@ -2820,6 +3073,10 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
 }
 
 pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {
+    quote_inner(size, globals, global_offset, v)
+}
+
+fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {
     match v {
         Value::VNeutral(n) => quote_neutral(size, globals, global_offset, n),
         Value::VLam(x, clos) => Term::TAbs(
@@ -2905,9 +3162,9 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> 
             args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect(),
             ivars.into_iter().map(|v| quote(size, globals, global_offset, v)).collect(),
         ),
-        Value::VElim(motive, cases, scrut) => Term::TElim(
+        Value::VElim(motive, cases, scrut, env, go) => Term::TElim(
             Box::new(quote(size, globals, global_offset, *motive)),
-            quote_cases(size, globals, global_offset, cases),
+            quote_cases(size, globals, global_offset, &env, go, cases),
             Box::new(quote(size, globals, global_offset, *scrut)),
         ),
         Value::VGlue(a, phi, te) => Term::TGlue(
@@ -3027,9 +3284,9 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
         }
         Neutral::NFst(p) => Term::TFst(Box::new(quote_neutral(size, globals, global_offset, *p))),
         Neutral::NSnd(p) => Term::TSnd(Box::new(quote_neutral(size, globals, global_offset, *p))),
-        Neutral::NElim(motive, cases, scrut) => Term::TElim(
+        Neutral::NElim(motive, cases, scrut, env, go) => Term::TElim(
             Box::new(quote(size, globals, global_offset, *motive)),
-            quote_cases(size, globals, global_offset, cases),
+            quote_cases(size, globals, global_offset, &env, go, cases),
             Box::new(quote_neutral(size, globals, global_offset, *scrut)),
         ),
         Neutral::NTransport(p, x) => {
@@ -3081,31 +3338,309 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
     }
 }
 
-fn quote_cases(size: usize, globals: &Globals, global_offset: usize, cases: Vec<ElimCase>) -> Vec<ElimCase> {
-    cases
-        .into_iter()
-        .map(|case| ElimCase {
-            con: case.con,
-            binders: case.binders.clone(),
-            body: Box::new(normalize_under_binders(
-                size,
-                case.binders.len() + if case.as_name.is_some() { 1 } else { 0 },
-                globals,
-                global_offset,
-                &case.body,
-            )),
-            as_name: case.as_name,
-            record_bindings: case.record_bindings,
-        })
-        .collect()
+/// Re-anchor a stored elim case body for quotation.
+///
+/// A stuck elim stores the *raw source* case bodies. Those bodies reference
+/// (in de Bruijn order): the case's own binders (TVar 0..nb), the enclosing
+/// locals captured in the elim's creation `env`, and below-frame globals.
+/// Re-evaluating the body under fresh binders would re-trigger recursive
+/// definitions (e.g. `add`'s `suc` case body calls `add` on the pattern
+/// variable), producing a fresh stuck elim every level — a non-terminating
+/// growth. So we re-anchor *structurally*: local references are replaced by
+/// the re-quoted captured values, binder references round-trip unchanged, and
+/// global references are moved to below the quoting frame. Nothing is
+/// re-evaluated, so recursion terminates.
+fn quote_case_body(size: usize, globals: &Globals, global_offset: usize, env: &Scope, go: usize, t: &Term) -> Term {
+    quote_case_body_inner(size, globals, global_offset, env, go, t)
 }
 
-fn normalize_under_binders(size: usize, binders: usize, globals: &Globals, global_offset: usize, body: &Term) -> Term {
-    let mut env = Scope::empty();
-    for level in size..size + binders {
-        env = env.extend(Value::VNeutral(Neutral::NVar(level)));
+fn quote_case_body_inner(size: usize, globals: &Globals, global_offset: usize, env: &Scope, go: usize, t: &Term) -> Term {
+    match t {
+        Term::TVar(i) => {
+            let i = *i as usize;
+            if i < env.len() {
+                quote(size, globals, global_offset, env.lookup(i).clone())
+            } else {
+                Term::TVar((size + go + i - env.len()) as i32)
+            }
+        }
+        Term::TApp(f, a) => Term::TApp(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, f)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+        ),
+        Term::TAbs(x, b) => Term::TAbs(
+            x.clone(),
+            Box::new(quote_case_body(
+                size + 1,
+                globals,
+                global_offset,
+                &env.extend(Value::VNeutral(Neutral::NVar(size))),
+                go,
+                b,
+            )),
+        ),
+        Term::TUniv(n) => Term::TUniv(*n),
+        Term::TProp => Term::TProp,
+        Term::TSSet => Term::TSSet,
+        Term::TLift(a, lvl) => Term::TLift(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            *lvl,
+        ),
+        Term::TLower(a) => Term::TLower(Box::new(quote_case_body(size, globals, global_offset, env, go, a))),
+        Term::TIntervalTy => Term::TIntervalTy,
+        Term::TPi(x, a, b) => Term::TPi(
+            x.clone(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            Box::new(quote_case_body(
+                size + 1,
+                globals,
+                global_offset,
+                &env.extend(Value::VNeutral(Neutral::NVar(size))),
+                go,
+                b,
+            )),
+        ),
+        Term::TInterval(i) => Term::TInterval(i.clone()),
+        Term::TCube(c) => Term::TCube(c.clone()),
+        Term::TPath(a, u, v) => Term::TPath(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, u)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, v)),
+        ),
+        Term::PLam(x, b) => Term::PLam(
+            x.clone(),
+            Box::new(quote_case_body(
+                size + 1,
+                globals,
+                global_offset,
+                &env.extend(Value::VNeutral(Neutral::NVar(size))),
+                go,
+                b,
+            )),
+        ),
+        Term::PApp(p, r) => Term::PApp(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, p)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, r)),
+        ),
+        Term::THComp(a, sys, u0) => Term::THComp(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            sys.iter()
+                .map(|(phi, t)| {
+                    (
+                        quote_case_body(size, globals, global_offset, env, go, phi),
+                        quote_case_body(size, globals, global_offset, env, go, t),
+                    )
+                })
+                .collect(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, u0)),
+        ),
+        Term::TComp(a, sys, u0) => Term::TComp(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            sys.iter()
+                .map(|(phi, t)| {
+                    (
+                        quote_case_body(size, globals, global_offset, env, go, phi),
+                        quote_case_body(size, globals, global_offset, env, go, t),
+                    )
+                })
+                .collect(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, u0)),
+        ),
+        Term::TFill(a, sys, u0) => Term::TFill(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            sys.iter()
+                .map(|(phi, t)| {
+                    (
+                        quote_case_body(size, globals, global_offset, env, go, phi),
+                        quote_case_body(size, globals, global_offset, env, go, t),
+                    )
+                })
+                .collect(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, u0)),
+        ),
+        Term::THFill(a, sys, u0) => Term::THFill(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            sys.iter()
+                .map(|(phi, t)| {
+                    (
+                        quote_case_body(size, globals, global_offset, env, go, phi),
+                        quote_case_body(size, globals, global_offset, env, go, t),
+                    )
+                })
+                .collect(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, u0)),
+        ),
+        Term::TEquiv(a, b) => Term::TEquiv(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, b)),
+        ),
+        Term::TMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, b)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, f)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, g)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, eta)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, eps)),
+        ),
+        Term::TEquivFwd(e, x) => Term::TEquivFwd(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, e)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, x)),
+        ),
+        Term::TUa(e) => Term::TUa(Box::new(quote_case_body(size, globals, global_offset, env, go, e))),
+        Term::TTransport(p, x) => Term::TTransport(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, p)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, x)),
+        ),
+        Term::TGlue(a, phi, te) => Term::TGlue(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, phi)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, te)),
+        ),
+        Term::TGlueElem(phi, t, a) => Term::TGlueElem(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, phi)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, t)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+        ),
+        Term::TUnglue(phi, te, g) => Term::TUnglue(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, phi)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, te)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, g)),
+        ),
+        Term::TPartial(phi, a) => Term::TPartial(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, phi)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+        ),
+        Term::TSystemType(sys) => Term::TSystemType(
+            sys.iter()
+                .map(|(phi, a)| {
+                    (
+                        quote_case_body(size, globals, global_offset, env, go, phi),
+                        quote_case_body(size, globals, global_offset, env, go, a),
+                    )
+                })
+                .collect(),
+        ),
+        Term::TSigma(x, a, b) => Term::TSigma(
+            x.clone(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            Box::new(quote_case_body(
+                size + 1,
+                globals,
+                global_offset,
+                &env.extend(Value::VNeutral(Neutral::NVar(size))),
+                go,
+                b,
+            )),
+        ),
+        Term::TPair(a, b) => Term::TPair(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, b)),
+        ),
+        Term::TFst(p) => Term::TFst(Box::new(quote_case_body(size, globals, global_offset, env, go, p))),
+        Term::TSnd(p) => Term::TSnd(Box::new(quote_case_body(size, globals, global_offset, env, go, p))),
+        Term::TData(name, params) => Term::TData(
+            name.clone(),
+            params
+                .iter()
+                .map(|p| quote_case_body(size, globals, global_offset, env, go, p))
+                .collect(),
+        ),
+        Term::TCon(data, con, args) => Term::TCon(
+            data.clone(),
+            con.clone(),
+            args.iter()
+                .map(|a| quote_case_body(size, globals, global_offset, env, go, a))
+                .collect(),
+        ),
+        Term::TPCon(data, con, args, r) => Term::TPCon(
+            data.clone(),
+            con.clone(),
+            args.iter()
+                .map(|a| quote_case_body(size, globals, global_offset, env, go, a))
+                .collect(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, r)),
+        ),
+        Term::TSqCon(data, con, args, r, s) => Term::TSqCon(
+            data.clone(),
+            con.clone(),
+            args.iter()
+                .map(|a| quote_case_body(size, globals, global_offset, env, go, a))
+                .collect(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, r)),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, s)),
+        ),
+        Term::TCellCon(data, con, args, ivars) => Term::TCellCon(
+            data.clone(),
+            con.clone(),
+            args.iter()
+                .map(|a| quote_case_body(size, globals, global_offset, env, go, a))
+                .collect(),
+            ivars
+                .iter()
+                .map(|v| quote_case_body(size, globals, global_offset, env, go, v))
+                .collect(),
+        ),
+        Term::TElim(motive, cases, scrut) => {
+            let mut new_cases = Vec::with_capacity(cases.len());
+            for case in cases {
+                let extra = if case.as_name.is_some() { 1 } else { 0 };
+                let nb = case.binders.len() + extra;
+                let mut env2 = env.clone();
+                for j in (0..nb).rev() {
+                    env2 = env2.extend(Value::VNeutral(Neutral::NVar(size + j)));
+                }
+                new_cases.push(ElimCase {
+                    con: case.con.clone(),
+                    binders: case.binders.clone(),
+                    body: Box::new(quote_case_body(size + nb, globals, global_offset, &env2, go, &case.body)),
+                    as_name: case.as_name.clone(),
+                    record_bindings: case.record_bindings.clone(),
+                });
+            }
+            Term::TElim(
+                Box::new(quote_case_body(size, globals, global_offset, env, go, motive)),
+                new_cases,
+                Box::new(quote_case_body(size, globals, global_offset, env, go, scrut)),
+            )
+        }
+        Term::Meta(i) => Term::Meta(*i),
+        Term::TBy(_) => panic!("TBy should be resolved before NbE"),
+        Term::TDelay(a) => Term::TDelay(Box::new(quote_case_body(size, globals, global_offset, env, go, a))),
+        Term::TNext(a) => Term::TNext(Box::new(quote_case_body(size, globals, global_offset, env, go, a))),
+        Term::TForce(a) => Term::TForce(Box::new(quote_case_body(size, globals, global_offset, env, go, a))),
+        Term::TProj(field, r) => Term::TProj(
+            field.clone(),
+            Box::new(quote_case_body(size, globals, global_offset, env, go, r)),
+        ),
+        Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
+            Box::new(quote_case_body(size, globals, global_offset, env, go, r)),
+            updates
+                .iter()
+                .map(|(f, e)| (f.clone(), quote_case_body(size, globals, global_offset, env, go, e)))
+                .collect(),
+        ),
     }
-    quote(size + binders, globals, global_offset, eval_nbe(&env, globals, global_offset, body))
+}
+
+fn quote_cases(size: usize, globals: &Globals, global_offset: usize, env: &Scope, go: usize, cases: Vec<ElimCase>) -> Vec<ElimCase> {
+    cases
+        .into_iter()
+        .map(|case| {
+            let extra = if case.as_name.is_some() { 1 } else { 0 };
+            let nb = case.binders.len() + extra;
+            let mut env2 = env.clone();
+            for j in (0..nb).rev() {
+                env2 = env2.extend(Value::VNeutral(Neutral::NVar(size + j)));
+            }
+            ElimCase {
+                con: case.con,
+                binders: case.binders.clone(),
+                body: Box::new(quote_case_body(size + nb, globals, global_offset, &env2, go, &case.body)),
+                as_name: case.as_name,
+                record_bindings: case.record_bindings,
+            }
+        })
+        .collect()
 }
 
 pub fn normalize(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Term {
@@ -3175,10 +3710,18 @@ pub fn nbe_eval_ctx(ctx_len: usize, t: &Term) -> Term {
     };
     let n_globals = globals.borrow().len();
     let n_local = ctx_len.saturating_sub(n_globals);
+    // Build the eval env with ONLY the local binders (as neutral variables).
+    // Global references are left outside the env so they resolve through the
+    // `globals` vec in `eval_nbe_inner` (`global_offset + (i - env.len())`).
+    // Keeping globals out of the env is load-bearing: any stuck elim created
+    // during this evaluation captures `env`, and `quote_case_body` re-anchors
+    // a raw case-body global ref as a *reference below the frame* precisely
+    // when the ref lands beyond `env.len()`. If globals were in the env, those
+    // refs would land inside `env.len()` and get inlined, which re-evaluates
+    // recursive definitions (e.g. `add`'s case body calling `add`) on every
+    // normalization pass — the non-terminating growth documented at
+    // `quote_case_body`. With a locals-only env, normalization is idempotent.
     let mut env = Scope::empty();
-    for g in globals.borrow().iter().rev().cloned() {
-        env = env.extend(g);
-    }
     for level in 0..n_local {
         env = env.extend(Value::VNeutral(Neutral::NVar(level)));
     }
@@ -3204,11 +3747,13 @@ fn equiv_dom_value(v: Value) -> Value {
     }
 }
 
-fn stuck_elim(motive: Value, cases: &[ElimCase], n: Neutral) -> Value {
+fn stuck_elim(motive: Value, cases: &[ElimCase], n: Neutral, env: &Scope, global_offset: usize) -> Value {
     Value::VNeutral(Neutral::NElim(
         Box::new(motive),
         cases.to_vec(),
         Box::new(n),
+        env.clone(),
+        global_offset,
     ))
 }
 

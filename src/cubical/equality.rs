@@ -226,6 +226,10 @@ fn infer_ty(ctx: &Ctx, t: &Term) -> Option<Term> {
             Some(Term::TPi(_, _, b_ty)) => Some(nbe_eval_ctx(ctx.len(), &beta(&b_ty, a))),
             _ => None,
         },
+        Term::TElim(motive, _, scrut) => Some(nbe_eval_ctx(
+            ctx.len(),
+            &Term::TApp(Box::new((**motive).clone()), Box::new((**scrut).clone())),
+        )),
         _ => None,
     }
 }
@@ -248,6 +252,10 @@ fn infer_neutral_ty(ctx: &Ctx, t: &Term) -> Option<Term> {
             Some(Term::TPi(_, _, b_ty)) => Some(nbe_eval_ctx(ctx.len(), &beta(&b_ty, a))),
             _ => None,
         },
+        Term::TElim(motive, _, scrut) => Some(nbe_eval_ctx(
+            ctx.len(),
+            &Term::TApp(Box::new((**motive).clone()), Box::new((**scrut).clone())),
+        )),
         _ => None,
     }
 }

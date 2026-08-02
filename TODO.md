@@ -4,6 +4,8 @@
 
 ## Completed (implementation log)
 
+- [x] Idempotent normalization with global definitions — `nbe_eval_ctx` now builds the evaluation environment from **local binders only**; global references resolve through the global definition value vector (`global_offset + (i - env.len())`) instead of being placed in the environment. Keeping globals out of the env is load-bearing: a stuck eliminator created during evaluation captures the env, and `quote_case_body` re-anchors a raw case-body global ref as a *reference below the quoting frame* precisely when the ref lands beyond `env.len()`. If globals were in the env, those refs would land inside `env.len()` and get inlined by re-evaluation, re-opening recursive definitions (e.g. `add`'s case body calling `add`) on every normalization pass — unbounded term growth that exhausted eta-equality fuel (`EtaFuelExhausted`). With the locals-only env, normalization is idempotent: quoting a term twice yields the same normal form. Verified on a `Path Nat ((add_0_r n) 0) n` recursive proof that previously failed at fuel exhaustion; all 36 `examples/*.owl` and 169 tests stay green.
+
 - [x] PathP (dependent path types) — Added as syntactic sugar over TPath. `PathP (<i> A i) u v` parses to `TPath(PLam("i", A i), u, v)`. Type families work correctly with endpoint checking.
 
 - [x] General systems for hcomp/comp/fill/hfill — Multi-face system syntax `[phi => tube, ...]` using `=>` (FatArrow) separator. Old single-face syntax `comp A phi tube base` still works (desugars to single-entry system). The `System` type is `Vec<(Term, Term)>`. Top-face reduction applies tube at i1 (not raw VPLam). Constant type families handled correctly for comp/fill. Compatibility checking delegated to face-by-face `check_faces` calls.

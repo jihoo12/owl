@@ -1823,6 +1823,32 @@ Closure application uses `Scope::extend` (one allocation) instead of
 `vec![v] + extend_from_slice` (two allocations plus a full copy of the
 existing environment).
 
+### Global Definitions in Normalization
+
+When a term is normalized in the presence of global definitions (the
+`nbe_eval_ctx` path used by equality checking), the first `ctx_len` de Bruijn
+indices are treated as local binders and everything below them resolves to
+global definitions:
+
+- **Local binders** are placed in the evaluation environment as neutral
+  variables.
+- **Global references** are kept *outside* the environment and resolve
+  through the global definition value vector via the index formula
+  `global_offset + (i - env.len())`.
+
+Keeping globals out of the environment is load-bearing for termination: a
+stuck eliminator created during evaluation captures the environment, and when
+it is quoted (`quote_case_body`) the raw global references inside its case
+bodies are re-anchored as references *below the quoting frame* instead of
+being inlined. If globals were placed in the environment, those references
+would land inside `env.len()` and be inlined by re-evaluation — re-opening
+recursive definitions (e.g. `add`'s case body calling `add`) on every
+normalization pass. That produced unbounded term growth that eventually
+exhausted eta-equality fuel (`EtaFuelExhausted`) when comparing two stuck
+eliminators that differed only in inlining depth. With globals kept out of the
+environment, normalization is **idempotent**: quoting a term twice yields the
+same normal form.
+
 ### Beta Reduction
 
 ```

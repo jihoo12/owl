@@ -266,11 +266,14 @@ fn require_equiv_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<(Term, Term
 /// `Pos n`    → iₙ = 1   (IVar n ↦ I1)
 /// `NegVar n` → iₙ = 0   (IVar n ↦ I0)
 pub fn apply_literal(lit: &Literal, t: &Term) -> Term {
+    apply_literal_inner(lit, t)
+}
+
+fn apply_literal_inner(lit: &Literal, t: &Term) -> Term {
     let (n, val) = match lit {
         Literal::Pos(k) => (*k, I::I1),
         Literal::NegVar(k) => (*k, I::I0),
     };
-
     fn go_i(i: &I, n: i32, val: &I) -> I {
         match i {
             I::Var(k) if *k == n => val.clone(),
@@ -2696,7 +2699,7 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
                 }
             }
             let p2 = reduce_pcon_endpoints_dt(dts, p);
-            nbe_eval(&Term::PApp(Box::new(p2), Box::new(r_nf)))
+            nbe_eval(&Term::PApp(Box::new(p2), Box::new(r_nf.clone())))
         }
         // Recurse into PLam so that e.g. `PLam(k, cube3 @ i0 @ j @ k)` reduces too.
         Term::PLam(name, body) => {

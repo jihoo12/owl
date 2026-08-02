@@ -537,7 +537,6 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
         let path = dir.join("main.owl");
         fs::write(&path, src).unwrap();
         let output = run(&path).expect("mul should compute");
-        eprintln!("mul result: {}", output);
         let _ = fs::remove_dir_all(&dir);
     }
 
