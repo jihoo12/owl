@@ -266,6 +266,7 @@ pub fn show_tactic(env: &[Name], t: &Tactic) -> String {
         Tactic::Transitivity => "transitivity".to_string(),
         Tactic::Compute => "compute".to_string(),
         Tactic::Trivial => "trivial".to_string(),
+        Tactic::Omega => "omega".to_string(),
     }
 }
 

@@ -401,12 +401,21 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     // before parsing the value, so it is available for self-reference.
     // Mirror that here by pushing the current name+type at the front.
     global_ctx.insert(0, (name.clone(), check_ty.clone()));
+    // Tactic resolution may need to reduce global definitions (e.g. `add`
+    // applied to constructors), so expose the definition values via the
+    // thread-local globals exactly like `check_with_full_env` does. The
+    // current definition itself is not yet in `env.defs`, so its reference
+    // (de Bruijn index 0 of the goal scope) stays neutral.
+    let globals = crate::cubical::env::build_definition_values(env);
+    let prev_globals = crate::cubical::nbe::set_current_globals(Some(globals));
     let resolved_val = crate::cubical::tactics::resolve_tactics(
         &env.datatypes,
         val,
         &check_ty,
         &global_ctx,
-    ).map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)))?;
+    ).map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
+    crate::cubical::nbe::set_current_globals(prev_globals);
+    let resolved_val = resolved_val?;
 
     // Register before checking the body so recursive calls resolve.
     // Store the RAW annotation so that consumers resolving this definition's
@@ -845,5 +854,63 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
         )
         .expect("induction-recursion should typecheck");
         assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(1));
+    }
+
+    #[test]
+    fn nat_path_algebra_example_checks() {
+        // Guard against regressions in the verified path-algebra example:
+        // congruence, symmetry, transitivity and the additive laws over Nat.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("nat_path_algebra.owl");
+        check(&path).expect("examples/nat_path_algebra.owl should typecheck");
+    }
+
+    #[test]
+    fn omega_demo_example_checks() {
+        // Guard against regressions in `by omega`: definitional reflexivity
+        // (unfolding `add` on constructor-headed arguments) and direct
+        // application of a previously verified global lemma.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("omega_demo.owl");
+        check(&path).expect("examples/omega_demo.owl should typecheck");
+    }
+
+    #[test]
+    fn stress_mul_algebra_example_checks() {
+        // Full multiplicative algebra: assoc/comm/distributive laws over Nat
+        // as cubical paths, ending with the double-double lemma. Guards the
+        // suspended-elim case-body normalization fix in the equality checker.
+        // The deeply nested elim/hcomp normal forms need a larger stack than
+        // the default 2 MiB test-thread stack.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("stress_mul_algebra.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn stress check thread");
+        handle
+            .join()
+            .expect("stress check thread panicked")
+            .expect("examples/stress_mul_algebra.owl should typecheck");
+    }
+
+    #[test]
+    fn omega_rejects_unproved_comm() {
+        // Without a pre-proved comm lemma omega cannot synthesize induction
+        // yet; it must fail with a clear error rather than accept a circular
+        // proof.
+        let source = "inductive Nat where\n\
+             | zero : Nat\n\
+             | suc : Nat -> Nat\n\
+             def add : Nat -> Nat -> Nat := fun m n =>\n\
+               match m return Nat with\n\
+               | zero => n\n\
+               | suc m' => suc (add m' n)\n\
+             def bad : forall (m : Nat), forall (n : Nat), Path Nat (add m n) (add n m) := by intro m n; omega";
+        let err = run_str(source).expect_err("omega should reject an unproved comm goal");
+        assert!(err.to_string().contains("omega: unable to solve goal"));
     }
 }

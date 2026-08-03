@@ -1,0 +1,52 @@
+-- `by omega` — linear arithmetic over Nat.
+--
+-- Exercises both tiers of the omega decision procedure:
+--   1. definitional reflexivity (unfolding `add` on constructor-headed args),
+--   2. direct application of a previously verified global lemma.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+-- Definitional unfolding: both sides reduce to the same term.
+def add_zero_l : forall (n : Nat), Path Nat (add zero n) n :=
+  by intro n; omega
+
+def add_suc_l : forall (m : Nat), forall (n : Nat), Path Nat (add (suc m) n) (suc (add m n)) :=
+  by intro m n; omega
+
+-- Verified helpers, proved by hand (as in examples/nat_path_algebra.owl).
+def _owl_add_0_r : forall (m : Nat), Path Nat (add m zero) m :=
+  fun m => match m return Path Nat (add m zero) m with
+  | zero => <i> zero
+  | suc m' => <i> suc ((_owl_add_0_r m') @ i)
+
+def _owl_add_suc_r : forall (m : Nat), forall (n : Nat), Path Nat (add m (suc n)) (suc (add m n)) :=
+  fun m n => match m return Path Nat (add m (suc n)) (suc (add m n)) with
+  | zero => <i> suc n
+  | suc m' => <i> suc ((_owl_add_suc_r m' n) @ i)
+
+def _owl_cong_suc : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat (suc a) (suc b) :=
+  fun a b p => <i> suc (p @ i)
+
+def _owl_trans : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat a b -> Path Nat b c -> Path Nat a c :=
+  fun a b c p q => <i> hcomp Nat [~i => <j> a, i => q] (p @ i)
+
+def _owl_sym : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat b a :=
+  fun a b p => <i> p @ ~i
+
+def _owl_add_comm : forall (m : Nat), forall (n : Nat), Path Nat (add m n) (add n m) :=
+  fun m n => match m return Path Nat (add m n) (add n m) with
+  | zero => <i> (_owl_add_0_r n) @ ~i
+  | suc m' => _owl_trans (suc (add m' n)) (suc (add n m')) (add n (suc m'))
+      (_owl_cong_suc (add m' n) (add n m') (_owl_add_comm m' n))
+      (_owl_sym (add n (suc m')) (suc (add n m')) (_owl_add_suc_r n m'))
+
+-- Lemma matching: omega finds `_owl_add_comm` and applies it as `_owl_add_comm n m`.
+def add_comm_by_omega : forall (m : Nat), forall (n : Nat), Path Nat (add n m) (add m n) :=
+  by intro m n; omega

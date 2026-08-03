@@ -212,6 +212,15 @@ pub enum Tactic {
     /// `trivial` — attempt `reflexivity`; succeeds when the goal is a path
     /// with definitionally equal endpoints.
     Trivial,
+    /// `omega` — decision procedure for linear arithmetic over Nat.
+    ///
+    /// Proves goals of the form `Path Nat u v` where `u` and `v` are linear
+    /// expressions over the context's Nat variables, by (1) definitional
+    /// reflexivity after normalization and (2) direct application of a
+    /// previously verified global lemma to the context's variables — both
+    /// re-checked by the kernel. Produces a complete proof term (like
+    /// `exact`). See `src/cubical/omega.rs`.
+    Omega,
 }
 
 // ---------------------------------------------------------------------------
@@ -524,7 +533,8 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
         | Tactic::Assumption
         | Tactic::Transitivity
         | Tactic::Compute
-        | Tactic::Trivial => tac.clone(),
+        | Tactic::Trivial
+        | Tactic::Omega => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),
@@ -702,7 +712,8 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
         | Tactic::Assumption
         | Tactic::Transitivity
         | Tactic::Compute
-        | Tactic::Trivial => tac.clone(),
+        | Tactic::Trivial
+        | Tactic::Omega => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),

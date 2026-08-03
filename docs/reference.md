@@ -209,6 +209,17 @@ A -> B                   -- non-dependent (shorthand)
 The codomain `B` may reference the argument `x`. Non-dependent function
 types are sugar for `forall (_ : A), B`.
 
+**`forall` position**: `forall` / `∀` is only recognized at term top-level —
+it cannot follow a non-dependent `->`. Declare every binder before the arrow
+chain:
+
+```
+forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat b a
+```
+
+A type such as `Path Nat a b -> forall (m : Nat), ...` is a parse error
+(`unknown name or constructor 'forall'`).
+
 ### Sigma Types (Dependent Pairs)
 
 ```
@@ -1849,6 +1860,18 @@ eliminators that differed only in inlining depth. With globals kept out of the
 environment, normalization is **idempotent**: quoting a term twice yields the
 same normal form.
 
+A stuck eliminator suspends its case bodies, so idempotent whole-term
+normalization alone does not reduce a global application that lands *inside* a
+case body via substitution (e.g. the `((mul b) c)` that `mul`'s case bodies
+leave unfolded) — yet the same value entered as an eagerly-evaluated function
+argument appears folded. To compare such terms, the equality checker's
+eliminator-congruence arm normalizes each case body **once** in isolation
+(with the case binders extended into the local environment), accepts when the
+two sides converge, and otherwise falls back to the raw structural comparison.
+Normalizing a single time is essential: re-normalizing an already-normal case
+body would unfold the recursive global definition one level per pass and never
+reach a fixed point.
+
 ### Beta Reduction
 
 ```
@@ -2093,7 +2116,15 @@ separately from term variables. The special names `i0` and `i1` are always
 resolved as interval endpoints, not as regular variables.
 
 **Integer literals**: The integers `0` and `1` are parsed as interval endpoints
-(`i0` and `i1`). Other integers are not valid in the surface syntax.
+(`i0` and `i1`). Other integers are not valid in the surface syntax. This means
+natural numbers must be written with the constructors of `Nat` (`zero`,
+`suc zero`, ...) — writing `add m 0` passes the interval `i0` where a `Nat` is
+expected and fails with `Type mismatch: expected Nat got I`.
+
+**`forall` position**: `forall` / `∀` is only a term-level form (see the
+grammar: it is a `<lambda>` alternative). It cannot follow a `->`; put every
+binder before the arrow chain, e.g. `forall (a : Nat), forall (b : Nat),
+Path Nat a b -> Path Nat b a`.
 
 **Match scrutinee**: The `match` form accepts either a bare name (resolved
 from scope) or an arbitrary term as the scrutinee.
@@ -2426,6 +2457,76 @@ def const_hcomp : Nat :=
 def transport_pi : Nat :=
   (transport (<i> Nat -> Nat) (fun x => suc x)) zero
 ```
+
+### Example 19: Path Algebra on Nat (hcomp Transitivity)
+
+Symmetry and hcomp-based transitivity for `Path`. This exercises two
+surface-syntax rules: naturals are written with the constructors `zero`/`suc`
+(integer literals `0` and `1` parse as the interval endpoints `i0`/`i1`), and
+every `forall` binder must be declared *before* any non-dependent `->` (a
+`forall` may not follow an arrow).
+
+```
+def sym : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat b a :=
+  fun a b p => <i> p @ ~i
+
+-- Compose p : a ~ b with q : b ~ c using an hcomp whose tube is the
+-- constant path at ~i (face `~i => a`) and q itself at i (face `i => q`).
+def trans : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat a b -> Path Nat b c -> Path Nat a c :=
+  fun a b c p q => <i> hcomp Nat [~i => <j> a, i => q] (p @ i)
+
+-- Right identity of add, proved by structural recursion.
+def add_0_r : forall (m : Nat), Path Nat (add m zero) m :=
+  fun m => match m return Path Nat (add m zero) m with
+  | zero => <i> zero
+  | suc m' => <i> suc ((add_0_r m') @ i)
+```
+
+Evaluating the composed path at an endpoint reduces the hcomp:
+`trans a b c p q @ i1` reduces to `q`. The full verified Nat suite
+(cong-suc, add-suc-r, cong-add-r, add-comm, cong-add-l, add-assoc) builds on
+these three lemmas.
+
+### Example 20: Multiplicative Algebra on Nat
+
+The multiplicative laws are the classic hard theorems for an inductive proof
+assistant: each success case composes several congruence, symmetry, and
+transitivity steps over the additive laws. `examples/stress_mul_algebra.owl`
+proves the full set (`mul-zero-r`, `mul-suc-r`, `mul-one-r`, `mul-comm`,
+right-distributivity `mul-add-r`, `mul-assoc`) and uses them to derive
+`mul_double` (`2 * n = n + n`) and the consumer lemma `double_double`
+(`(n + n) + (n + n) = 2 * (2 * n)`), with `by omega` handling the
+definitional / direct-lemma-instance subgoals.
+
+```
+def mul : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => zero
+  | suc m' => add (mul m' n) n
+
+-- mul m zero = zero
+def mul_zero_r : forall (m : Nat), Path Nat (mul m zero) zero :=
+  fun m => match m return Path Nat (mul m zero) zero with
+  | zero => <i> zero
+  | suc m' => _owl_trans (add (mul m' zero) zero) (add zero zero) zero
+      (_owl_cong_add_l (mul m' zero) zero zero (mul_zero_r m'))
+      (<i> zero)
+
+-- mul m n = mul n m; the success case rewrites add (mul m' n) n
+-- via cong-add-l on the IH, then sym of mul-suc-r at (n, m').
+def mul_comm : forall (m : Nat), forall (n : Nat), Path Nat (mul m n) (mul n m) :=
+  fun m n => match m return Path Nat (mul m n) (mul n m) with
+  | zero => _owl_sym (mul n zero) zero (mul_zero_r n)
+  | suc m' => _owl_trans (add (mul m' n) n) (add (mul n m') n) (mul n (suc m'))
+      (_owl_cong_add_l (mul m' n) (mul n m') n (mul_comm m' n))
+      (_owl_sym (mul n (suc m')) (add (mul n m') n) (_owl_mul_suc_r n m'))
+```
+
+These proofs depend on the equality checker reducing a stuck elim's case bodies
+(see §14, "Global Definitions in Normalization"): a reducible global
+application such as `mul b c` substituted into a case body is not folded by
+whole-term normalization, so the eliminator-congruence check normalizes each
+body once before comparing.
 
 ---
 

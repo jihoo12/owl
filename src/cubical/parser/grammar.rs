@@ -612,7 +612,10 @@ impl Parser {
         if self.consume_ident("trivial") {
             return Ok(Tactic::Trivial);
         }
-        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', or 'trivial'"))
+        if self.consume_ident("omega") {
+            return Ok(Tactic::Omega);
+        }
+        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', or 'omega'"))
     }
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {
@@ -1917,6 +1920,7 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "transitivity"
             | "compute"
             | "trivial"
+            | "omega"
             | "def"
             | "inductive"
             | "record"

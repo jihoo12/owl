@@ -4,6 +4,7 @@ pub mod equality;
 pub mod interval;
 #[allow(dead_code)]
 pub mod nbe;
+pub mod omega;
 pub mod parser;
 pub mod syntax;
 pub mod tactics;

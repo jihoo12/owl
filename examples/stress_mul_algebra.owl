@@ -1,0 +1,218 @@
+-- Stress test: the multiplicative algebra over Nat.
+--
+-- Exercises the full proof stack end to end:
+--   * dependent `match ... return ...` recursion (induction via self-reference),
+--   * cubical path algebra: trans/sym/cong composition, hcomp,
+--   * `by omega` for definitional and direct-lemma-instance subgoals.
+--
+-- The multiplicative laws (mul_zero_r, mul_suc_r, mul_comm, mul_add_r,
+-- mul_assoc) are the classic hard theorems for an inductive proof assistant:
+-- each success case composes several congruence/symmetry/transitivity steps
+-- over the additive laws proved below.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+def mul : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => zero
+  | suc m' => add (mul m' n) n
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Part 1 — additive path algebra (congruence, symmetry, transitivity,
+--          the additive laws).
+-- ══════════════════════════════════════════════════════════════════════════
+
+def _owl_cong_suc : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat (suc a) (suc b) :=
+  fun a b p => <i> suc (p @ i)
+
+def _owl_sym : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat b a :=
+  fun a b p => <i> p @ ~i
+
+def _owl_trans : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat a b -> Path Nat b c -> Path Nat a c :=
+  fun a b c p q => <i> hcomp Nat [~i => <j> a, i => q] (p @ i)
+
+def _owl_add_0_r : forall (m : Nat), Path Nat (add m zero) m :=
+  fun m => match m return Path Nat (add m zero) m with
+  | zero => <i> zero
+  | suc m' => <i> suc ((_owl_add_0_r m') @ i)
+
+def _owl_add_suc_r : forall (m : Nat), forall (n : Nat), Path Nat (add m (suc n)) (suc (add m n)) :=
+  fun m n => match m return Path Nat (add m (suc n)) (suc (add m n)) with
+  | zero => <i> suc n
+  | suc m' => <i> suc ((_owl_add_suc_r m' n) @ i)
+
+def _owl_cong_add_r : forall (a : Nat), forall (b : Nat), forall (m : Nat), Path Nat a b -> Path Nat (add m a) (add m b) :=
+  fun a b m p => match m return Path Nat (add m a) (add m b) with
+  | zero => p
+  | suc m' => <i> suc ((_owl_cong_add_r a b m' p) @ i)
+
+def _owl_add_comm : forall (m : Nat), forall (n : Nat), Path Nat (add m n) (add n m) :=
+  fun m n => match m return Path Nat (add m n) (add n m) with
+  | zero => <i> (_owl_add_0_r n) @ ~i
+  | suc m' => _owl_trans (suc (add m' n)) (suc (add n m')) (add n (suc m'))
+      (_owl_cong_suc (add m' n) (add n m') (_owl_add_comm m' n))
+      (_owl_sym (add n (suc m')) (suc (add n m')) (_owl_add_suc_r n m'))
+
+def _owl_cong_add_l : forall (a : Nat), forall (b : Nat), forall (n : Nat), Path Nat a b -> Path Nat (add a n) (add b n) :=
+  fun a b n p => _owl_trans (add a n) (add n a) (add b n) (_owl_add_comm a n)
+    (_owl_trans (add n a) (add n b) (add b n) (_owl_cong_add_r a b n p) (_owl_add_comm n b))
+
+def _owl_add_assoc : forall (x : Nat), forall (y : Nat), forall (z : Nat), Path Nat (add (add x y) z) (add x (add y z)) :=
+  fun x y z => match x return Path Nat (add (add x y) z) (add x (add y z)) with
+  | zero => <i> add y z
+  | suc x' => _owl_cong_suc (add (add x' y) z) (add x' (add y z)) (_owl_add_assoc x' y z)
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Part 2 — `by omega` showcases.
+--
+--   * definitional: both sides reduce to the same normal form,
+--   * lemma instance: the goal is a direct instance of `_owl_add_comm`.
+-- ══════════════════════════════════════════════════════════════════════════
+
+def _owl_add_zero_l : forall (n : Nat), Path Nat (add zero n) n :=
+  by intro n; omega
+
+def _owl_add_suc_l : forall (m : Nat), forall (n : Nat), Path Nat (add (suc m) n) (suc (add m n)) :=
+  by intro m n; omega
+
+def _owl_mul_zero_l : forall (n : Nat), Path Nat (mul zero n) zero :=
+  by intro n; omega
+
+def _owl_double_omega : forall (n : Nat), Path Nat (add n n) (mul (suc (suc zero)) n) :=
+  by intro n; omega
+
+def _owl_add_comm_omega : forall (m : Nat), forall (n : Nat), Path Nat (add n m) (add m n) :=
+  by intro m n; omega
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Part 3 — multiplicative path algebra (the stress test proper).
+-- ══════════════════════════════════════════════════════════════════════════
+
+-- mul m zero = zero
+def _owl_mul_zero_r : forall (m : Nat), Path Nat (mul m zero) zero :=
+  fun m => match m return Path Nat (mul m zero) zero with
+  | zero => <i> zero
+  | suc m' => _owl_trans (add (mul m' zero) zero) (add zero zero) zero
+      (_owl_cong_add_l (mul m' zero) zero zero (_owl_mul_zero_r m'))
+      (<i> zero)
+
+-- Additive rearrangement helper for the success case:
+--   add (add A m') (suc n)  =  suc (add A (add n m'))
+def _owl_mul_suc_r_aux : forall (A : Nat), forall (n : Nat), forall (m' : Nat),
+  Path Nat (add (add A m') (suc n)) (suc (add A (add n m'))) :=
+  fun A n m' => _owl_trans (add (add A m') (suc n))
+    (suc (add (add A m') n))
+    (suc (add A (add n m')))
+    (_owl_add_suc_r (add A m') n)
+    (_owl_trans (suc (add (add A m') n))
+       (suc (add A (add m' n)))
+       (suc (add A (add n m')))
+       (_owl_cong_suc (add (add A m') n) (add A (add m' n)) (_owl_add_assoc A m' n))
+       (_owl_cong_suc (add A (add m' n)) (add A (add n m'))
+          (<i> add A ((_owl_add_comm m' n) @ i))))
+
+-- Rearrangement helper for the success case:
+--   suc (add (mul m' n) (add n m'))  =  add (add (mul m' n) n) (suc m')
+def _owl_mul_suc_r_right : forall (m' : Nat), forall (n : Nat),
+  Path Nat (suc (add (mul m' n) (add n m'))) (add (add (mul m' n) n) (suc m')) :=
+  fun m' n => _owl_trans (suc (add (mul m' n) (add n m')))
+     (suc (add (add (mul m' n) n) m'))
+     (add (add (mul m' n) n) (suc m'))
+     (_owl_cong_suc (add (mul m' n) (add n m')) (add (add (mul m' n) n) m')
+        (_owl_sym (add (add (mul m' n) n) m') (add (mul m' n) (add n m')) (_owl_add_assoc (mul m' n) n m')))
+     (_owl_sym (add (add (mul m' n) n) (suc m')) (suc (add (add (mul m' n) n) m')) (_owl_add_suc_r (add (mul m' n) n) m'))
+
+-- mul m (suc n) = add (mul m n) m
+-- The success case composes: congruence on the induction hypothesis,
+-- add-associativity, add-commutativity, add-suc-r and symmetry.
+def _owl_mul_suc_r : forall (m : Nat), forall (n : Nat), Path Nat (mul m (suc n)) (add (mul m n) m) :=
+  fun m n => match m return Path Nat (mul m (suc n)) (add (mul m n) m) with
+  | zero => <i> zero
+  | suc m' =>
+      _owl_trans (add (mul m' (suc n)) (suc n))
+        (suc (add (mul m' n) (add n m')))
+        (add (add (mul m' n) n) (suc m'))
+        -- left leg: unfold, apply IH, then rearrange with assoc/comm
+        (_owl_trans (add (mul m' (suc n)) (suc n))
+           (add (add (mul m' n) m') (suc n))
+           (suc (add (mul m' n) (add n m')))
+           (_owl_cong_add_l (mul m' (suc n)) (add (mul m' n) m') (suc n) (_owl_mul_suc_r m' n))
+           (_owl_mul_suc_r_aux (mul m' n) n m'))
+        -- right leg: rearrange to add (add a n) (suc m')
+        (_owl_mul_suc_r_right m' n)
+
+-- mul m (suc zero) = m
+def _owl_mul_one_r : forall (n : Nat), Path Nat (mul n (suc zero)) n :=
+  fun n => _owl_trans (mul n (suc zero)) (add (mul n zero) n) n
+    (_owl_mul_suc_r n zero)
+    (_owl_cong_add_l (mul n zero) zero n (_owl_mul_zero_r n))
+
+-- mul m n = mul n m
+def _owl_mul_comm : forall (m : Nat), forall (n : Nat), Path Nat (mul m n) (mul n m) :=
+  fun m n => match m return Path Nat (mul m n) (mul n m) with
+  | zero => _owl_sym (mul n zero) zero (_owl_mul_zero_r n)
+  | suc m' => _owl_trans (add (mul m' n) n) (add (mul n m') n) (mul n (suc m'))
+      (_owl_cong_add_l (mul m' n) (mul n m') n (_owl_mul_comm m' n))
+      (_owl_sym (mul n (suc m')) (add (mul n m') n) (_owl_mul_suc_r n m'))
+
+-- Additive rearrangement helper for mul_add_r's success case (mul-free;
+-- the product is passed in as the bare parameter d):
+--   add (add a d) c  =  add (add a c) d
+def _owl_add_assoc_swap : forall (a : Nat), forall (d : Nat), forall (c : Nat),
+  Path Nat (add (add a d) c) (add (add a c) d) :=
+  fun a d c => _owl_trans (add (add a d) c)
+    (add a (add d c))
+    (add (add a c) d)
+    (_owl_add_assoc a d c)
+    (_owl_trans (add a (add d c))
+       (add a (add c d))
+       (add (add a c) d)
+       (<i> add a ((_owl_add_comm d c) @ i))
+       (_owl_sym (add (add a c) d) (add a (add c d)) (_owl_add_assoc a c d)))
+
+-- mul (add a b) c = add (mul a c) (mul b c)  — right distributivity
+def _owl_mul_add_r : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (mul (add a b) c) (add (mul a c) (mul b c)) :=
+  fun a b c => match a return Path Nat (mul (add a b) c) (add (mul a c) (mul b c)) with
+  | zero => <i> mul b c
+  | suc a' =>
+      _owl_trans (add (mul (add a' b) c) c)
+        (add (add (mul a' c) (mul b c)) c)
+        (add (add (mul a' c) c) (mul b c))
+        (_owl_cong_add_l (mul (add a' b) c) (add (mul a' c) (mul b c)) c (_owl_mul_add_r a' b c))
+        (_owl_add_assoc_swap (mul a' c) (mul b c) c)
+
+-- mul (mul x y) z = mul x (mul y z)
+def _owl_mul_assoc : forall (x : Nat), forall (y : Nat), forall (z : Nat), Path Nat (mul (mul x y) z) (mul x (mul y z)) :=
+  fun x y z => match x return Path Nat (mul (mul x y) z) (mul x (mul y z)) with
+  | zero => <i> zero
+  | suc x' =>
+      _owl_trans (mul (add (mul x' y) y) z)
+        (add (mul (mul x' y) z) (mul y z))
+        (add (mul x' (mul y z)) (mul y z))
+        (_owl_mul_add_r (mul x' y) y z)
+        (_owl_cong_add_l (mul (mul x' y) z) (mul x' (mul y z)) (mul y z) (_owl_mul_assoc x' y z))
+
+-- 2 * n = n + n  (via the multiplicative laws, not omega)
+def _owl_mul_double : forall (n : Nat), Path Nat (mul n (suc (suc zero))) (add n n) :=
+  fun n => _owl_trans (mul n (suc (suc zero))) (add (mul n (suc zero)) n) (add n n)
+    (_owl_mul_suc_r n (suc zero))
+    (_owl_cong_add_l (mul n (suc zero)) n n (_owl_mul_one_r n))
+
+def _owl_double_omega_dot : forall (n : Nat), Path Nat (mul (suc (suc zero)) n) (add n n) :=
+  by intro n; omega
+
+-- A final consumer theorem pulling several laws together:
+--   (n + n) + (n + n)  =  2 * (2 * n)
+def _owl_double_double : forall (n : Nat), Path Nat (add (add n n) (add n n)) (mul (suc (suc zero)) (mul (suc (suc zero)) n)) :=
+  fun n => _owl_trans (add (add n n) (add n n)) (add (mul (suc (suc zero)) n) (add n n)) (mul (suc (suc zero)) (mul (suc (suc zero)) n))
+    (_owl_cong_add_l (add n n) (mul (suc (suc zero)) n) (add n n) (_owl_double_omega_dot n))
+    (_owl_trans (add (mul (suc (suc zero)) n) (add n n)) (add (mul (suc (suc zero)) n) (mul (suc (suc zero)) n)) (mul (suc (suc zero)) (mul (suc (suc zero)) n))
+      (_owl_cong_add_r (add n n) (mul (suc (suc zero)) n) (mul (suc (suc zero)) n) (_owl_double_omega_dot n))
+      (_owl_sym (mul (suc (suc zero)) (mul (suc (suc zero)) n)) (add (mul (suc (suc zero)) n) (mul (suc (suc zero)) n)) (_owl_double_omega_dot (mul (suc (suc zero)) n))))

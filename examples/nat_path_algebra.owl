@@ -1,0 +1,60 @@
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+-- Path algebra over Nat: congruence, symmetry, transitivity and
+-- the additive laws, all proved as cubical paths.
+
+-- cong over suc
+def _owl_cong_suc : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat (suc a) (suc b) :=
+  fun a b p => <i> suc (p @ i)
+
+-- symmetry
+def _owl_sym : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat b a :=
+  fun a b p => <i> p @ ~i
+
+-- transitivity, cubical composition
+def _owl_trans : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat a b -> Path Nat b c -> Path Nat a c :=
+  fun a b c p q => <i> hcomp Nat [~i => <j> a, i => q] (p @ i)
+
+-- add m zero = m
+def _owl_add_0_r : forall (m : Nat), Path Nat (add m zero) m :=
+  fun m => match m return Path Nat (add m zero) m with
+  | zero => <i> zero
+  | suc m' => <i> suc ((_owl_add_0_r m') @ i)
+
+-- add m (suc n) = suc (add m n)
+def _owl_add_suc_r : forall (m : Nat), forall (n : Nat), Path Nat (add m (suc n)) (suc (add m n)) :=
+  fun m n => match m return Path Nat (add m (suc n)) (suc (add m n)) with
+  | zero => <i> suc n
+  | suc m' => <i> suc ((_owl_add_suc_r m' n) @ i)
+
+-- cong over right argument of add
+def _owl_cong_add_r : forall (a : Nat), forall (b : Nat), forall (m : Nat), Path Nat a b -> Path Nat (add m a) (add m b) :=
+  fun a b m p => match m return Path Nat (add m a) (add m b) with
+  | zero => p
+  | suc m' => <i> suc ((_owl_cong_add_r a b m' p) @ i)
+
+-- add m n = add n m
+def _owl_add_comm : forall (m : Nat), forall (n : Nat), Path Nat (add m n) (add n m) :=
+  fun m n => match m return Path Nat (add m n) (add n m) with
+  | zero => <i> (_owl_add_0_r n) @ ~i
+  | suc m' => _owl_trans (suc (add m' n)) (suc (add n m')) (add n (suc m'))
+      (_owl_cong_suc (add m' n) (add n m') (_owl_add_comm m' n))
+      (_owl_sym (add n (suc m')) (suc (add n m')) (_owl_add_suc_r n m'))
+
+-- cong over left argument of add
+def _owl_cong_add_l : forall (a : Nat), forall (b : Nat), forall (n : Nat), Path Nat a b -> Path Nat (add a n) (add b n) :=
+  fun a b n p => _owl_trans (add a n) (add n a) (add b n) (_owl_add_comm a n)
+    (_owl_trans (add n a) (add n b) (add b n) (_owl_cong_add_r a b n p) (_owl_add_comm n b))
+
+-- add (add x y) z = add x (add y z)
+def _owl_add_assoc : forall (x : Nat), forall (y : Nat), forall (z : Nat), Path Nat (add (add x y) z) (add x (add y z)) :=
+  fun x y z => match x return Path Nat (add (add x y) z) (add x (add y z)) with
+  | zero => <i> add y z
+  | suc x' => _owl_cong_suc (add (add x' y) z) (add x' (add y z)) (_owl_add_assoc x' y z)

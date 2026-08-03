@@ -704,7 +704,30 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
                     .map(|b| (b.clone(), Term::TUniv(0)))
                     .collect();
                 case_ctx.extend_from_slice(ctx);
-                and_result(acc, eta_eq_memo(fuel, &case_ctx, &c1.body, &c2.body, memo))
+                // A stuck elim suspends its case bodies, so a reducible
+                // global application (e.g. `mul b c`) that entered a case
+                // body via substitution is never reduced by whole-term
+                // normalization — leaving `(mul b) c` in the normal form
+                // while the same value, entered as an eagerly-evaluated
+                // function argument, appears folded. Normalize each body
+                // *once* in isolation (terminating: a single top-level
+                // evaluation pass) and, if both sides converge to the same
+                // normal form, accept. Do NOT recurse on the normalized
+                // bodies: re-normalizing a stuck elim's case bodies unfolds
+                // recursive definitions one level per pass and never reaches
+                // a fixed point. If the single pass does not converge,
+                // fall back to the raw structural comparison, which is what
+                // this code did before.
+                let n1 = nbe_eval_ctx(case_ctx.len(), &c1.body);
+                let n2 = nbe_eval_ctx(case_ctx.len(), &c2.body);
+                if n1 == n2 {
+                    acc
+                } else {
+                    and_result(
+                        acc,
+                        eta_eq_memo(fuel, &case_ctx, &c1.body, &c2.body, memo),
+                    )
+                }
             });
         return and_result(
             and_result(cases_eq, eta_eq_memo(fuel, ctx, m1, m2, memo)),
