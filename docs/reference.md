@@ -54,6 +54,7 @@ The following words are reserved and cannot be used as variable names:
 | `transitivity`| Tactic: chain path equalities              |
 | `compute`     | Tactic: normalize the goal type            |
 | `trivial`     | Tactic: prove trivial goals automatically  |
+| `ring`        | Tactic: prove polynomial identities over Nat |
 | `match`       | Pattern matching / elimination             |
 | `return`      | Annotate match return type                 |
 | `with`        | Match cases / mutual datatypes separator   |
@@ -1741,6 +1742,40 @@ def trivial_path : Path Nat zero zero := by trivial
 def trivial_nat : Nat := by trivial    -- applies 'zero'
 ```
 
+#### `ring`
+
+Prove polynomial identities over the natural numbers. The goal must be a
+path `Path Nat u v` where `u` and `v` are expressions built from the ring
+operations `add`/`mul`/`zero`/`one` and the variables in scope. `ring`
+normalizes both sides to polynomial normal form over the commutative
+semiring (associativity, commutativity, distributivity, identity and
+annihilation laws) and, when the normal forms agree, returns a proof term
+built by applying the ring laws.
+
+The tactic resolves the following names from the context (they are provided
+by `examples/ring_laws.owl`, which is imported by the demos):
+
+- operations: `zero`, `one`, `add`, `mul`
+- laws: `add_comm`, `add_assoc`, `add_0_l`, `add_0_r`, `mul_comm`,
+  `mul_assoc`, `mul_1_l`, `mul_1_r`, `mul_0_l`, `mul_0_r`, `mul_add_l`,
+  `mul_add_r`
+- structural lemmas: `trans`, `sym`, `cong_add_l`, `cong_add_r`,
+  `cong_mul_l`, `cong_mul_r`
+
+```
+def add_comm_demo : forall (m : Nat), forall (n : Nat), Path Nat (add m n) (add n m) :=
+  by intro m n; ring
+
+def dist_demo : forall (m : Nat), forall (n : Nat), forall (p : Nat),
+    Path Nat (mul (add m n) p) (add (mul m p) (mul n p)) :=
+  by intro m n p; ring
+```
+
+See `examples/ring_demo.owl` and `examples/ring_laws.owl`. The generated
+proof is a tree of law applications that the kernel re-checks (structural
+recursion guard skipped, since law bodies unfold to elims on compound
+neutral scrutinees in the normal form).
+
 ### Example: Multi-Step Tactic Proof
 
 ```
@@ -2102,6 +2137,7 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "transitivity"
                 | "compute"
                 | "trivial"
+                | "ring"
 
 <face>        ::= <face_atom> ("\/" <face_atom>)*
 <face_atom>   ::= <face_lit> ("/\ " <face_lit>)*

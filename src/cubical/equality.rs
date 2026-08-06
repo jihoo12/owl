@@ -722,11 +722,34 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
                 let n2 = nbe_eval_ctx(case_ctx.len(), &c2.body);
                 if n1 == n2 {
                     acc
+                } else if c1.body == c2.body {
+                    acc
                 } else {
-                    and_result(
-                        acc,
-                        eta_eq_memo(fuel, &case_ctx, &c1.body, &c2.body, memo),
-                    )
+                    // Bounded fallback: recursing into the raw bodies lets
+                    // proofs that need a couple of unfolds go through, but an
+                    // unbounded fallback re-normalizes a stuck elim's case
+                    // bodies one definitional level per pass and never reaches
+                    // a fixed point on recursive definitions (see the comment
+                    // above). Cap the number of nested fallbacks so recursive
+                    // definitions like nat_add/nat_mul terminate instead of
+                    // overflowing the stack.
+                    const ELIM_RECURSE_CAP: usize = 6;
+                    thread_local! {
+                        static ELIM_CASE_RECURSE: std::cell::Cell<usize> =
+                            const { std::cell::Cell::new(0) };
+                    }
+                    let depth = ELIM_CASE_RECURSE.with(|d| d.get());
+                    if depth >= ELIM_RECURSE_CAP {
+                        NotEqual
+                    } else {
+                        ELIM_CASE_RECURSE.with(|d| d.set(depth + 1));
+                        let r = and_result(
+                            acc,
+                            eta_eq_memo(fuel, &case_ctx, &c1.body, &c2.body, memo),
+                        );
+                        ELIM_CASE_RECURSE.with(|d| d.set(depth));
+                        r
+                    }
                 }
             });
         return and_result(

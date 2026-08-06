@@ -878,6 +878,26 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn ring_demo_example_checks() {
+        // Guard against regressions in `by ring`: polynomial normalization
+        // over the commutative semiring on Nat plus the law-application tree
+        // the kernel re-checks (add_comm/mul_comm/distributivity demos).
+        // The large law-application proofs need a bigger stack than the
+        // default 2 MiB test-thread stack.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("ring_demo.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn ring check thread");
+        handle
+            .join()
+            .expect("ring check thread panicked")
+            .expect("examples/ring_demo.owl should typecheck");
+    }
+
+    #[test]
     fn stress_mul_algebra_example_checks() {
         // Full multiplicative algebra: assoc/comm/distributive laws over Nat
         // as cubical paths, ending with the double-double lemma. Guards the

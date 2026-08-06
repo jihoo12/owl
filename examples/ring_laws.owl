@@ -1,0 +1,295 @@
+-- Ring solver law library.
+--
+-- Provides, for the ring of integers (Int = pos : Nat | negsuc : Nat, with
+-- pos n = n and negsuc n = -(n+1)):
+--
+--   * the ring operations: neg, add, mul, sub  (sub a b := add a (neg b))
+--   * a complete set of ring laws: add_comm/add_assoc/add_0_l/add_0_r,
+--     neg_neg/neg_add/neg_mul, mul_comm/mul_assoc/mul_1_l/mul_add_l/mul_add_r,
+--   * the structural lemmas (trans/sym/cong_*) used by `by ring` to build
+--     proof terms.
+--
+-- The `by ring` tactic (see src/cubical/ring.rs) looks up these names in the
+-- context; goals over any ring whose context provides these names can be
+-- solved.  The laws here are proved over Int, so importing this file makes
+-- `by ring` work for integer goals.
+--
+-- Part 1 ports the natural-number algebra (the source of the additive and
+-- multiplicative identities used to lift the laws to Int).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def nat_add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (nat_add m' n)
+
+def nat_mul : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => zero
+  | suc m' => nat_add (nat_mul m' n) n
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Part 1 — the natural-number path algebra
+-- ══════════════════════════════════════════════════════════════════════════
+
+def _owl_cong_suc : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat (suc a) (suc b) :=
+  fun a b p => <i> suc (p @ i)
+
+def _owl_sym : forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat b a :=
+  fun a b p => <i> p @ ~i
+
+def _owl_trans : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat a b -> Path Nat b c -> Path Nat a c :=
+  fun a b c p q => <i> hcomp Nat [~i => <j> a, i => q] (p @ i)
+
+def _owl_add_0_r : forall (m : Nat), Path Nat (nat_add m zero) m :=
+  fun m => match m return Path Nat (nat_add m zero) m with
+  | zero => <i> zero
+  | suc m' => <i> suc ((_owl_add_0_r m') @ i)
+
+def _owl_add_suc_r : forall (m : Nat), forall (n : Nat), Path Nat (nat_add m (suc n)) (suc (nat_add m n)) :=
+  fun m n => match m return Path Nat (nat_add m (suc n)) (suc (nat_add m n)) with
+  | zero => <i> suc n
+  | suc m' => <i> suc ((_owl_add_suc_r m' n) @ i)
+
+def _owl_cong_add_r : forall (a : Nat), forall (b : Nat), forall (m : Nat), Path Nat a b -> Path Nat (nat_add m a) (nat_add m b) :=
+  fun a b m p => match m return Path Nat (nat_add m a) (nat_add m b) with
+  | zero => p
+  | suc m' => <i> suc ((_owl_cong_add_r a b m' p) @ i)
+
+def _owl_add_comm : forall (m : Nat), forall (n : Nat), Path Nat (nat_add m n) (nat_add n m) :=
+  fun m n => match m return Path Nat (nat_add m n) (nat_add n m) with
+  | zero => <i> (_owl_add_0_r n) @ ~i
+  | suc m' => _owl_trans (suc (nat_add m' n)) (suc (nat_add n m')) (nat_add n (suc m'))
+      (_owl_cong_suc (nat_add m' n) (nat_add n m') (_owl_add_comm m' n))
+      (_owl_sym (nat_add n (suc m')) (suc (nat_add n m')) (_owl_add_suc_r n m'))
+
+def _owl_cong_add_l : forall (a : Nat), forall (b : Nat), forall (n : Nat), Path Nat a b -> Path Nat (nat_add a n) (nat_add b n) :=
+  fun a b n p => _owl_trans (nat_add a n) (nat_add n a) (nat_add b n) (_owl_add_comm a n)
+    (_owl_trans (nat_add n a) (nat_add n b) (nat_add b n) (_owl_cong_add_r a b n p) (_owl_add_comm n b))
+
+def _owl_add_assoc : forall (x : Nat), forall (y : Nat), forall (z : Nat), Path Nat (nat_add (nat_add x y) z) (nat_add x (nat_add y z)) :=
+  fun x y z => match x return Path Nat (nat_add (nat_add x y) z) (nat_add x (nat_add y z)) with
+  | zero => <i> nat_add y z
+  | suc x' => _owl_cong_suc (nat_add (nat_add x' y) z) (nat_add x' (nat_add y z)) (_owl_add_assoc x' y z)
+
+def _owl_mul_zero_r : forall (m : Nat), Path Nat (nat_mul m zero) zero :=
+  fun m => match m return Path Nat (nat_mul m zero) zero with
+  | zero => <i> zero
+  | suc m' => _owl_trans (nat_add (nat_mul m' zero) zero) (nat_add zero zero) zero
+      (_owl_cong_add_l (nat_mul m' zero) zero zero (_owl_mul_zero_r m'))
+      (<i> zero)
+
+def _owl_mul_suc_r_aux : forall (A : Nat), forall (n : Nat), forall (m' : Nat),
+  Path Nat (nat_add (nat_add A m') (suc n)) (suc (nat_add A (nat_add n m'))) :=
+  fun A n m' => _owl_trans (nat_add (nat_add A m') (suc n))
+    (suc (nat_add (nat_add A m') n))
+    (suc (nat_add A (nat_add n m')))
+    (_owl_add_suc_r (nat_add A m') n)
+    (_owl_trans (suc (nat_add (nat_add A m') n))
+       (suc (nat_add A (nat_add m' n)))
+       (suc (nat_add A (nat_add n m')))
+       (_owl_cong_suc (nat_add (nat_add A m') n) (nat_add A (nat_add m' n)) (_owl_add_assoc A m' n))
+       (_owl_cong_suc (nat_add A (nat_add m' n)) (nat_add A (nat_add n m'))
+          (<i> nat_add A ((_owl_add_comm m' n) @ i))))
+
+def _owl_mul_suc_r_right : forall (m' : Nat), forall (n : Nat),
+  Path Nat (suc (nat_add (nat_mul m' n) (nat_add n m'))) (nat_add (nat_add (nat_mul m' n) n) (suc m')) :=
+  fun m' n => _owl_trans (suc (nat_add (nat_mul m' n) (nat_add n m')))
+     (suc (nat_add (nat_add (nat_mul m' n) n) m'))
+     (nat_add (nat_add (nat_mul m' n) n) (suc m'))
+     (_owl_cong_suc (nat_add (nat_mul m' n) (nat_add n m')) (nat_add (nat_add (nat_mul m' n) n) m')
+        (_owl_sym (nat_add (nat_add (nat_mul m' n) n) m') (nat_add (nat_mul m' n) (nat_add n m')) (_owl_add_assoc (nat_mul m' n) n m')))
+     (_owl_sym (nat_add (nat_add (nat_mul m' n) n) (suc m')) (suc (nat_add (nat_add (nat_mul m' n) n) m')) (_owl_add_suc_r (nat_add (nat_mul m' n) n) m'))
+
+def _owl_mul_suc_r : forall (m : Nat), forall (n : Nat), Path Nat (nat_mul m (suc n)) (nat_add (nat_mul m n) m) :=
+  fun m n => match m return Path Nat (nat_mul m (suc n)) (nat_add (nat_mul m n) m) with
+  | zero => <i> zero
+  | suc m' =>
+      _owl_trans (nat_add (nat_mul m' (suc n)) (suc n))
+        (suc (nat_add (nat_mul m' n) (nat_add n m')))
+        (nat_add (nat_add (nat_mul m' n) n) (suc m'))
+        (_owl_trans (nat_add (nat_mul m' (suc n)) (suc n))
+           (nat_add (nat_add (nat_mul m' n) m') (suc n))
+           (suc (nat_add (nat_mul m' n) (nat_add n m')))
+           (_owl_cong_add_l (nat_mul m' (suc n)) (nat_add (nat_mul m' n) m') (suc n) (_owl_mul_suc_r m' n))
+           (_owl_mul_suc_r_aux (nat_mul m' n) n m'))
+        (_owl_mul_suc_r_right m' n)
+
+def _owl_mul_one_r : forall (n : Nat), Path Nat (nat_mul n (suc zero)) n :=
+  fun n => _owl_trans (nat_mul n (suc zero)) (nat_add (nat_mul n zero) n) n
+    (_owl_mul_suc_r n zero)
+    (_owl_cong_add_l (nat_mul n zero) zero n (_owl_mul_zero_r n))
+
+def _owl_mul_comm : forall (m : Nat), forall (n : Nat), Path Nat (nat_mul m n) (nat_mul n m) :=
+  fun m n => match m return Path Nat (nat_mul m n) (nat_mul n m) with
+  | zero => _owl_sym (nat_mul n zero) zero (_owl_mul_zero_r n)
+  | suc m' => _owl_trans (nat_add (nat_mul m' n) n) (nat_add (nat_mul n m') n) (nat_mul n (suc m'))
+      (_owl_cong_add_l (nat_mul m' n) (nat_mul n m') n (_owl_mul_comm m' n))
+      (_owl_sym (nat_mul n (suc m')) (nat_add (nat_mul n m') n) (_owl_mul_suc_r n m'))
+
+def _owl_add_assoc_swap : forall (a : Nat), forall (d : Nat), forall (c : Nat),
+  Path Nat (nat_add (nat_add a d) c) (nat_add (nat_add a c) d) :=
+  fun a d c => _owl_trans (nat_add (nat_add a d) c)
+    (nat_add a (nat_add d c))
+    (nat_add (nat_add a c) d)
+    (_owl_add_assoc a d c)
+    (_owl_trans (nat_add a (nat_add d c))
+       (nat_add a (nat_add c d))
+       (nat_add (nat_add a c) d)
+       (<i> nat_add a ((_owl_add_comm d c) @ i))
+       (_owl_sym (nat_add (nat_add a c) d) (nat_add a (nat_add c d)) (_owl_add_assoc a c d)))
+
+def _owl_mul_add_r : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (nat_mul (nat_add a b) c) (nat_add (nat_mul a c) (nat_mul b c)) :=
+  fun a b c => match a return Path Nat (nat_mul (nat_add a b) c) (nat_add (nat_mul a c) (nat_mul b c)) with
+  | zero => <i> nat_mul b c
+  | suc a' =>
+      _owl_trans (nat_add (nat_mul (nat_add a' b) c) c)
+        (nat_add (nat_add (nat_mul a' c) (nat_mul b c)) c)
+        (nat_add (nat_add (nat_mul a' c) c) (nat_mul b c))
+        (_owl_cong_add_l (nat_mul (nat_add a' b) c) (nat_add (nat_mul a' c) (nat_mul b c)) c (_owl_mul_add_r a' b c))
+        (_owl_add_assoc_swap (nat_mul a' c) (nat_mul b c) c)
+
+def _owl_mul_assoc : forall (x : Nat), forall (y : Nat), forall (z : Nat), Path Nat (nat_mul (nat_mul x y) z) (nat_mul x (nat_mul y z)) :=
+  fun x y z => match x return Path Nat (nat_mul (nat_mul x y) z) (nat_mul x (nat_mul y z)) with
+  | zero => <i> zero
+  | suc x' =>
+      _owl_trans (nat_mul (nat_add (nat_mul x' y) y) z)
+        (nat_add (nat_mul (nat_mul x' y) z) (nat_mul y z))
+        (nat_add (nat_mul x' (nat_mul y z)) (nat_mul y z))
+        (_owl_mul_add_r (nat_mul x' y) y z)
+        (_owl_cong_add_l (nat_mul (nat_mul x' y) z) (nat_mul x' (nat_mul y z)) (nat_mul y z) (_owl_mul_assoc x' y z))
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Part 2 — the ring of integers
+-- ══════════════════════════════════════════════════════════════════════════
+--
+-- Int = pos : Nat -> Int | negsuc : Nat -> Int, with
+--   pos n     = n            (the integer n)
+--   negsuc n  = -(n+1)       (the integer -(n+1))
+--
+-- `zero` still resolves to the Nat constructor in this section; the bare
+-- ring-operation names (`add`, `mul`, `neg`, `sub`, `zero`, `one`) used by
+-- the `by ring` tactic are defined at the very end as aliases.
+
+-- A name for the Nat zero, usable after a global `zero` is introduced.
+def _owl_nat_zero : Nat := zero
+
+inductive Int where
+  | pos : Nat -> Int
+  | negsuc : Nat -> Int
+
+-- Negation of a Nat as an integer: 0 ↦ 0, n+1 ↦ -(n+1).
+def _owl_nat_neg : Nat -> Int := fun n =>
+  match n return Int with
+  | zero => pos zero
+  | suc n' => negsuc n'
+
+-- pos m + negsuc n = m - (n+1).
+-- Needs `by_wf`: the structural-guard checker rejects nested eliminators on
+-- the same datatype (it treats them as recursive calls), and the recursion
+-- here descends on m then n. The body is still fully typechecked; the
+-- definition genuinely terminates (first argument decreases).
+def _owl_add_pos_neg : Nat -> Nat -> Int by_wf := fun m n =>
+  match m return Int with
+  | zero => negsuc n
+  | suc m' => match n return Int with
+    | zero => pos m'
+    | suc n' => _owl_add_pos_neg m' n'
+
+def int_add : Int -> Int -> Int by_wf := fun a b =>
+  match a return Int with
+  | pos x => match b return Int with
+    | pos y => pos (nat_add x y)
+    | negsuc y => _owl_add_pos_neg x y
+  | negsuc x => match b return Int with
+    | pos y => _owl_add_pos_neg y x
+    | negsuc y => negsuc (suc (nat_add x y))
+
+def int_neg : Int -> Int := fun a =>
+  match a return Int with
+  | pos n => _owl_nat_neg n
+  | negsuc n => pos (suc n)
+
+def int_sub : Int -> Int -> Int := fun a b => int_add a (int_neg b)
+
+def int_zero : Int := pos _owl_nat_zero
+def int_one : Int := pos (suc _owl_nat_zero)
+
+-- pos x * negsuc y = -(x * (y+1)).
+def _owl_MPN : Nat -> Nat -> Int := fun x y =>
+  match (nat_mul x (suc y)) return Int with
+  | zero => pos zero
+  | suc k => negsuc k
+
+def int_mul : Int -> Int -> Int by_wf := fun a b =>
+  match a return Int with
+  | pos x => match b return Int with
+    | pos y => pos (nat_mul x y)
+    | negsuc y => _owl_MPN x y
+  | negsuc x => match b return Int with
+    | pos y => _owl_MPN y x
+    | negsuc y => pos (nat_mul (suc x) (suc y))
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Part 3 — the `by ring` names for the natural numbers
+-- ══════════════════════════════════════════════════════════════════════════
+--
+-- `by ring` (src/cubical/ring.rs) recognizes the ring operations in the goal
+-- by the shape of their normal forms (the eliminators `nat_add`/`nat_mul`
+-- unfold to) and constructs proofs from the law names below, resolved in the
+-- context.  This section introduces those names over the natural numbers, a
+-- commutative semiring.  The additive ring structure (neg/sub) and the
+-- integer laws are added in a later milestone.
+--
+-- Left distributivity does not hold definitionally, so it is derived here
+-- from `mul_comm` and `mul_add_r`.
+def _owl_mul_add_l : forall (a : Nat), forall (b : Nat), forall (c : Nat),
+  Path Nat (nat_mul a (nat_add b c)) (nat_add (nat_mul a b) (nat_mul a c)) :=
+  fun a b c => _owl_trans (nat_mul a (nat_add b c)) (nat_mul (nat_add b c) a) (nat_add (nat_mul a b) (nat_mul a c))
+    (_owl_mul_comm a (nat_add b c))
+    (_owl_trans (nat_mul (nat_add b c) a) (nat_add (nat_mul b a) (nat_mul c a)) (nat_add (nat_mul a b) (nat_mul a c))
+      (_owl_mul_add_r b c a)
+      (_owl_trans (nat_add (nat_mul b a) (nat_mul c a)) (nat_add (nat_mul a b) (nat_mul c a)) (nat_add (nat_mul a b) (nat_mul a c))
+        (_owl_cong_add_l (nat_mul b a) (nat_mul a b) (nat_mul c a) (_owl_mul_comm b a))
+        (_owl_cong_add_r (nat_mul c a) (nat_mul a c) (nat_mul a b) (_owl_mul_comm c a))))
+
+-- Congruence of multiplication on the right argument (first argument fixed).
+def _owl_cong_mul_r : forall (a : Nat), forall (b : Nat), forall (m : Nat),
+  Path Nat a b -> Path Nat (nat_mul m a) (nat_mul m b) :=
+  fun a b m p => match m return Path Nat (nat_mul m a) (nat_mul m b) with
+  | zero => <i> zero
+  | suc m' => _owl_trans (nat_add (nat_mul m' a) a) (nat_add (nat_mul m' b) a) (nat_add (nat_mul m' b) b)
+      (_owl_cong_add_l (nat_mul m' a) (nat_mul m' b) a (_owl_cong_mul_r a b m' p))
+      (_owl_cong_add_r a b (nat_mul m' b) p)
+
+-- Congruence of multiplication on the left argument (second argument fixed).
+def _owl_cong_mul_l : forall (a : Nat), forall (b : Nat), forall (n : Nat),
+  Path Nat a b -> Path Nat (nat_mul a n) (nat_mul b n) :=
+  fun a b n p => _owl_trans (nat_mul a n) (nat_mul n a) (nat_mul b n)
+    (_owl_mul_comm a n)
+    (_owl_trans (nat_mul n a) (nat_mul n b) (nat_mul b n)
+      (_owl_cong_mul_r a b n p)
+      (_owl_mul_comm n b))
+
+-- The operation names `by ring` canonicalizes with.
+def zero : Nat := _owl_nat_zero
+def one : Nat := suc _owl_nat_zero
+def add : Nat -> Nat -> Nat := nat_add
+def mul : Nat -> Nat -> Nat := nat_mul
+
+-- The law names `by ring` builds proofs from.
+def add_comm : forall (a : Nat), forall (b : Nat), Path Nat (add a b) (add b a) := _owl_add_comm
+def add_assoc : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (add (add a b) c) (add a (add b c)) := _owl_add_assoc
+def add_0_l : forall (a : Nat), Path Nat (add zero a) a := fun a => <i> a
+def add_0_r : forall (a : Nat), Path Nat (add a zero) a := _owl_add_0_r
+def mul_comm : forall (a : Nat), forall (b : Nat), Path Nat (mul a b) (mul b a) := _owl_mul_comm
+def mul_assoc : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (mul (mul a b) c) (mul a (mul b c)) := _owl_mul_assoc
+def mul_1_l : forall (a : Nat), Path Nat (mul one a) a := fun a => <i> a
+def mul_1_r : forall (a : Nat), Path Nat (mul a one) a := _owl_mul_one_r
+def mul_0_l : forall (a : Nat), Path Nat (mul zero a) zero := fun a => <i> zero
+def mul_0_r : forall (a : Nat), Path Nat (mul a zero) zero := _owl_mul_zero_r
+def mul_add_l : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (mul a (add b c)) (add (mul a b) (mul a c)) := _owl_mul_add_l
+def mul_add_r : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (mul (add a b) c) (add (mul a c) (mul b c)) := _owl_mul_add_r

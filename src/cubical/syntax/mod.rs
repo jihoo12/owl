@@ -221,6 +221,15 @@ pub enum Tactic {
     /// re-checked by the kernel. Produces a complete proof term (like
     /// `exact`). See `src/cubical/omega.rs`.
     Omega,
+    /// `ring` — decision procedure for the commutative semiring over Nat.
+    ///
+    /// Proves goals of the form `Path Nat u v` where `u` and `v` are
+    /// polynomial expressions over the context's Nat variables (built with
+    /// `add`, `mul`, `zero`, `one`), by canonicalizing both sides to a sum
+    /// of monomials and proving the equality from the law names in
+    /// `examples/ring_laws.owl`. The proof term is re-checked by the
+    /// kernel. See `src/cubical/ring.rs`.
+    Ring,
 }
 
 // ---------------------------------------------------------------------------
@@ -534,7 +543,8 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
         | Tactic::Transitivity
         | Tactic::Compute
         | Tactic::Trivial
-        | Tactic::Omega => tac.clone(),
+        | Tactic::Omega
+        | Tactic::Ring => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),
@@ -713,7 +723,8 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
         | Tactic::Transitivity
         | Tactic::Compute
         | Tactic::Trivial
-        | Tactic::Omega => tac.clone(),
+        | Tactic::Omega
+        | Tactic::Ring => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),

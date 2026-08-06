@@ -480,10 +480,6 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
 ///   globals[global_offset + (k - env.len())]
 /// UNLESS that is also out of bounds — in which case we create a neutral.
 pub fn eval_nbe(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Value {
-    eval_nbe_inner(env, globals, global_offset, t)
-}
-
-fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Value {
     match t {
         Term::TVar(i) => {
             let i = *i as usize;
@@ -2111,10 +2107,34 @@ fn match_ctor_args<'a>(v: &'a Value, expected_name: &str) -> Option<(&'a str, Ve
     }
 }
 
+thread_local! {
+    static ALL_TUBES_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
+}
+
 /// Check if all tubes in the system are constant (tube @ I0 ≡ tube @ I1)
 /// AND coherent with base (tube @ I0 ≡ base). When this holds, the Kan
 /// operations degenerate: hcomp/comp → base, fill/hfill → constant path.
 fn all_tubes_constant_and_coherent(globals: &Globals, global_offset: usize, sys: &DNFSystem, base: &Value) -> bool {
+    // Guard against re-entrancy. The tube check quotes the base/tubes and
+    // compares them with `definitionally_equal`, which re-normalizes via
+    // `nbe_eval_ctx` → `quote`. When the quoted body is itself a PLam/VLam
+    // whose evaluation contains an hcomp, that re-normalization re-runs this
+    // check on the same structure → infinite eval↔quote recursion (see the
+    // ring_demo overflow). This check is only an optimization (the
+    // constant-tube shortcut); bailing out is safe — the hcomp simply stays
+    // stuck instead of reducing to base.
+    let depth = ALL_TUBES_DEPTH.with(|d| d.get() + 1);
+    ALL_TUBES_DEPTH.with(|d| d.set(depth));
+    if depth > 1 {
+        ALL_TUBES_DEPTH.with(|d| d.set(depth - 1));
+        return false;
+    }
+    let result = all_tubes_constant_and_coherent_inner(globals, global_offset, sys, base);
+    ALL_TUBES_DEPTH.with(|d| d.set(depth - 1));
+    result
+}
+
+fn all_tubes_constant_and_coherent_inner(globals: &Globals, global_offset: usize, sys: &DNFSystem, base: &Value) -> bool {
     let base_term = quote(0, globals, global_offset, base.clone());
     for (_phi, tube) in sys {
         let t0 = do_papp(globals, global_offset, tube.clone(), Value::VInterval(I::I0));
@@ -3073,10 +3093,6 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
 }
 
 pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {
-    quote_inner(size, globals, global_offset, v)
-}
-
-fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {
     match v {
         Value::VNeutral(n) => quote_neutral(size, globals, global_offset, n),
         Value::VLam(x, clos) => Term::TAbs(
@@ -3351,15 +3367,45 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
 /// global references are moved to below the quoting frame. Nothing is
 /// re-evaluated, so recursion terminates.
 fn quote_case_body(size: usize, globals: &Globals, global_offset: usize, env: &Scope, go: usize, t: &Term) -> Term {
-    quote_case_body_inner(size, globals, global_offset, env, go, t)
-}
-
-fn quote_case_body_inner(size: usize, globals: &Globals, global_offset: usize, env: &Scope, go: usize, t: &Term) -> Term {
     match t {
         Term::TVar(i) => {
             let i = *i as usize;
             if i < env.len() {
-                quote(size, globals, global_offset, env.lookup(i).clone())
+                let v = env.lookup(i).clone();
+                match &v {
+                    // Captured closures must be re-anchored structurally, not
+                    // re-quoted via general `quote`: `quote` on a VLam applies
+                    // the closure (`clos.apply`), which re-evaluates the body.
+                    // Inside a stuck elim that body can reference recursive
+                    // definitions (e.g. `add_comm m' n`), so re-evaluating it
+                    // re-unfolds the definition one level per pass and never
+                    // terminates. Re-anchoring the raw body under the
+                    // closure's env keeps quoting evaluation-free (see the
+                    // comment on `quote_case_body`).
+                    Value::VLam(x, clos) => Term::TAbs(
+                        x.clone(),
+                        Box::new(quote_case_body(
+                            size + 1,
+                            globals,
+                            global_offset,
+                            &clos.env.extend(Value::VNeutral(Neutral::NVar(size))),
+                            clos.global_offset,
+                            &clos.body,
+                        )),
+                    ),
+                    Value::VPLam(x, clos) => Term::PLam(
+                        x.clone(),
+                        Box::new(quote_case_body(
+                            size + 1,
+                            globals,
+                            global_offset,
+                            &clos.env.extend(Value::VIntervalVar(size)),
+                            clos.global_offset,
+                            &clos.body,
+                        )),
+                    ),
+                    _ => quote(size, globals, global_offset, v.clone()),
+                }
             } else {
                 Term::TVar((size + go + i - env.len()) as i32)
             }

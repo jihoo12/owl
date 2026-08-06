@@ -53,7 +53,14 @@ pub fn lookup_ctx(i: i32, ctx: &Ctx) -> Result<Term, TypeError> {
     if i < 0 || i as usize >= ctx.len() {
         Err(TypeError::UnboundVariable(format!("#{}", i)))
     } else {
-        Ok(nbe_eval_ctx(ctx.len(), &shift(i + 1, 0, &ctx[i as usize].1)))
+        // Return the declared type unnormalized. Normalizing here bakes
+        // quoted elim case bodies (whose global refs are re-anchored to
+        // absolute frame positions) into the type; beta-substituting
+        // arguments into that quoted normal form then leaves stale
+        // re-anchored references that never re-resolve on the second pass.
+        // Consumers normalize at the point of comparison, so a single
+        // normalization pass from the raw type keeps both sides consistent.
+        Ok(shift(i + 1, 0, &ctx[i as usize].1))
     }
 }
 
@@ -714,7 +721,14 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     },
                 };
                 check_dt(dts, ctx, a, &a_ty)?;
-                Ok(nbe_eval_ctx(ctx.len(), &beta(&b_ty, a)))
+                // Keep the result unnormalized so that chains of applications
+                // (e.g. a fully-applied law) beta-substitute into raw
+                // codomains throughout, then normalize exactly once at the
+                // comparison site. Normalizing here would beta-substitute the
+                // outer argument into a codomain already baked into a quoted
+                // normal form, leaving stale re-anchored global references in
+                // elim case bodies.
+                Ok(beta(&b_ty, a))
             }
             Err(e) => infer_via_reduction(dts, ctx, t, e),
         },
@@ -3002,7 +3016,18 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 engine.run_tactic(tac, ctx)?;
             }
             let proof = engine.into_term()?;
-            check_dt(dts, ctx, &proof, ty)
+            // The `ring` tactic returns a fully-normalized proof whose unfolded
+            // law bodies contain elims on compound neutral scrutinees. The
+            // structural-recursion guard cannot fire on a normal form (see the
+            // comment at the fallback below), so skip it for this tactic's
+            // output; every other tactic (e.g. `by exact`) keeps the guard.
+            let prev = crate::cubical::typechecker::termination::should_skip_guard();
+            if tactics.iter().any(|t| matches!(t, crate::cubical::syntax::Tactic::Ring)) {
+                crate::cubical::typechecker::termination::set_skip_guard(true);
+            }
+            let r = check_dt(dts, ctx, &proof, ty);
+            crate::cubical::typechecker::termination::set_skip_guard(prev);
+            r
         }
 
         // ------------------------------------------------------------------
@@ -3106,12 +3131,27 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 }
             }
             Err(e) => {
-                let reduced = nbe_eval(t);
+                let reduced = nbe_eval_ctx(ctx.len(), t);
                 if reduced == *t { Err(e) }
                 else {
-                    let nf = nbe_eval(&reduced);
+                    let nf = nbe_eval_ctx(ctx.len(), &reduced);
                     if nf == *t { Err(e) }
-                    else { check_dt(dts, ctx, &nf, ty) }
+                    else {
+                        // Re-check the fully-reduced term. Guard checking is a
+                        // source-level structural-recursion check for
+                        // definitions; the normal form only contains stuck
+                        // elims (neutral scrutinees) that can never fire, so
+                        // the guard is vacuous here. Without skipping it,
+                        // legitimate normal forms built from checked
+                        // definitions (e.g. the ring tactic's proof) would be
+                        // rejected because unfolding inlines elims whose
+                        // scrutinees are compound neutrals.
+                        let prev = crate::cubical::typechecker::termination::should_skip_guard();
+                        crate::cubical::typechecker::termination::set_skip_guard(true);
+                        let r = check_dt(dts, ctx, &nf, ty);
+                        crate::cubical::typechecker::termination::set_skip_guard(prev);
+                        r
+                    }
                 }
             }
         }

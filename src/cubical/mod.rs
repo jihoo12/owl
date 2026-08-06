@@ -6,6 +6,7 @@ pub mod interval;
 pub mod nbe;
 pub mod omega;
 pub mod parser;
+pub mod ring;
 pub mod syntax;
 pub mod tactics;
 pub mod typechecker;

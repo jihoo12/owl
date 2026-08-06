@@ -1072,6 +1072,24 @@ impl<'a> TacticEngine<'a> {
                 self.result = Some(result);
                 Ok(())
             }
+
+            // ── ring ──────────────────────────────────────────────────────
+            Tactic::Ring => {
+                let combined_ctx: Ctx = {
+                    let mut c = self.tactic_ctx.clone();
+                    c.extend_from_slice(outer_ctx);
+                    c
+                };
+                let result = crate::cubical::ring::prove(
+                    self.dts,
+                    &combined_ctx,
+                    &self.goal_ty,
+                    self.tactic_ctx.len(),
+                    self.intro_names.len(),
+                )?;
+                self.result = Some(result);
+                Ok(())
+            }
         }?;
 
         // ── process any pending goal transition AFTER the tactic ─────────
