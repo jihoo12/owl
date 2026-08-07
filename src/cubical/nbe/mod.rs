@@ -479,7 +479,36 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
 /// A TVar(k) where k >= env.len() is a global reference:
 ///   globals[global_offset + (k - env.len())]
 /// UNLESS that is also out of bounds — in which case we create a neutral.
+///
+/// Normalization can diverge on definitions that reference themselves directly
+/// (e.g. `def f : Nat -> Nat := fun n => f n`): evaluating the global value
+/// re-resolves the self-reference to the same lambda forever, growing the
+/// recursion unboundedly. Cap the evaluation depth so such inputs produce a
+/// finite (stuck) value instead of overflowing the stack. Every divergent path
+/// — direct self-application, mutual recursion, and self-references reached via
+/// `Closure::apply` / `IClosure` — recurses through `eval_nbe`, so the single
+/// guard below covers them all. Legitimate normal forms stay far below the cap.
+const EVAL_NBE_MAX_DEPTH: usize = 200;
+thread_local! {
+    static EVAL_NBE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn eval_nbe(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Value {
+    let depth = EVAL_NBE_DEPTH.with(|c| {
+        let d = c.get();
+        c.set(d + 1);
+        d
+    });
+    if depth >= EVAL_NBE_MAX_DEPTH {
+        EVAL_NBE_DEPTH.with(|c| c.set(depth));
+        return Value::VNeutral(Neutral::NVar(depth));
+    }
+    let result = eval_nbe_inner(env, globals, global_offset, t);
+    EVAL_NBE_DEPTH.with(|c| c.set(depth));
+    result
+}
+
+fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Value {
     match t {
         Term::TVar(i) => {
             let i = *i as usize;
@@ -3092,7 +3121,37 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
     }
 }
 
+thread_local! {
+    static QUOTE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Quoting can also diverge independently of `eval_nbe`: re-quoting a lambda
+/// whose body re-references the same global value grows the quote recursion one
+/// `TAbs` layer per cycle (`quote` -> `Closure::apply` -> `eval_nbe` -> `quote`),
+/// while each `eval_nbe` call returns immediately. Cap the quote depth so such
+/// values produce a finite (stuck) term instead of overflowing the stack. The
+/// placeholder is an unbound `TVar(size)` (far beyond any real context), which
+/// surfaces as an error downstream rather than silently passing. The cap must be
+/// low enough to fit the debug-build stack frames on the smallest thread stack
+/// the normalizer may run on (test threads default to 2 MiB).
+const QUOTE_MAX_DEPTH: usize = 200;
+
 pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {
+    let n = QUOTE_DEPTH.with(|c| {
+        let d = c.get() + 1;
+        c.set(d);
+        d
+    });
+    if n > QUOTE_MAX_DEPTH {
+        QUOTE_DEPTH.with(|c| c.set(n - 1));
+        return Term::TVar(size as i32);
+    }
+    let r = quote_inner(size, globals, global_offset, v);
+    QUOTE_DEPTH.with(|c| c.set(n - 1));
+    r
+}
+
+fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {
     match v {
         Value::VNeutral(n) => quote_neutral(size, globals, global_offset, n),
         Value::VLam(x, clos) => Term::TAbs(
