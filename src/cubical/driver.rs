@@ -269,12 +269,20 @@ fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<
     let param_ctx: crate::cubical::typechecker::Ctx = dt
         .params
         .iter()
-        .enumerate()
         .rev()
-        .map(|(i, (pname, pty))| {
-            // Shift the param type up by i so it's well-scoped
-            // in a context where i parameters are already bound.
-            (pname.clone(), crate::cubical::syntax::shift(i as i32, 0, pty))
+        .map(|(pname, pty)| {
+            // Keep each param type's de Bruijn indices UNCHANGED.  Params are
+            // inserted into the parser's `term_env` front-first, so `params`
+            // is stored in parse order while the runtime context stores them
+            // innermost-first (last param at position 0).  The reversed
+            // iteration reproduces exactly the parse-time layout, so a param
+            // type's original indices already resolve to the correct slots
+            // (verified: `lookup_ctx` shifts a stored type by `i+1`, which
+            // lands on the same param a reference `j-1-k` targeted at parse
+            // time).  Shifting here breaks params whose types reference
+            // earlier params (e.g. `add : R -> R -> R` in a record, where the
+            // field type references `add`), producing wrong de Bruijn indices.
+            (pname.clone(), pty.clone())
         })
         .collect();
     for con in &dt.cons {
@@ -313,10 +321,12 @@ fn process_data_mutual(
         let param_ctx: crate::cubical::typechecker::Ctx = dt
             .params
             .iter()
-            .enumerate()
             .rev()
-            .map(|(i, (pname, pty))| {
-                (pname.clone(), crate::cubical::syntax::shift(i as i32, 0, pty))
+            .map(|(pname, pty)| {
+                // See `process_data`: param types keep their original
+                // (parse-time) de Bruijn indices; shifting breaks params whose
+                // types reference earlier params.
+                (pname.clone(), pty.clone())
             })
             .collect();
         for con in &dt.cons {
@@ -864,6 +874,26 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
             .join("examples")
             .join("nat_path_algebra.owl");
         check(&path).expect("examples/nat_path_algebra.owl should typecheck");
+    }
+
+    #[test]
+    fn record_examples_check() {
+        // Guard against regressions in record support: minimal records,
+        // dependent record params, record update, and record-with-stress
+        // patterns. The `record` declaration desugars to a single-constructor
+        // inductive, so these exercise the constructor-arg (field-type)
+        // checking path.
+        for name in [
+            "record_minimal.owl",
+            "record_types.owl",
+            "stress_record_types.owl",
+            "stress_update_or_patterns.owl",
+        ] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join(name);
+            check(&path).unwrap_or_else(|e| panic!("examples/{name} should typecheck: {e}"));
+        }
     }
 
     #[test]

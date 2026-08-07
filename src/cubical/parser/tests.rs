@@ -487,6 +487,39 @@ fn cumulativity_record_types() {
 }
 
 #[test]
+fn record_params_referenced_inside_field_binders() {
+    use crate::cubical::driver::run_str;
+    // Regression test: a record whose parameter types depend on earlier
+    // parameters, and whose field types reference parameters under a nested
+    // binder (e.g. `add z` inside `forall (a : R), Path R (add z a) a`).
+    // Previously the constructor-arg context shifted param types, producing
+    // wrong de Bruijn indices (`Type mismatch expected #7 got #5`).
+    run_str(
+        r#"
+        inductive Nat where | zero : Nat | suc : Nat -> Nat
+        inductive Eq (A : Type) (x : A) (y : A) where | refl : Eq A x y
+
+        record CR (R : Type) (z : R) (o : R) (add : R -> R -> R) where
+          field add_0_l : forall (a : R), Eq R (add z a) a
+          field add_0_r : forall (a : R), Eq R (add a z) a
+
+        def mk : forall (R : Type), forall (z : R), forall (o : R),
+          forall (add : R -> R -> R),
+          (forall (a : R), Eq R (add z a) a) ->
+          (forall (a : R), Eq R (add a z) a) -> CR R z o add :=
+          fun R z o add l r => mkCR l r
+
+        def use : forall (R : Type), forall (z : R), forall (o : R),
+          forall (add : R -> R -> R),
+          forall (C : CR R z o add),
+          forall (a : R), Eq R (add z a) a :=
+          fun R z o add C a => C.add_0_l a
+        "#,
+    )
+    .expect("record field types referencing params under binders should typecheck");
+}
+
+#[test]
 fn cumulativity_contravariant_datatype() {
     use crate::cubical::driver::run_str;
     // Bad (A) with `mkb : (A -> Nat) -> Bad A` is contravariant in A: the
