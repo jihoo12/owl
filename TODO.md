@@ -129,6 +129,33 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   - Example gallery
   - Comparison with other cubical systems (Agda cubical, cubicaltt)
 
+### H. Algebraic Geometry 🔴
+
+> Goal: make Owl handle algebraic geometry well. AG is ~95% **set-level commutative
+> algebra + 1-categorical diagram chasing**; almost nothing uses the higher-categorical
+> part of cubical type theory. "AG well" = (1) automatic ring/field computation,
+> (2) ergonomic set truncation/quotients, (3) a commutative-algebra + scheme layer.
+> Direction: **classical schemes first, homotopical/derived AG as the long tail** that
+> the cubical core uniquely enables. Items B.3/B.4 (group solver, field solver) and the
+> Int side of B.1 (omega) are folded in here.
+
+- [ ] **H1. Generic `by ring`** *(🔴 — the single highest-leverage feature; Coq/Lean AG is built on a ring tactic over arbitrary rings.)* Today `by ring` is hardcoded to `Nat`:
+  - `is_add_call`/`is_mul_call` recognize operations by **Nat eliminator normal-form shape** (`is_addshape_elim`/`is_mulshape_elim`, `src/cubical/ring.rs:264-377`) — meaningless for abstract ring ops that don't unfold.
+  - `numeral`/`numeral_of` hardcode `Nat`'s `zero`/`suc` constructors (`ring.rs:199-217`).
+  - Good news: `Ring::resolve` already resolves law names from the context (`ring.rs:78-116`), so the proof-tree builder is mostly reusable.
+  - Design: extend `Ring` with a mode — `Concrete` (current Nat path, kept for backward compat) vs `Structured`. In `Structured` mode, recognize ops by **head-symbol equality** with resolved `add`/`mul`/`neg`/`sub`/`zero`/`one` terms instead of by unfolding; build numerals as iterated `one + …`; add `neg`/`sub` support (currently absent); keep kernel re-checking as the soundness backstop.
+  - Syntax: `by ring with C` where `C : CommRing` bundles ops + law proofs (requires deciding H4's instance-search first, or an explicit argument). Wire through `Tactic::Ring` in `src/cubical/tactics.rs:1076`.
+  - Criterion: `by ring` closes goals over an abstract `CommRing R` as reliably as it closes `Nat` goals today. Add `examples/comm_ring_demo.owl`.
+- [ ] **H2. `by field`** *(🔴 — field identities with inverse reasoning; needed for residue/function fields. Builds on H1.)*
+- [ ] **H3. Int `by omega` + group solver** *(🟡 — omega-Int for valuation/residue computations; group solver is the base of the field ladder.)*
+- [ ] **H4. Bundled algebra records + lightweight instance search** *(🔴 — without typeclasses, every theorem must thread `CommRing R` explicitly. Minimal implicit-argument + instance-search layer, Lean/Coq-style, on top of the existing record system.)*
+- [ ] **H5. Commutative algebra library** *(🔴)*: `CommRing`/`Field`/`Module`/`Ideal` structures; quotient rings `R/I` and localization `S⁻¹R` via the existing HIT quotients; polynomial rings `R[X]`; prime/maximal ideals; finite fields `F_p`.
+- [ ] **H6. Set-level foundation polish** *(🟡)*: quotient elimination ergonomics, proof irrelevance for Prop, `isSet` stability — AG objects are all sets.
+- [ ] **H7. Category + sheaf core** *(🔴)*: categories, functors, natural transformations, Yoneda; presheaves and sheaves; the Zariski site.
+- [ ] **H8. Schemes** *(🔴)*: **functor-of-points route** — `Spec R := Hom(R, −)` on `CommRing^op`; a scheme is a Zariski sheaf locally represented by affines (the UniMath approach). Avoids building the structure sheaf on a point-set, which is far costlier in type theory. Targets: `Spec R`, Zariski opens `D(f)`, affine cover, products/pullbacks, projective space `P^n`, closed/open immersions.
+- [ ] **H9. Long tail — derived schemes / higher stacks** *(🟢 — where cubical/HoTT genuinely shines over vanilla ITT: simplicial rings, homotopy limits/colimits, higher truncation. Research-level.)*
+- [ ] **H10. Ergonomics blockers at library scale** *(🟡)*: `forall` cannot follow `->` (`docs/reference.md:213` — all binders must precede the arrow chain) and the basic module/import system (§D) become painful for a growing AG library.
+
 ---
 
 ## Suggested Order of Attack
@@ -139,3 +166,4 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
 4. 🟡 **Nested constructor patterns** — moderate-cost ergonomics fix, independent of everything else.
 5. 🟡 **Interactive REPL proof sessions** — biggest remaining UX win, builds on existing hole/tactic machinery.
 6. 🟢 Remaining items (Group/Field solver, reflection API, custom tactics, incremental normalization, stdlib, docs) — valuable but can proceed in parallel/opportunistically once the above land.
+7. 🔴 **Algebraic geometry** — follow §H in order: H4 (instance search) → H1 (generic `by ring`) → H2 (`by field`) → H5 (comm algebra) → H7 (categories/sheaves) → H8 (schemes). H1 is the highest-leverage single feature; H6/H10 unlock as library size grows.
