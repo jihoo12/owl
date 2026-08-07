@@ -3038,7 +3038,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             // comment at the fallback below), so skip it for this tactic's
             // output; every other tactic (e.g. `by exact`) keeps the guard.
             let prev = crate::cubical::typechecker::termination::should_skip_guard();
-            if tactics.iter().any(|t| matches!(t, crate::cubical::syntax::Tactic::Ring)) {
+            if tactics.iter().any(|t| matches!(t, crate::cubical::syntax::Tactic::Ring(_))) {
                 crate::cubical::typechecker::termination::set_skip_guard(true);
             }
             let r = check_dt(dts, ctx, &proof, ty);

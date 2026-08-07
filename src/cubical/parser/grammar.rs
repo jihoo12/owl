@@ -616,9 +616,13 @@ impl Parser {
             return Ok(Tactic::Omega);
         }
         if self.consume_ident("ring") {
-            return Ok(Tactic::Ring);
+            if self.consume_ident("with") {
+                let term = self.parse_term()?;
+                return Ok(Tactic::Ring(Some(term)));
+            }
+            return Ok(Tactic::Ring(None));
         }
-        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', 'omega', or 'ring'"))
+        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', 'omega', 'ring', or 'ring with <term>'"))
     }
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {

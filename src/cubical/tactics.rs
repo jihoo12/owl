@@ -1074,7 +1074,7 @@ impl<'a> TacticEngine<'a> {
             }
 
             // ── ring ──────────────────────────────────────────────────────
-            Tactic::Ring => {
+            Tactic::Ring(ring_term) => {
                 let combined_ctx: Ctx = {
                     let mut c = self.tactic_ctx.clone();
                     c.extend_from_slice(outer_ctx);
@@ -1086,6 +1086,7 @@ impl<'a> TacticEngine<'a> {
                     &self.goal_ty,
                     self.tactic_ctx.len(),
                     self.intro_names.len(),
+                    ring_term.as_ref(),
                 )?;
                 self.result = Some(result);
                 Ok(())

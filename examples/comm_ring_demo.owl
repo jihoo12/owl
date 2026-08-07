@@ -1,0 +1,70 @@
+-- `by ring with C` — the abstract commutative semiring solver.
+--
+-- Binds an abstract `CommRing` record `C` and proves polynomial identities
+-- over its operations using `by ring with C`.  The record bundles the
+-- operations as *parameters* (record fields cannot reference earlier fields
+-- in this kernel) and the law/glue lemmas as fields; the solver resolves the
+-- operation heads by name in the context (`add`/`mul`/`zero`/`one`) and the
+-- lemmas as projections of C.
+
+record CommRing (A : Type) (add : A -> A -> A) (mul : A -> A -> A) (zero : A) (one : A) where
+  field trans : forall (a : A), forall (b : A), forall (c : A), Path A a b -> Path A b c -> Path A a c
+  field sym : forall (a : A), forall (b : A), Path A a b -> Path A b a
+  field cong_add_l : forall (a : A), forall (b : A), forall (n : A), Path A a b -> Path A (add a n) (add b n)
+  field cong_add_r : forall (a : A), forall (b : A), forall (m : A), Path A a b -> Path A (add m a) (add m b)
+  field cong_mul_l : forall (a : A), forall (b : A), forall (n : A), Path A a b -> Path A (mul a n) (mul b n)
+  field cong_mul_r : forall (a : A), forall (b : A), forall (m : A), Path A a b -> Path A (mul m a) (mul m b)
+  field add_comm : forall (a : A), forall (b : A), Path A (add a b) (add b a)
+  field add_assoc : forall (a : A), forall (b : A), forall (c : A), Path A (add (add a b) c) (add a (add b c))
+  field add_0_l : forall (a : A), Path A (add zero a) a
+  field add_0_r : forall (a : A), Path A (add a zero) a
+  field mul_comm : forall (a : A), forall (b : A), Path A (mul a b) (mul b a)
+  field mul_assoc : forall (a : A), forall (b : A), forall (c : A), Path A (mul (mul a b) c) (mul a (mul b c))
+  field mul_1_l : forall (a : A), Path A (mul one a) a
+  field mul_1_r : forall (a : A), Path A (mul a one) a
+  field mul_0_l : forall (a : A), Path A (mul zero a) zero
+  field mul_0_r : forall (a : A), Path A (mul a zero) zero
+  field mul_add_l : forall (a : A), forall (b : A), forall (c : A), Path A (mul a (add b c)) (add (mul a b) (mul a c))
+  field mul_add_r : forall (a : A), forall (b : A), forall (c : A), Path A (mul (add a b) c) (add (mul a c) (mul b c))
+
+def comm_demo_add_comm :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A),
+  forall (zero : A), forall (one : A),
+  forall (C : CommRing A add mul zero one), forall (x : A), forall (y : A),
+  Path A (add x y) (add y x) :=
+  by intro A add mul zero one C x y; ring with C
+
+def comm_demo_mul_comm :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A),
+  forall (zero : A), forall (one : A),
+  forall (C : CommRing A add mul zero one), forall (x : A), forall (y : A),
+  Path A (mul x y) (mul y x) :=
+  by intro A add mul zero one C x y; ring with C
+
+def comm_demo_dist :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A),
+  forall (zero : A), forall (one : A),
+  forall (C : CommRing A add mul zero one), forall (x : A), forall (y : A), forall (z : A),
+  Path A (mul (add x y) z) (add (mul x z) (mul y z)) :=
+  by intro A add mul zero one C x y z; ring with C
+
+def comm_demo_assoc :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A),
+  forall (zero : A), forall (one : A),
+  forall (C : CommRing A add mul zero one), forall (x : A), forall (y : A), forall (z : A),
+  Path A (add (add x y) z) (add x (add y z)) :=
+  by intro A add mul zero one C x y z; ring with C
+
+def comm_demo_numerals :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A),
+  forall (zero : A), forall (one : A),
+  forall (C : CommRing A add mul zero one), forall (x : A),
+  Path A (mul (add one one) x) (add x x) :=
+  by intro A add mul zero one C x; ring with C
+
+def comm_demo_zero :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A),
+  forall (zero : A), forall (one : A),
+  forall (C : CommRing A add mul zero one), forall (x : A),
+  Path A (add (mul one x) zero) (mul x one) :=
+  by intro A add mul zero one C x; ring with C

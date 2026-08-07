@@ -221,15 +221,23 @@ pub enum Tactic {
     /// re-checked by the kernel. Produces a complete proof term (like
     /// `exact`). See `src/cubical/omega.rs`.
     Omega,
-    /// `ring` — decision procedure for the commutative semiring over Nat.
+    /// `ring` — decision procedure for commutative semiring/ring identities.
     ///
-    /// Proves goals of the form `Path Nat u v` where `u` and `v` are
-    /// polynomial expressions over the context's Nat variables (built with
-    /// `add`, `mul`, `zero`, `one`), by canonicalizing both sides to a sum
-    /// of monomials and proving the equality from the law names in
-    /// `examples/ring_laws.owl`. The proof term is re-checked by the
-    /// kernel. See `src/cubical/ring.rs`.
-    Ring,
+    /// `ring` without an argument is the concrete path: it proves goals of
+    /// the form `Path Nat u v` where `u` and `v` are polynomial expressions
+    /// over the context's Nat variables (built with `add`, `mul`, `zero`,
+    /// `one`), by canonicalizing both sides to a sum of monomials and proving
+    /// the equality from the law names in `examples/ring_laws.owl`.
+    ///
+    /// `ring with C` proves the same class of identities over an *abstract*
+    /// commutative ring bundled in the record `C : CommRing A`: the operations
+    /// (`add`/`mul`/`zero`/`one`) and law proofs are resolved as projections
+    /// of `C`, and recognized by head-symbol equality instead of by unfolding
+    /// Nat eliminators. See `src/cubical/ring.rs`.
+    ///
+    /// In both modes the constructed proof is re-checked by the kernel, which
+    /// is the soundness backstop.
+    Ring(Option<Term>),
 }
 
 // ---------------------------------------------------------------------------
@@ -536,6 +544,7 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
     match tac {
         Tactic::Exact(t) => Tactic::Exact(shift(d, c, t)),
         Tactic::Apply(t) => Tactic::Apply(shift(d, c, t)),
+        Tactic::Ring(t) => Tactic::Ring(t.as_ref().map(|t| shift(d, c, t))),
         Tactic::Reflexivity
         | Tactic::Symmetry
         | Tactic::Split
@@ -544,7 +553,7 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
         | Tactic::Compute
         | Tactic::Trivial
         | Tactic::Omega
-        | Tactic::Ring => tac.clone(),
+        => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),
@@ -716,6 +725,7 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
     match tac {
         Tactic::Exact(t) => Tactic::Exact(subst(j, s, t)),
         Tactic::Apply(t) => Tactic::Apply(subst(j, s, t)),
+        Tactic::Ring(t) => Tactic::Ring(t.as_ref().map(|t| subst(j, s, t))),
         Tactic::Reflexivity
         | Tactic::Symmetry
         | Tactic::Split
@@ -724,7 +734,7 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
         | Tactic::Compute
         | Tactic::Trivial
         | Tactic::Omega
-        | Tactic::Ring => tac.clone(),
+        => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),

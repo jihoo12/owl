@@ -46,8 +46,27 @@ struct Mono {
     atoms: Vec<Term>,
 }
 
+/// The ring the solver is working over.
+///
+/// - `Concrete`: the natural numbers. Operations and laws are resolved by
+///   name from the context (`examples/ring_laws.owl`), and operations in the
+///   goal are recognized by the shape of their normal forms (the `nat_add`/
+///   `nat_mul` eliminators).
+/// - `Structured`: an abstract commutative ring bundled in the record term
+///   given by `ring with C`. Operations, laws, and glue lemmas are resolved
+///   as projections of `C`, and operations in the goal are recognized by
+///   head-symbol equality with those projections. Numerals are iterated
+///   `one + ...` built from `C.add`/`C.one`/`C.zero`.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Concrete,
+    Structured,
+}
+
 /// Resolved references to the ring operations, structural lemmas, and law
-/// names (all looked up in the context by name).
+/// names. In `Concrete` mode these are global `TVar` references looked up in
+/// the context by name; in `Structured` mode they are field projections of
+/// the bundled `CommRing` record.
 struct Ring {
     add: Term,
     mul: Term,
@@ -72,10 +91,16 @@ struct Ring {
     mul_add_l: Term,
     mul_add_r: Term,
     ctx_len: usize,
+    mode: Mode,
 }
 
 impl Ring {
-    fn resolve(ctx: &Ctx) -> Result<Ring, TypeError> {
+    fn resolve(ctx: &Ctx, ring_term: Option<&Term>) -> Result<Ring, TypeError> {
+        let mode = if ring_term.is_some() {
+            Mode::Structured
+        } else {
+            Mode::Concrete
+        };
         let var = |name: &str| -> Result<Term, TypeError> {
             let gi = ctx
                 .iter()
@@ -88,30 +113,51 @@ impl Ring {
                 })?;
             Ok(Term::TVar(gi as i32))
         };
+        let proj = |field: &str| -> Result<Term, TypeError> {
+            let c = ring_term.ok_or_else(|| {
+                TypeError::Other("ring: internal error — structured mode without a ring term".into())
+            })?;
+            Ok(Term::TProj(field.to_string(), Box::new(c.clone())))
+        };
+        // The ring operations. In `Concrete` mode these are the globals
+        // `add`/`mul`/`zero`/`one`; in `Structured` mode they are the
+        // `CommRing` record's parameters, bound in the context under the same
+        // names, which is what the goal's operation heads refer to.
+        let op = |name: &str| -> Result<Term, TypeError> { var(name) };
+        // The structural glue and law lemmas. In `Concrete` mode these are the
+        // `_owl_*`/`add_*`/`mul_*` globals; in `Structured` mode they are
+        // field projections of the bundled `CommRing` record.
+        let law = |field: &str, name: &str| -> Result<Term, TypeError> {
+            match mode {
+                Mode::Concrete => var(name),
+                Mode::Structured => proj(field),
+            }
+        };
         Ok(Ring {
             ctx_len: ctx.len(),
-            add: var("add")?,
-            mul: var("mul")?,
-            zero: var("zero")?,
-            one: var("one")?,
-            trans: var("_owl_trans")?,
-            sym: var("_owl_sym")?,
-            cong_add_l: var("_owl_cong_add_l")?,
-            cong_add_r: var("_owl_cong_add_r")?,
-            cong_mul_l: var("_owl_cong_mul_l")?,
-            cong_mul_r: var("_owl_cong_mul_r")?,
-            add_comm: var("add_comm")?,
-            add_assoc: var("add_assoc")?,
-            add_0_l: var("add_0_l")?,
-            add_0_r: var("add_0_r")?,
-            mul_comm: var("mul_comm")?,
-            mul_assoc: var("mul_assoc")?,
-            mul_1_l: var("mul_1_l")?,
-            mul_1_r: var("mul_1_r")?,
-            mul_0_l: var("mul_0_l")?,
-            mul_0_r: var("mul_0_r")?,
-            mul_add_l: var("mul_add_l")?,
-            mul_add_r: var("mul_add_r")?,
+            mode,
+            add: op("add")?,
+            mul: op("mul")?,
+            zero: op("zero")?,
+            one: op("one")?,
+            trans: law("trans", "_owl_trans")?,
+            sym: law("sym", "_owl_sym")?,
+            cong_add_l: law("cong_add_l", "_owl_cong_add_l")?,
+            cong_add_r: law("cong_add_r", "_owl_cong_add_r")?,
+            cong_mul_l: law("cong_mul_l", "_owl_cong_mul_l")?,
+            cong_mul_r: law("cong_mul_r", "_owl_cong_mul_r")?,
+            add_comm: law("add_comm", "add_comm")?,
+            add_assoc: law("add_assoc", "add_assoc")?,
+            add_0_l: law("add_0_l", "add_0_l")?,
+            add_0_r: law("add_0_r", "add_0_r")?,
+            mul_comm: law("mul_comm", "mul_comm")?,
+            mul_assoc: law("mul_assoc", "mul_assoc")?,
+            mul_1_l: law("mul_1_l", "mul_1_l")?,
+            mul_1_r: law("mul_1_r", "mul_1_r")?,
+            mul_0_l: law("mul_0_l", "mul_0_l")?,
+            mul_0_r: law("mul_0_r", "mul_0_r")?,
+            mul_add_l: law("mul_add_l", "mul_add_l")?,
+            mul_add_r: law("mul_add_r", "mul_add_r")?,
         })
     }
 }
@@ -196,22 +242,153 @@ fn cong_mul_r(r: &Ring, p: &EqP, m: &Term) -> EqP {
 // ---------------------------------------------------------------------------
 
 /// The natural number `k` as a constructor numeral: `suc (suc ... zero)`.
-fn numeral(k: i64) -> Term {
-    let mut t = Term::TCon("Nat".into(), "zero".into(), Vec::new());
-    for _ in 0..k {
-        t = Term::TCon("Nat".into(), "suc".into(), vec![t]);
+/// The canonical term for the numeral `k`.
+///
+/// - `Concrete`: the Nat constructor numeral `suc^k zero`.
+/// - `Structured`: `zero` for 0 and right-associated `add one (add one ...)`
+///   otherwise, built from the bundled ring's projections.
+fn numeral(r: &Ring, k: i64) -> Term {
+    match r.mode {
+        Mode::Concrete => {
+            let mut t = Term::TCon("Nat".into(), "zero".into(), Vec::new());
+            for _ in 0..k {
+                t = Term::TCon("Nat".into(), "suc".into(), vec![t]);
+            }
+            t
+        }
+        Mode::Structured => {
+            let mut t = r.zero.clone();
+            for _ in 0..k {
+                t = app(&app(&r.add, &r.one), &t);
+            }
+            t
+        }
     }
-    t
 }
 
-/// Recognize a constructor numeral, returning the count.
-fn numeral_of(t: &Term) -> Option<i64> {
-    match t {
-        Term::TCon(d, c, args) if d == "Nat" && c == "zero" && args.is_empty() => Some(0),
-        Term::TCon(d, c, args) if d == "Nat" && c == "suc" && args.len() == 1 => {
-            numeral_of(&args[0]).map(|k| k + 1)
+/// Recognize a numeral term, returning the count.  In `Structured` mode only
+/// the canonical shapes are recognized (`zero`, `add one (add one ...)`), so
+/// the recognized term may still need a propositional proof to equal
+/// `numeral(k)` — see `numeral_refl_eq`.
+fn numeral_of(r: &Ring, t: &Term) -> Option<i64> {
+    match r.mode {
+        Mode::Concrete => match t {
+            Term::TCon(d, c, args) if d == "Nat" && c == "zero" && args.is_empty() => Some(0),
+            Term::TCon(d, c, args) if d == "Nat" && c == "suc" && args.len() == 1 => {
+                numeral_of(r, &args[0]).map(|k| k + 1)
+            }
+            _ => None,
+        },
+        Mode::Structured => {
+            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t);
+            if nf == r.zero {
+                return Some(0);
+            }
+            if nf == r.one {
+                return Some(1);
+            }
+            match nf {
+                Term::TApp(outer, inner) => match *outer {
+                    Term::TApp(g, one_t) if *g == r.add && *one_t == r.one => {
+                        numeral_of(r, &inner).map(|j| j + 1)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            }
         }
-        _ => None,
+    }
+}
+
+/// In `Structured` mode, prove `t = numeral(k)` for a term `t` recognized as
+/// the numeral `k` by `numeral_of` (which may be written non-canonically,
+/// e.g. `add one zero`).
+fn numeral_refl_eq(r: &Ring, t: &Term, k: i64) -> EqP {
+    if k == 0 {
+        return EqP {
+            a: t.clone(),
+            b: r.zero.clone(),
+            p: refl(t),
+        };
+    }
+    match t {
+        Term::TApp(outer, inner) => {
+            if let Term::TApp(g, one_t) = &**outer {
+                if **g == r.add && **one_t == r.one {
+                    let inner_eq = numeral_refl_eq(r, inner, k - 1);
+                    let p = cong_add_r(r, &inner_eq, &r.one);
+                    return EqP {
+                        a: t.clone(),
+                        b: numeral(r, k),
+                        p: p.p,
+                    };
+                }
+            }
+            EqP {
+                a: t.clone(),
+                b: numeral(r, k),
+                p: refl(t),
+            }
+        }
+        // t == one, k == 1: `one = add one zero`.
+        _ => EqP {
+            a: t.clone(),
+            b: numeral(r, 1),
+            p: syp(
+                r,
+                &EqP {
+                    a: app(&app(&r.add, &r.one), &r.zero),
+                    b: r.one.clone(),
+                    p: inst(&r.add_0_r, &[&r.one]),
+                },
+            )
+            .p,
+        },
+    }
+}
+
+/// `mul (numeral 1) x = x` over an abstract ring.  The bundled `mul_1_l`
+/// only covers `mul one x`, not the numeral-fold `one` (`add one zero`), so
+/// this pushes the folded one in via `mul_add_r`/`mul_1_l`/`mul_0_l`/
+/// `add_0_r`.
+fn numeral_one_left_mul_eq(r: &Ring, x: &Term) -> EqP {
+    let mul_one_x = app(&app(&r.mul, &r.one), x);
+    let mul_zero_x = app(&app(&r.mul, &r.zero), x);
+    let lhs = app(&app(&r.mul, &numeral(r, 1)), x);
+    let mid = app(&app(&r.add, &mul_one_x), &mul_zero_x);
+    let e_mr = EqP {
+        a: lhs.clone(),
+        b: mid.clone(),
+        p: inst(&r.mul_add_r, &[&r.one, &r.zero, x]),
+    };
+    let e_m1 = cong_add_l(
+        r,
+        &EqP {
+            a: mul_one_x.clone(),
+            b: x.clone(),
+            p: inst(&r.mul_1_l, &[x]),
+        },
+        &mul_zero_x,
+    );
+    let e_m0 = cong_add_r(
+        r,
+        &EqP {
+            a: mul_zero_x,
+            b: r.zero.clone(),
+            p: inst(&r.mul_0_l, &[x]),
+        },
+        x,
+    );
+    let e_0r = EqP {
+        a: app(&app(&r.add, x), &r.zero),
+        b: x.clone(),
+        p: inst(&r.add_0_r, &[x]),
+    };
+    let p = trp(r, &trp(r, &trp(r, &e_mr, &e_m1), &e_m0), &e_0r);
+    EqP {
+        a: lhs,
+        b: x.clone(),
+        p: p.p,
     }
 }
 
@@ -225,15 +402,22 @@ fn prod_term(r: &Ring, atoms: &[Term]) -> Term {
 }
 
 /// The canonical term for a monomial.
+///
+/// In `Structured` mode the coefficient is always wrapped in `mul (numeral k)
+/// _` (even `mul (numeral 1) _` and constant monomials become `mul (numeral k)
+/// one`), so that canonical forms are built from the exact same projection
+/// head symbols regardless of how the goal was written — the shape glues in
+/// the polynomial arithmetic then hold definitionally, and the coefficient
+/// arithmetic (`numeral_add_eq`/`numeral_mul_eq`) is proved propositionally.
 fn mono_term(r: &Ring, m: &Mono) -> Term {
-    if m.atoms.is_empty() {
-        return numeral(m.coeff);
+    if m.atoms.is_empty() && r.mode == Mode::Concrete {
+        return numeral(r, m.coeff);
     }
     let p = prod_term(r, &m.atoms);
-    if m.coeff == 1 {
+    if m.coeff == 1 && r.mode == Mode::Concrete {
         p
     } else {
-        app(&app(&r.mul, &numeral(m.coeff)), &p)
+        app(&app(&r.mul, &numeral(r, m.coeff)), &p)
     }
 }
 
@@ -330,19 +514,44 @@ fn is_mulshape_elim(r: &Ring, t: &Term) -> bool {
 }
 
 /// Treat `t` as an `add` operation, returning `(a, b)` with `t ~ add a b`.
-/// The operation may be the unfolded eliminator or a stuck application of the
-/// `add` global; normalize the latter so both give the eliminator normal form.
+///
+/// - `Concrete`: the operation may be the unfolded eliminator or a stuck
+///   application of the `add` global; normalize the latter so both give the
+///   eliminator normal form.
+/// - `Structured`: normalize `t` and match its head symbol against the
+///   bundled ring's `add` projection (both compared in normal form).
 fn as_add(r: &Ring, t: &Term) -> Option<(Term, Term)> {
-    let nf = match t {
-        Term::TApp(_, _) => crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t),
-        _ => t.clone(),
-    };
-    if is_addshape_elim(&nf) {
-        if let Term::TElim(_, cases, scrut) = nf {
-            return Some(((*scrut).clone(), (*cases[0].body).clone()));
+    match r.mode {
+        Mode::Concrete => {
+            let nf = match t {
+                Term::TApp(_, _) => crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t),
+                _ => t.clone(),
+            };
+            if is_addshape_elim(&nf) {
+                if let Term::TElim(_, cases, scrut) = nf {
+                    return Some(((*scrut).clone(), (*cases[0].body).clone()));
+                }
+            }
+            None
+        }
+        Mode::Structured => {
+            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t);
+            match nf {
+                Term::TApp(outer, b) => match *outer {
+                    Term::TApp(g, a) => {
+                        let add_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.add);
+                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &g) == add_nf {
+                            Some((*a, *b))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                },
+                _ => None,
+            }
         }
     }
-    None
 }
 
 /// The second argument of the mul-eliminator, extracted from the suc-case
@@ -358,17 +567,38 @@ fn mul_suc_arg(body: &Term) -> Term {
 
 /// Treat `t` as a `mul` operation, returning `(a, b)` with `t ~ mul a b`.
 fn as_mul(r: &Ring, t: &Term) -> Option<(Term, Term)> {
-    let nf = match t {
-        Term::TApp(_, _) => crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t),
-        _ => t.clone(),
-    };
-    if is_mulshape_elim(r, &nf) {
-        if let Term::TElim(_, cases, scrut) = nf {
-            let arg = mul_suc_arg(&cases[1].body);
-            return Some(((*scrut).clone(), arg));
+    match r.mode {
+        Mode::Concrete => {
+            let nf = match t {
+                Term::TApp(_, _) => crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t),
+                _ => t.clone(),
+            };
+            if is_mulshape_elim(r, &nf) {
+                if let Term::TElim(_, cases, scrut) = nf {
+                    let arg = mul_suc_arg(&cases[1].body);
+                    return Some(((*scrut).clone(), arg));
+                }
+            }
+            None
+        }
+        Mode::Structured => {
+            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t);
+            match nf {
+                Term::TApp(outer, b) => match *outer {
+                    Term::TApp(g, a) => {
+                        let mul_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.mul);
+                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &g) == mul_nf {
+                            Some((*a, *b))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                },
+                _ => None,
+            }
         }
     }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -387,7 +617,7 @@ fn decomp(r: &Ring, t: &Term) -> Result<(Vec<Mono>, EqP), TypeError> {
         let (pa, pfa) = decomp(r, &a)?;
         return reify_mul(r, &s, &ps, &pfs, &a, &pa, &pfa);
     }
-    if let Some(k) = numeral_of(t) {
+    if let Some(k) = numeral_of(r, t) {
         if k == 0 {
             return Ok((
                 Vec::new(),
@@ -398,20 +628,49 @@ fn decomp(r: &Ring, t: &Term) -> Result<(Vec<Mono>, EqP), TypeError> {
                 },
             ));
         }
-        let canon = app(&app(&r.add, &numeral(k)), &r.zero);
-        let pf = syp(
-            r,
-            &EqP {
-                a: canon.clone(),
-                b: numeral(k),
-                p: inst(&r.add_0_r, &[&numeral(k)]),
-            },
-        );
+        let mono = Mono {
+            coeff: k,
+            atoms: Vec::new(),
+        };
+        let canon = canon_term(r, &[mono.clone()]);
+        let pf = match r.mode {
+            // canon = add (numeral k) zero; `t` is the literal numeral.
+            Mode::Concrete => syp(
+                r,
+                &EqP {
+                    a: canon.clone(),
+                    b: numeral(r, k),
+                    p: inst(&r.add_0_r, &[&numeral(r, k)]),
+                },
+            ),
+            // canon = add (mul (numeral k) one) zero; prove t = numeral k,
+            // numeral k = mul (numeral k) one, then add-0-r.
+            Mode::Structured => {
+                let e1 = numeral_refl_eq(r, t, k);
+                let e2 = syp(
+                    r,
+                    &EqP {
+                        a: app(&app(&r.mul, &numeral(r, k)), &r.one),
+                        b: numeral(r, k),
+                        p: inst(&r.mul_1_r, &[&numeral(r, k)]),
+                    },
+                );
+                let e3 = syp(
+                    r,
+                    &EqP {
+                        a: canon.clone(),
+                        b: app(&app(&r.mul, &numeral(r, k)), &r.one),
+                        p: inst(
+                            &r.add_0_r,
+                            &[&app(&app(&r.mul, &numeral(r, k)), &r.one)],
+                        ),
+                    },
+                );
+                trp(r, &trp(r, &e1, &e2), &e3)
+            }
+        };
         return Ok((
-            vec![Mono {
-                coeff: k,
-                atoms: Vec::new(),
-            }],
+            vec![mono],
             EqP {
                 a: t.clone(),
                 b: canon,
@@ -419,30 +678,58 @@ fn decomp(r: &Ring, t: &Term) -> Result<(Vec<Mono>, EqP), TypeError> {
             },
         ));
     }
-    let atom = app(&app(&r.mul, t), &r.one);
-    let canon = app(&app(&r.add, &atom), &r.zero);
-    let p1 = syp(
-        r,
-        &EqP {
-            a: atom.clone(),
-            b: t.clone(),
-            p: inst(&r.mul_1_r, &[t]),
-        },
-    );
-    let p2 = syp(
-        r,
-        &EqP {
-            a: canon.clone(),
-            b: atom.clone(),
-            p: inst(&r.add_0_r, &[&atom]),
-        },
-    );
-    let pf = trp(r, &p1, &p2);
+    let atom_mono = Mono {
+        coeff: 1,
+        atoms: vec![t.clone()],
+    };
+    let atom = mono_term(r, &atom_mono);
+    let canon = canon_term(r, &[atom_mono.clone()]);
+    let pf = match r.mode {
+        // atom = mul t one; canon = add (mul t one) zero.
+        Mode::Concrete => {
+            let p1 = syp(
+                r,
+                &EqP {
+                    a: atom.clone(),
+                    b: t.clone(),
+                    p: inst(&r.mul_1_r, &[t]),
+                },
+            );
+            let p2 = syp(
+                r,
+                &EqP {
+                    a: canon.clone(),
+                    b: atom.clone(),
+                    p: inst(&r.add_0_r, &[&atom]),
+                },
+            );
+            trp(r, &p1, &p2)
+        }
+        // atom = mul (numeral 1) (mul t one); canon = add atom zero.
+        Mode::Structured => {
+            let prod = prod_term(r, &[t.clone()]);
+            let p1 = syp(
+                r,
+                &EqP {
+                    a: prod.clone(),
+                    b: t.clone(),
+                    p: inst(&r.mul_1_r, &[t]),
+                },
+            );
+            let p2 = syp(r, &numeral_one_left_mul_eq(r, &prod));
+            let p3 = syp(
+                r,
+                &EqP {
+                    a: canon.clone(),
+                    b: atom.clone(),
+                    p: inst(&r.add_0_r, &[&atom]),
+                },
+            );
+            trp(r, &trp(r, &p1, &p2), &p3)
+        }
+    };
     Ok((
-        vec![Mono {
-            coeff: 1,
-            atoms: vec![t.clone()],
-        }],
+        vec![atom_mono],
         EqP {
             a: t.clone(),
             b: canon,
@@ -660,28 +947,120 @@ fn combine_proof(r: &Ring, m: &Mono, h: &Mono, combined: &Mono) -> EqP {
     let c_term = mono_term(r, combined);
     let a = app(&app(&r.add, &m_term), &h_term);
     let b = c_term;
-    if m.atoms.is_empty() {
-        refl2(&a, &b)
-    } else {
-        let ka = numeral(m.coeff);
-        let kb = numeral(h.coeff);
-        let p = prod_term(r, &m.atoms);
-        let p_mr = syp(
-            r,
-            &EqP {
-                a: app(&app(&r.mul, &app(&app(&r.add, &ka), &kb)), &p),
-                b: app(
-                    &app(&r.add, &app(&app(&r.mul, &ka), &p)),
-                    &app(&app(&r.mul, &kb), &p),
-                ),
-                p: inst(&r.mul_add_r, &[&ka, &kb, &p]),
-            },
-        );
-        trp(
-            r,
-            &trp(r, &refl2(&a, &p_mr.a), &p_mr),
-            &refl2(&p_mr.b, &b),
-        )
+    match r.mode {
+        // Over Nat, `add (numeral k1) (numeral k2)` computes to the numeral
+        // for the sum, so `refl` glues the coefficient-combining steps.
+        Mode::Concrete => {
+            if m.atoms.is_empty() {
+                refl2(&a, &b)
+            } else {
+                let ka = numeral(r, m.coeff);
+                let kb = numeral(r, h.coeff);
+                let p = prod_term(r, &m.atoms);
+                let p_mr = syp(
+                    r,
+                    &EqP {
+                        a: app(&app(&r.mul, &app(&app(&r.add, &ka), &kb)), &p),
+                        b: app(
+                            &app(&r.add, &app(&app(&r.mul, &ka), &p)),
+                            &app(&app(&r.mul, &kb), &p),
+                        ),
+                        p: inst(&r.mul_add_r, &[&ka, &kb, &p]),
+                    },
+                );
+                trp(
+                    r,
+                    &trp(r, &refl2(&a, &p_mr.a), &p_mr),
+                    &refl2(&p_mr.b, &b),
+                )
+            }
+        }
+        // Over an abstract ring, `add (numeral k1) (numeral k2) = numeral (k1
+        // + k2)` needs `add_assoc` and is proved by `numeral_add_eq`; the
+        // coefficient is distributed over the shared atom product with
+        // `mul_add_r`.
+        Mode::Structured => {
+            let p = prod_term(r, &m.atoms);
+            let ka = numeral(r, m.coeff);
+            let kb = numeral(r, h.coeff);
+            let p_mr = syp(
+                r,
+                &EqP {
+                    a: app(&app(&r.mul, &app(&app(&r.add, &ka), &kb)), &p),
+                    b: app(
+                        &app(&r.add, &app(&app(&r.mul, &ka), &p)),
+                        &app(&app(&r.mul, &kb), &p),
+                    ),
+                    p: inst(&r.mul_add_r, &[&ka, &kb, &p]),
+                },
+            );
+            let p_comb = cong_mul_l(r, &numeral_add_eq(r, m.coeff, h.coeff), &p);
+            trp(r, &p_mr, &p_comb)
+        }
+    }
+}
+
+/// `add (numeral a) (numeral b) = numeral (a + b)` over an abstract ring,
+/// proved from `add_assoc`/`add_0_l` by iterating the left addend.
+fn numeral_add_eq(r: &Ring, a: i64, b: i64) -> EqP {
+    let nb = numeral(r, b);
+    if a == 0 {
+        return EqP {
+            a: app(&app(&r.add, &r.zero), &nb),
+            b: nb.clone(),
+            p: inst(&r.add_0_l, &[&nb]),
+        };
+    }
+    let na1 = numeral(r, a - 1);
+    let lhs = app(&app(&r.add, &app(&app(&r.add, &r.one), &na1)), &nb);
+    let mid = app(&app(&r.add, &r.one), &app(&app(&r.add, &na1), &nb));
+    let p_assoc = inst(&r.add_assoc, &[&r.one, &na1, &nb]);
+    let ih = numeral_add_eq(r, a - 1, b);
+    let p_ctx = cong_add_r(r, &ih, &r.one);
+    let p = trp(r, &EqP { a: lhs.clone(), b: mid, p: p_assoc }, &p_ctx);
+    EqP {
+        a: lhs,
+        b: numeral(r, a + b),
+        p: p.p,
+    }
+}
+
+/// `mul (numeral a) (numeral b) = numeral (a * b)` over an abstract ring,
+/// proved from `mul_0_l`/`mul_1_l`/`mul_add_r` plus `numeral_add_eq`.
+fn numeral_mul_eq(r: &Ring, a: i64, b: i64) -> EqP {
+    let nb = numeral(r, b);
+    if a == 0 {
+        return EqP {
+            a: app(&app(&r.mul, &r.zero), &nb),
+            b: r.zero.clone(),
+            p: inst(&r.mul_0_l, &[&nb]),
+        };
+    }
+    let na1 = numeral(r, a - 1);
+    let lhs = app(&app(&r.mul, &app(&app(&r.add, &r.one), &na1)), &nb);
+    let mul_one_nb = app(&app(&r.mul, &r.one), &nb);
+    let mul_na1_nb = app(&app(&r.mul, &na1), &nb);
+    let mid = app(&app(&r.add, &mul_one_nb), &mul_na1_nb);
+    let p_step = inst(&r.mul_add_r, &[&r.one, &na1, &nb]);
+    let p_m1 = EqP {
+        a: mul_one_nb.clone(),
+        b: nb.clone(),
+        p: inst(&r.mul_1_l, &[&nb]),
+    };
+    let ih = numeral_mul_eq(r, a - 1, b);
+    // mul_add_r: lhs = add (mul one nb) (mul na1 nb).
+    let p1 = EqP { a: lhs.clone(), b: mid.clone(), p: p_step };
+    // mul_1_l: add (mul one nb) (mul na1 nb) = add nb (mul na1 nb).
+    let p2 = cong_add_l(r, &p_m1, &mul_na1_nb);
+    // induction: add nb (mul na1 nb) = add nb (numeral ((a-1)*b)).
+    let p3 = cong_add_r(r, &ih, &nb);
+    // numeral_add_eq: add nb (numeral ((a-1)*b)) = numeral (a*b).
+    let p4 = numeral_add_eq(r, b, (a - 1) * b);
+    let p = trp(r, &trp(r, &trp(r, &p1, &p2), &p3), &p4);
+    EqP {
+        a: lhs,
+        b: numeral(r, a * b),
+        p: p.p,
     }
 }
 
@@ -832,8 +1211,8 @@ fn mono_mul(r: &Ring, m: &Mono, n: &Mono) -> (Mono, EqP) {
     let m_term = mono_term(r, m);
     let n_term = mono_term(r, n);
     let a = app(&app(&r.mul, &m_term), &n_term);
-    let ka = numeral(m.coeff);
-    let kb = numeral(n.coeff);
+    let ka = numeral(r, m.coeff);
+    let kb = numeral(r, n.coeff);
     let aa = prod_term(r, &m.atoms);
     let bb = prod_term(r, &n.atoms);
     let full = app(
@@ -843,15 +1222,25 @@ fn mono_mul(r: &Ring, m: &Mono, n: &Mono) -> (Mono, EqP) {
     let p0 = refl2(&a, &full);
     let p_ac = regroup(r, &ka, &aa, &kb, &bb);
     let k = m.coeff * n.coeff;
-    let kk = numeral(k);
+    let kk = numeral(r, k);
     let grouped = app(
         &app(&r.mul, &app(&app(&r.mul, &ka), &kb)),
         &app(&app(&r.mul, &aa), &bb),
     );
-    let p3 = refl2(
-        &grouped,
-        &app(&app(&r.mul, &kk), &app(&app(&r.mul, &aa), &bb)),
-    );
+    let p3 = match r.mode {
+        // `mul ka kb` computes to `kk` definitionally over Nat.
+        Mode::Concrete => refl2(
+            &grouped,
+            &app(&app(&r.mul, &kk), &app(&app(&r.mul, &aa), &bb)),
+        ),
+        // Over an abstract ring the coefficient product needs
+        // `numeral_mul_eq`, applied on the left of the shared atom product.
+        Mode::Structured => cong_mul_l(
+            r,
+            &numeral_mul_eq(r, m.coeff, n.coeff),
+            &app(&app(&r.mul, &aa), &bb),
+        ),
+    };
     let (merged, pf_merge) = atom_merge(r, &m.atoms, &n.atoms);
     let p2 = cong_mul_r(r, &pf_merge, &kk);
     let mn = Mono {
@@ -1038,37 +1427,50 @@ fn atom_insert(r: &Ring, t: &Term, sorted: &[Term]) -> (Vec<Term>, EqP) {
 // Entry point
 // ---------------------------------------------------------------------------
 
+/// Display name of the carrier for error messages.
+fn ring_carrier(r: &Ring) -> &'static str {
+    match r.mode {
+        Mode::Concrete => "Nat",
+        Mode::Structured => "_",
+    }
+}
+
 /// Entry point called by the `Tactic::Ring` arm.
 ///
 /// - `ctx` is the full context the goal lives in (tactic binders innermost).
 /// - `goal_ty` is the normalized goal type.
 /// - `num_tactic` is the number of binders `ctx` has beyond the outer context.
 /// - `num_intro` is the number of names introduced by `intro`.
+/// - `ring_term` is the `C` in `ring with C`; `None` selects the concrete
+///   natural-number solver, `Some` the abstract `CommRing` solver.
 pub fn prove(
     dts: &[Datatype],
     ctx: &Ctx,
     goal_ty: &Term,
     _num_tactic: usize,
     _num_intro: usize,
+    ring_term: Option<&Term>,
 ) -> Result<Term, TypeError> {
-    let ring = Ring::resolve(ctx)?;
+    let ring = Ring::resolve(ctx, ring_term)?;
 
     let (u, v) = {
         let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty);
         match goal_nf {
             Term::TPath(a, u, v) => {
-                let a_nf = nbe_eval_ctx(ctx.len(), &a);
-                if !matches!(a_nf, Term::TData(ref d, ref p) if d == "Nat" && p.is_empty()) {
-                    return Err(TypeError::Other(format!(
-                        "ring: goal is not a path over Nat (got '{}')",
-                        a_nf,
-                    )));
+                if ring.mode == Mode::Concrete {
+                    let a_nf = nbe_eval_ctx(ctx.len(), &a);
+                    if !matches!(a_nf, Term::TData(ref d, ref p) if d == "Nat" && p.is_empty()) {
+                        return Err(TypeError::Other(format!(
+                            "ring: goal is not a path over Nat (got '{}')",
+                            a_nf,
+                        )));
+                    }
                 }
                 (*u, *v)
             }
             other => {
                 return Err(TypeError::Other(format!(
-                    "ring: goal is not a path over Nat\n  goal: {}",
+                    "ring: goal is not a path (got '{}')",
                     other,
                 )))
             }
@@ -1082,8 +1484,12 @@ pub fn prove(
     let cv = canon_term(&ring, &pv);
     if cu != cv {
         return Err(TypeError::Other(format!(
-            "ring: unable to solve goal\n  goal : Path Nat {} {}\n  left  : {}\n  right : {}",
-            u, v, cu, cv,
+            "ring: unable to solve goal\n  goal : Path {} {} {}\n  left  : {}\n  right : {}",
+            ring_carrier(&ring),
+            u,
+            v,
+            cu,
+            cv,
         )));
     }
 
@@ -1102,16 +1508,20 @@ pub fn prove(
     crate::cubical::typechecker::termination::set_skip_guard(prev_skip);
     if let Err(e) = check_res {
         let detail = match &e {
-            crate::cubical::typechecker::TypeError::TypeMismatch { expected, got, .. } => format!(
-                "  expected : {}\n  got      : {}",
+            crate::cubical::typechecker::TypeError::TypeMismatch { expected, got, pos, .. } => format!(
+                "  expected : {}\n  got      : {}\n  pos      : {:?}",
                 crate::cubical::syntax::show_term(&ctx.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), expected),
                 crate::cubical::syntax::show_term(&ctx.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), got),
+                pos,
             ),
             _ => format!("{:?}", e),
         };
         Err(TypeError::Other(format!(
-            "ring: kernel rejected the constructed proof for\n  goal : Path Nat {} {}\n  error: {}",
-            u, v, detail,
+            "ring: kernel rejected the constructed proof for\n  goal : Path {} {} {}\n  error: {}",
+            ring_carrier(&ring),
+            u,
+            v,
+            detail,
         )))
     } else {
         Ok(pf.p)

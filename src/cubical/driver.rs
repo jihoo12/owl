@@ -928,6 +928,25 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn comm_ring_demo_example_checks() {
+        // Guard against regressions in `by ring with C`: polynomial
+        // normalization over an abstract `CommRing` record plus the
+        // law-application tree the kernel re-checks.  The large proofs need a
+        // bigger stack than the default 2 MiB test-thread stack.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("comm_ring_demo.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn comm ring check thread");
+        handle
+            .join()
+            .expect("comm ring check thread panicked")
+            .expect("examples/comm_ring_demo.owl should typecheck");
+    }
+
+    #[test]
     fn stress_mul_algebra_example_checks() {
         // Full multiplicative algebra: assoc/comm/distributive laws over Nat
         // as cubical paths, ending with the double-double lemma. Guards the
