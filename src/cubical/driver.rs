@@ -930,6 +930,25 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn ring_laws_lib_checks() {
+        // The ring-law library is imported by the demos and resolved by name
+        // by `by ring`; it must typecheck standalone as a library. Its large
+        // law-application normal forms need a bigger stack than the default
+        // 2 MiB test-thread stack.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("lib")
+            .join("ring_laws.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn ring laws check thread");
+        handle
+            .join()
+            .expect("ring laws check thread panicked")
+            .expect("lib/ring_laws.owl should typecheck");
+    }
+
+    #[test]
     fn comm_ring_demo_example_checks() {
         // Guard against regressions in `by ring with C`: polynomial
         // normalization over an abstract `CommRing` record plus the

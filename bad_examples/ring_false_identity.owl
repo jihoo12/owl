@@ -3,7 +3,7 @@
 -- rather than produce a bogus proof.
 -- Expected rejection: ring tactic unable to solve the goal.
 
-import "../examples/ring_laws.owl"
+import "../lib/ring_laws.owl"
 
 def bad_false_identity : forall (m : Nat), forall (n : Nat),
     Path Nat (add m n) (mul m n) :=

@@ -227,7 +227,7 @@ pub enum Tactic {
     /// the form `Path Nat u v` where `u` and `v` are polynomial expressions
     /// over the context's Nat variables (built with `add`, `mul`, `zero`,
     /// `one`), by canonicalizing both sides to a sum of monomials and proving
-    /// the equality from the law names in `examples/ring_laws.owl`.
+    /// the equality from the law names in `lib/ring_laws.owl`.
     ///
     /// `ring with C` proves the same class of identities over an *abstract*
     /// commutative ring bundled in the record `C : CommRing A`: the operations

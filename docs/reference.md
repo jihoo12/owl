@@ -1758,7 +1758,7 @@ Prove polynomial identities. Two modes:
   [`ring with C`](#ring-with-c-abstract-commring) below.
 
 The concrete mode resolves the following names from the context (they are
-provided by `examples/ring_laws.owl`, which is imported by the demos):
+provided by `lib/ring_laws.owl`, which is imported by the demos):
 
 - operations: `zero`, `one`, `add`, `mul`
 - laws: `add_comm`, `add_assoc`, `add_0_l`, `add_0_r`, `mul_comm`,
@@ -1776,7 +1776,7 @@ def dist_demo : forall (m : Nat), forall (n : Nat), forall (p : Nat),
   by intro m n p; ring
 ```
 
-See `examples/ring_demo.owl` and `examples/ring_laws.owl`. The generated
+See `examples/ring_demo.owl` and `lib/ring_laws.owl`. The generated
 proof is a tree of law applications that the kernel re-checks (structural
 recursion guard skipped, since law bodies unfold to elims on compound
 neutral scrutinees in the normal form).

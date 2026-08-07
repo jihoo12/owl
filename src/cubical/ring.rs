@@ -4,7 +4,7 @@
 //! expressions over the context's `Nat` variables, built with the ring
 //! operations.  Both sides are canonicalized to a sorted sum of monomials
 //! (`add` of `mul (numeral k) (product of atoms)`) and the equality is
-//! proved from the law names in `examples/ring_laws.owl`:
+//! proved from the law names in `lib/ring_laws.owl`:
 //!
 //! * `add_comm`/`add_assoc`/`add_0_l`/`add_0_r` for the additive monoid,
 //! * `mul_comm`/`mul_assoc`/`mul_1_l`/`mul_1_r`/`mul_0_l`/`mul_0_r` for the
@@ -49,7 +49,7 @@ struct Mono {
 /// The ring the solver is working over.
 ///
 /// - `Concrete`: the natural numbers. Operations and laws are resolved by
-///   name from the context (`examples/ring_laws.owl`), and operations in the
+///   name from the context (`lib/ring_laws.owl`), and operations in the
 ///   goal are recognized by the shape of their normal forms (the `nat_add`/
 ///   `nat_mul` eliminators).
 /// - `Structured`: an abstract commutative ring bundled in the record term
@@ -107,7 +107,7 @@ impl Ring {
                 .position(|(n, _)| n == name)
                 .ok_or_else(|| {
                     TypeError::Other(format!(
-                        "ring: missing lemma '{}'; import examples/ring_laws.owl",
+                        "ring: missing lemma '{}'; import lib/ring_laws.owl",
                         name
                     ))
                 })?;

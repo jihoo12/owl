@@ -1,4 +1,4 @@
-import "ring_laws.owl"
+import "../lib/ring_laws.owl"
 
 def add_comm_demo : forall (m : Nat), forall (n : Nat), Path Nat (add m n) (add n m) :=
   by intro m n; ring
