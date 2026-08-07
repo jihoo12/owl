@@ -520,6 +520,30 @@ fn record_params_referenced_inside_field_binders() {
 }
 
 #[test]
+fn record_construction_with_params_under_field_binders() {
+    use crate::cubical::driver::run_str;
+    // Regression test: constructing a record value whose field types
+    // reference the datatype parameters under the field's own binders (e.g.
+    // `f a` inside `forall (a : A), Path A (f a) (f a)`).  The universe-level
+    // check of the type annotation used to beta-substitute the parameters
+    // from the head, which shifted all free variables and produced `Unit a`
+    // (the `f` reference collapsed onto `A`), failing with
+    // "Expected a Π-type, but found: U0".
+    run_str(
+        r#"
+        inductive Unit where | tt : Unit
+        def uf : Unit -> Unit := fun _ => Unit.tt
+
+        record R (A : Type) (f : A -> A) where
+          field g : forall (a : A), Path A (f a) (f a)
+
+        def r : R Unit uf := mkR (fun a => <i> uf a)
+        "#,
+    )
+    .expect("record construction with params referenced under field binders should typecheck");
+}
+
+#[test]
 fn cumulativity_contravariant_datatype() {
     use crate::cubical::driver::run_str;
     // Bad (A) with `mkb : (A -> Nat) -> Bad A` is contravariant in A: the

@@ -1481,10 +1481,16 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let mut tel_ctx = ctx.clone();
                 let mut prev_args: Vec<Term> = Vec::new();
                 for (k, arg_ty) in con_sig.arg_tys.iter().enumerate() {
-                    // Substitute provided parameters (reverse order for de Bruijn).
+                    // Substitute provided parameters.  Param `i` (in parse
+                    // order) lives at de Bruijn index `num_params - 1 - i`;
+                    // record field types reference params under their own
+                    // binders, so `subst` (which descends through binders) is
+                    // required instead of head-`beta`, which would shift all
+                    // free variables and corrupt those references.
                     let mut substituted = arg_ty.clone();
-                    for i in (0..num_params.min(args.len())).rev() {
-                        substituted = beta(&substituted, &args[i]);
+                    for i in 0..num_params.min(args.len()) {
+                        let d = (num_params - 1 - i) as i32;
+                        substituted = subst(d, &args[i], &substituted);
                     }
                     let arg_ty_inst = prev_args
                         .iter()
@@ -1492,10 +1498,19 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         .fold(substituted, |ty, a| beta(&ty, a));
                     let lvl = type_level_dt(dts, &tel_ctx, &arg_ty_inst)?;
                     max_level = max_level.max(lvl);
-                    let var_name = format!("_con_arg_{}", k);
-                    let depth = k as i32;
-                    prev_args.push(shift(depth + 1, 0, &Term::TVar(0)));
-                    tel_ctx = extend_ctx(var_name, nbe_eval(&arg_ty_inst), &tel_ctx);
+                    // Record fields never reference earlier fields, and their
+                    // types reference the datatype parameters at depths that
+                    // include the field's own binders (handled by `subst`
+                    // above and `type_level_dt`'s Pi recursion).  Building a
+                    // dependent telescope context for them would shift the
+                    // parameter references onto the wrong slots, so skip the
+                    // accumulation for records.
+                    if dt.field_names.is_none() {
+                        let var_name = format!("_con_arg_{}", k);
+                        let depth = k as i32;
+                        prev_args.push(shift(depth + 1, 0, &Term::TVar(0)));
+                        tel_ctx = extend_ctx(var_name, nbe_eval(&arg_ty_inst), &tel_ctx);
+                    }
                 }
             }
 
@@ -1505,8 +1520,9 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let mut prev_args: Vec<Term> = Vec::new();
                 for (k, arg_ty) in pcon_sig.arg_tys.iter().enumerate() {
                     let mut substituted = arg_ty.clone();
-                    for i in (0..num_params.min(args.len())).rev() {
-                        substituted = beta(&substituted, &args[i]);
+                    for i in 0..num_params.min(args.len()) {
+                        let d = (num_params - 1 - i) as i32;
+                        substituted = subst(d, &args[i], &substituted);
                     }
                     let arg_ty_inst = prev_args
                         .iter()
