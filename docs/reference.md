@@ -54,7 +54,7 @@ The following words are reserved and cannot be used as variable names:
 | `transitivity`| Tactic: chain path equalities              |
 | `compute`     | Tactic: normalize the goal type            |
 | `trivial`     | Tactic: prove trivial goals automatically  |
-| `ring`        | Tactic: prove polynomial identities over Nat |
+| `ring`        | Tactic: prove polynomial identities (Nat or abstract `CommRing` via `with C`) |
 | `match`       | Pattern matching / elimination             |
 | `return`      | Annotate match return type                 |
 | `with`        | Match cases / mutual datatypes separator   |
@@ -1744,16 +1744,21 @@ def trivial_nat : Nat := by trivial    -- applies 'zero'
 
 #### `ring`
 
-Prove polynomial identities over the natural numbers. The goal must be a
-path `Path Nat u v` where `u` and `v` are expressions built from the ring
-operations `add`/`mul`/`zero`/`one` and the variables in scope. `ring`
-normalizes both sides to polynomial normal form over the commutative
-semiring (associativity, commutativity, distributivity, identity and
-annihilation laws) and, when the normal forms agree, returns a proof term
-built by applying the ring laws.
+Prove polynomial identities. Two modes:
 
-The tactic resolves the following names from the context (they are provided
-by `examples/ring_laws.owl`, which is imported by the demos):
+- **Concrete (default)** — over the natural numbers. The goal must be a path
+  `Path Nat u v` where `u` and `v` are expressions built from the ring
+  operations `add`/`mul`/`zero`/`one` and the variables in scope. `ring`
+  normalizes both sides to polynomial normal form over the commutative
+  semiring (associativity, commutativity, distributivity, identity and
+  annihilation laws) and, when the normal forms agree, returns a proof term
+  built by applying the ring laws.
+- **Structured** — over an abstract commutative ring, via `by ring with C`
+  where `C` is a `CommRing` record bundling the operations and laws. See
+  [`ring with C`](#ring-with-c-abstract-commring) below.
+
+The concrete mode resolves the following names from the context (they are
+provided by `examples/ring_laws.owl`, which is imported by the demos):
 
 - operations: `zero`, `one`, `add`, `mul`
 - laws: `add_comm`, `add_assoc`, `add_0_l`, `add_0_r`, `mul_comm`,
@@ -1775,6 +1780,49 @@ See `examples/ring_demo.owl` and `examples/ring_laws.owl`. The generated
 proof is a tree of law applications that the kernel re-checks (structural
 recursion guard skipped, since law bodies unfold to elims on compound
 neutral scrutinees in the normal form).
+
+#### `ring with C` (abstract `CommRing`)
+
+`by ring with C` proves the same class of polynomial identities over an
+abstract commutative semiring `C : CommRing A add mul zero one`, without
+requiring the operations to unfold. The `CommRing` record bundles:
+
+- the operations as *parameters* (`add`, `mul`, `zero`, `one`), which `ring`
+  recognizes by **head-symbol equality** with the names in scope (not by
+  normal-form shape); and
+- the law and structural lemmas as *fields* (`trans`, `sym`,
+  `cong_add_l`/`cong_add_r`, `cong_mul_l`/`cong_mul_r`, `add_comm`,
+  `add_assoc`, `add_0_l`/`add_0_r`, `mul_comm`, `mul_assoc`,
+  `mul_1_l`/`mul_1_r`, `mul_0_l`/`mul_0_r`, `mul_add_l`/`mul_add_r`).
+
+The `by` block must appear at the **top level** of the definition (after the
+type annotation); `intro` binds the carrier `A`, the operations, `C`, and the
+goal variables, then `ring with C` solves the resulting `Path A u v` goal:
+
+```
+record CommRing (A : Type) (add : A -> A -> A) (mul : A -> A -> A)
+                (zero : A) (one : A) where
+  field trans : forall (a : A), forall (b : A), forall (c : A),
+                Path A a b -> Path A b c -> Path A a c
+  field sym : forall (a : A), forall (b : A), Path A a b -> Path A b a
+  -- ... plus cong_*, add_comm, add_assoc, add_0_l/r, mul_comm,
+  --     mul_assoc, mul_1_l/r, mul_0_l/r, mul_add_l/r
+
+def dist_abstract : forall (A : Type), forall (add : A -> A -> A),
+    forall (mul : A -> A -> A), forall (zero : A), forall (one : A),
+    forall (C : CommRing A add mul zero one),
+    forall (x : A), forall (y : A), forall (z : A),
+    Path A (mul (add x y) z) (add (mul x z) (mul y z)) :=
+  by intro A add mul zero one C x y z; ring with C
+```
+
+Numerals over the abstract ring are iterated `one + …`; numeral arithmetic
+(`add (numeral a) (numeral b) = numeral (a+b)`, `mul (numeral a) (numeral b)
+= numeral (a*b)`) is proved propositionally from the record's laws and glued
+into the proof tree. As in the concrete mode, the kernel re-checks the whole
+constructed proof.
+
+See `examples/comm_ring_demo.owl`.
 
 ### Example: Multi-Step Tactic Proof
 
