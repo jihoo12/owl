@@ -1,0 +1,9 @@
+-- BAD: the path lambda `<i> zero` is constant, so its endpoint at `i1`
+-- is `zero`, not `suc zero` as the declared path type requires.
+-- Expected rejection: path endpoint mismatch.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def bad_path : Path Nat zero (suc zero) := <i> zero

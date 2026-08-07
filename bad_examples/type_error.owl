@@ -1,0 +1,8 @@
+-- BAD: the body is a function but the declared type is `Nat`.
+-- Expected rejection: a type mismatch (a Π-type is not a Nat).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def not_nat : Nat := fun (x : Nat) => x

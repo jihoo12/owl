@@ -1,0 +1,8 @@
+-- BAD: an unfilled hole is left in the definition body.
+-- Expected rejection: unsolved holes remain.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def incomplete : Nat := ?hole

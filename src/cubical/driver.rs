@@ -433,8 +433,10 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     // (`nbe_eval_ctx(ctx.len(), shift(j+1, 0, annotation))`) see a clean,
     // non-inlined annotation.
     env.define(name.clone(), ty.clone(), resolved_val.clone());
+    let prev_def = crate::cubical::typechecker::termination::set_current_def(Some(name.clone()));
     let result = check_with_full_env(env, &resolved_val, &check_ty)
         .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
+    crate::cubical::typechecker::termination::set_current_def(prev_def);
     if by_wf {
         crate::cubical::typechecker::termination::set_skip_guard(false);
     }

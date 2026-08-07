@@ -1,0 +1,11 @@
+-- BAD: the datatype `Bad` occurs negatively in its own constructor — the
+-- argument type `Bad -> Nat` puts `Bad` on the left of an arrow inside a
+-- constructor argument.
+-- Expected rejection: positivity violation.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bad where
+  | mk : (Bad -> Nat) -> Bad

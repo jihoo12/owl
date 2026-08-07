@@ -1,0 +1,11 @@
+-- BAD: `NotARing` is not a `CommRing` record — it is missing the operation
+-- parameters and every law/structural field, so `by ring with C` cannot
+-- resolve the ring structure.
+-- Expected rejection: ring resolver unable to find the ring fields.
+
+record NotARing (A : Type) where
+  field arbitrary : A -> A
+
+def bad : forall (A : Type), forall (C : NotARing A), forall (x : A),
+    Path A x x :=
+  by intro A C x; ring with C

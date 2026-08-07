@@ -2464,7 +2464,15 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
 
             // Structural recursion guard check.
             if !crate::cubical::typechecker::termination::should_skip_guard() {
-                match crate::cubical::typechecker::termination::check_guard(&d, cases) {
+                // Index of the definition being checked in the current
+                // context (without the eliminator's own case binders). Used
+                // to detect recursive calls through the definition's name.
+                let def_idx = crate::cubical::typechecker::termination::current_def().and_then(|dn| {
+                    ctx.iter()
+                        .position(|(n, _)| n == &dn)
+                        .map(|p| p as i32)
+                });
+                match crate::cubical::typechecker::termination::check_guard(&d, cases, def_idx) {
                     crate::cubical::typechecker::termination::GuardStatus::Ok => {}
                     crate::cubical::typechecker::termination::GuardStatus::Violation { case, msg } => {
                         return Err(TypeError::TerminationViolation {

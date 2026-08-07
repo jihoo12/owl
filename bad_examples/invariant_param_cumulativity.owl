@@ -1,0 +1,12 @@
+-- BAD: `Bad`'s parameter occurs negatively (in an arrow domain), so it is
+-- invariant; `Bad U0 <= Bad U1` must be rejected rather than accepted by
+-- covariance.
+-- Expected rejection: cumulativity violation for the invariant parameter.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bad (A : Type) where
+  | mk : (A -> Nat) -> Bad A
+def bad_cumul : Bad U0 -> Bad U1 := fun b => b

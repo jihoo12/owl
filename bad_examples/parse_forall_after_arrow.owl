@@ -1,0 +1,9 @@
+-- BAD: `forall` is only recognized at term top-level; it cannot follow a
+-- non-dependent `->`.
+-- Expected rejection: parse error ("unknown name or constructor 'forall'").
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def bad_type : Nat -> forall (x : Nat), Nat := fun _ => fun x => x

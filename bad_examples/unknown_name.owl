@@ -1,0 +1,8 @@
+-- BAD: `undefined_name` is not declared anywhere.
+-- Expected rejection: unknown name / not-in-scope error.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def bad : Nat := undefined_name

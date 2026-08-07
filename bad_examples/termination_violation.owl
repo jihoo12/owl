@@ -1,0 +1,12 @@
+-- BAD: the recursive call passes the full scrutinee `m` (not the subterm `m'`)
+-- as the recursive argument.
+-- Expected rejection: structural-recursion (termination) violation.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def bad_loop : Nat -> Nat := fun m =>
+  match m return Nat with
+  | zero => zero
+  | suc m' => bad_loop m
