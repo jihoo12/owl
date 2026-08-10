@@ -31,19 +31,19 @@ use crate::cubical::typechecker::{check_dt, Ctx, TypeError};
 /// A path proof `p : Path Nat a b`, with its endpoints tracked so the
 /// proof term can be composed with `trans`/`sym`/congruence lemmas.
 #[derive(Clone)]
-struct EqP {
-    a: Term,
-    b: Term,
-    p: Term,
+pub(crate) struct EqP {
+    pub(crate) a: Term,
+    pub(crate) b: Term,
+    pub(crate) p: Term,
 }
 
 /// A monomial: `coeff` times the product of `atoms`.  Canonical polynomials
 /// are sorted lists of these with distinct atom vectors and positive
 /// coefficients.
 #[derive(Clone, Debug, PartialEq)]
-struct Mono {
-    coeff: i64,
-    atoms: Vec<Term>,
+pub(crate) struct Mono {
+    pub(crate) coeff: i64,
+    pub(crate) atoms: Vec<Term>,
 }
 
 /// The ring the solver is working over.
@@ -58,7 +58,7 @@ struct Mono {
 ///   head-symbol equality with those projections. Numerals are iterated
 ///   `one + ...` built from `C.add`/`C.one`/`C.zero`.
 #[derive(Clone, Copy, PartialEq)]
-enum Mode {
+pub(crate) enum Mode {
     Concrete,
     Structured,
 }
@@ -67,35 +67,35 @@ enum Mode {
 /// names. In `Concrete` mode these are global `TVar` references looked up in
 /// the context by name; in `Structured` mode they are field projections of
 /// the bundled `CommRing` record.
-struct Ring {
-    add: Term,
-    mul: Term,
-    zero: Term,
-    one: Term,
-    trans: Term,
-    sym: Term,
-    cong_add_l: Term,
-    cong_add_r: Term,
-    cong_mul_l: Term,
-    cong_mul_r: Term,
-    add_comm: Term,
-    add_assoc: Term,
-    add_0_l: Term,
-    add_0_r: Term,
-    mul_comm: Term,
-    mul_assoc: Term,
-    mul_1_l: Term,
-    mul_1_r: Term,
-    mul_0_l: Term,
-    mul_0_r: Term,
-    mul_add_l: Term,
-    mul_add_r: Term,
-    ctx_len: usize,
-    mode: Mode,
+pub(crate) struct Ring {
+    pub(crate) add: Term,
+    pub(crate) mul: Term,
+    pub(crate) zero: Term,
+    pub(crate) one: Term,
+    pub(crate) trans: Term,
+    pub(crate) sym: Term,
+    pub(crate) cong_add_l: Term,
+    pub(crate) cong_add_r: Term,
+    pub(crate) cong_mul_l: Term,
+    pub(crate) cong_mul_r: Term,
+    pub(crate) add_comm: Term,
+    pub(crate) add_assoc: Term,
+    pub(crate) add_0_l: Term,
+    pub(crate) add_0_r: Term,
+    pub(crate) mul_comm: Term,
+    pub(crate) mul_assoc: Term,
+    pub(crate) mul_1_l: Term,
+    pub(crate) mul_1_r: Term,
+    pub(crate) mul_0_l: Term,
+    pub(crate) mul_0_r: Term,
+    pub(crate) mul_add_l: Term,
+    pub(crate) mul_add_r: Term,
+    pub(crate) ctx_len: usize,
+    pub(crate) mode: Mode,
 }
 
 impl Ring {
-    fn resolve(ctx: &Ctx, ring_term: Option<&Term>) -> Result<Ring, TypeError> {
+    pub(crate) fn resolve(ctx: &Ctx, ring_term: Option<&Term>) -> Result<Ring, TypeError> {
         let mode = if ring_term.is_some() {
             Mode::Structured
         } else {
@@ -166,22 +166,22 @@ impl Ring {
 // Term / proof-term plumbing
 // ---------------------------------------------------------------------------
 
-fn app(f: &Term, a: &Term) -> Term {
+pub(crate) fn app(f: &Term, a: &Term) -> Term {
     Term::TApp(Box::new(f.clone()), Box::new(a.clone()))
 }
 
-fn inst(f: &Term, args: &[&Term]) -> Term {
+pub(crate) fn inst(f: &Term, args: &[&Term]) -> Term {
     args.iter().fold(f.clone(), |acc, a| app(&acc, a))
 }
 
 /// Path reflection: `Path t t`.
-fn refl(t: &Term) -> Term {
+pub(crate) fn refl(t: &Term) -> Term {
     Term::PLam("_i".into(), Box::new(shift(1, 0, t)))
 }
 
 /// `refl` adjusted to the declared endpoints `a`, `b` — valid when `a` and
 /// `b` are definitionally equal (the kernel accepts `Path a a` as `Path a b`).
-fn refl2(a: &Term, b: &Term) -> EqP {
+pub(crate) fn refl2(a: &Term, b: &Term) -> EqP {
     EqP {
         a: a.clone(),
         b: b.clone(),
@@ -189,7 +189,7 @@ fn refl2(a: &Term, b: &Term) -> EqP {
     }
 }
 
-fn trp(r: &Ring, p: &EqP, q: &EqP) -> EqP {
+pub(crate) fn trp(r: &Ring, p: &EqP, q: &EqP) -> EqP {
     EqP {
         a: p.a.clone(),
         b: q.b.clone(),
@@ -197,7 +197,7 @@ fn trp(r: &Ring, p: &EqP, q: &EqP) -> EqP {
     }
 }
 
-fn syp(r: &Ring, p: &EqP) -> EqP {
+pub(crate) fn syp(r: &Ring, p: &EqP) -> EqP {
     EqP {
         a: p.b.clone(),
         b: p.a.clone(),
@@ -205,7 +205,7 @@ fn syp(r: &Ring, p: &EqP) -> EqP {
     }
 }
 
-fn cong_add_l(r: &Ring, p: &EqP, n: &Term) -> EqP {
+pub(crate) fn cong_add_l(r: &Ring, p: &EqP, n: &Term) -> EqP {
     EqP {
         a: app(&app(&r.add, &p.a), n),
         b: app(&app(&r.add, &p.b), n),
@@ -213,7 +213,7 @@ fn cong_add_l(r: &Ring, p: &EqP, n: &Term) -> EqP {
     }
 }
 
-fn cong_add_r(r: &Ring, p: &EqP, m: &Term) -> EqP {
+pub(crate) fn cong_add_r(r: &Ring, p: &EqP, m: &Term) -> EqP {
     EqP {
         a: app(&app(&r.add, m), &p.a),
         b: app(&app(&r.add, m), &p.b),
@@ -221,7 +221,7 @@ fn cong_add_r(r: &Ring, p: &EqP, m: &Term) -> EqP {
     }
 }
 
-fn cong_mul_l(r: &Ring, p: &EqP, n: &Term) -> EqP {
+pub(crate) fn cong_mul_l(r: &Ring, p: &EqP, n: &Term) -> EqP {
     EqP {
         a: app(&app(&r.mul, &p.a), n),
         b: app(&app(&r.mul, &p.b), n),
@@ -229,7 +229,7 @@ fn cong_mul_l(r: &Ring, p: &EqP, n: &Term) -> EqP {
     }
 }
 
-fn cong_mul_r(r: &Ring, p: &EqP, m: &Term) -> EqP {
+pub(crate) fn cong_mul_r(r: &Ring, p: &EqP, m: &Term) -> EqP {
     EqP {
         a: app(&app(&r.mul, m), &p.a),
         b: app(&app(&r.mul, m), &p.b),
@@ -247,7 +247,7 @@ fn cong_mul_r(r: &Ring, p: &EqP, m: &Term) -> EqP {
 /// - `Concrete`: the Nat constructor numeral `suc^k zero`.
 /// - `Structured`: `zero` for 0 and right-associated `add one (add one ...)`
 ///   otherwise, built from the bundled ring's projections.
-fn numeral(r: &Ring, k: i64) -> Term {
+pub(crate) fn numeral(r: &Ring, k: i64) -> Term {
     match r.mode {
         Mode::Concrete => {
             let mut t = Term::TCon("Nat".into(), "zero".into(), Vec::new());
@@ -270,7 +270,7 @@ fn numeral(r: &Ring, k: i64) -> Term {
 /// the canonical shapes are recognized (`zero`, `add one (add one ...)`), so
 /// the recognized term may still need a propositional proof to equal
 /// `numeral(k)` — see `numeral_refl_eq`.
-fn numeral_of(r: &Ring, t: &Term) -> Option<i64> {
+pub(crate) fn numeral_of(r: &Ring, t: &Term) -> Option<i64> {
     match r.mode {
         Mode::Concrete => match t {
             Term::TCon(d, c, args) if d == "Nat" && c == "zero" && args.is_empty() => Some(0),
@@ -393,7 +393,7 @@ fn numeral_one_left_mul_eq(r: &Ring, x: &Term) -> EqP {
 }
 
 /// Right-associated product of `atoms` (`mul a1 (mul a2 ...)`).
-fn prod_term(r: &Ring, atoms: &[Term]) -> Term {
+pub(crate) fn prod_term(r: &Ring, atoms: &[Term]) -> Term {
     let mut t = r.one.clone();
     for a in atoms.iter().rev() {
         t = app(&app(&r.mul, a), &t);
@@ -409,7 +409,7 @@ fn prod_term(r: &Ring, atoms: &[Term]) -> Term {
 /// head symbols regardless of how the goal was written — the shape glues in
 /// the polynomial arithmetic then hold definitionally, and the coefficient
 /// arithmetic (`numeral_add_eq`/`numeral_mul_eq`) is proved propositionally.
-fn mono_term(r: &Ring, m: &Mono) -> Term {
+pub(crate) fn mono_term(r: &Ring, m: &Mono) -> Term {
     if m.atoms.is_empty() && r.mode == Mode::Concrete {
         return numeral(r, m.coeff);
     }
@@ -422,7 +422,7 @@ fn mono_term(r: &Ring, m: &Mono) -> Term {
 }
 
 /// Right-associated sum of canonical monomial terms.
-fn sum_term(r: &Ring, poly: &[Mono]) -> Term {
+pub(crate) fn sum_term(r: &Ring, poly: &[Mono]) -> Term {
     let mut t = r.zero.clone();
     for m in poly.iter().rev() {
         t = app(&app(&r.add, &mono_term(r, m)), &t);
@@ -430,7 +430,7 @@ fn sum_term(r: &Ring, poly: &[Mono]) -> Term {
     t
 }
 
-fn canon_term(r: &Ring, poly: &[Mono]) -> Term {
+pub(crate) fn canon_term(r: &Ring, poly: &[Mono]) -> Term {
     sum_term(r, poly)
 }
 
@@ -520,7 +520,7 @@ fn is_mulshape_elim(r: &Ring, t: &Term) -> bool {
 ///   eliminator normal form.
 /// - `Structured`: normalize `t` and match its head symbol against the
 ///   bundled ring's `add` projection (both compared in normal form).
-fn as_add(r: &Ring, t: &Term) -> Option<(Term, Term)> {
+pub(crate) fn as_add(r: &Ring, t: &Term) -> Option<(Term, Term)> {
     match r.mode {
         Mode::Concrete => {
             let nf = match t {
@@ -566,7 +566,7 @@ fn mul_suc_arg(body: &Term) -> Term {
 }
 
 /// Treat `t` as a `mul` operation, returning `(a, b)` with `t ~ mul a b`.
-fn as_mul(r: &Ring, t: &Term) -> Option<(Term, Term)> {
+pub(crate) fn as_mul(r: &Ring, t: &Term) -> Option<(Term, Term)> {
     match r.mode {
         Mode::Concrete => {
             let nf = match t {
@@ -606,7 +606,7 @@ fn as_mul(r: &Ring, t: &Term) -> Option<(Term, Term)> {
 // ---------------------------------------------------------------------------
 
 /// Reify `t` into a canonical polynomial with a proof `Path t canon`.
-fn decomp(r: &Ring, t: &Term) -> Result<(Vec<Mono>, EqP), TypeError> {
+pub(crate) fn decomp(r: &Ring, t: &Term) -> Result<(Vec<Mono>, EqP), TypeError> {
     if let Some((s, z)) = as_add(r, t) {
         let (ps, pfs) = decomp(r, &s)?;
         let (pz, pfz) = decomp(r, &z)?;
@@ -790,7 +790,7 @@ fn reify_mul(
 // ---------------------------------------------------------------------------
 
 /// `add (canon pa) (canon pb) = canon (pa + pb)` for sorted polys.
-fn poly_merge(r: &Ring, pa: &[Mono], pb: &[Mono]) -> (Vec<Mono>, EqP) {
+pub(crate) fn poly_merge(r: &Ring, pa: &[Mono], pb: &[Mono]) -> (Vec<Mono>, EqP) {
     let c_pb = canon_term(r, pb);
     match pa {
         [] => (
@@ -1066,7 +1066,7 @@ fn numeral_mul_eq(r: &Ring, a: i64, b: i64) -> EqP {
 
 /// `mul (canon pa) (canon pb) = sum_term products` — full distributivity
 /// expansion of the product of two canonical polynomials.
-fn expand(r: &Ring, pa: &[Mono], pb: &[Mono]) -> (Vec<Mono>, EqP) {
+pub(crate) fn expand(r: &Ring, pa: &[Mono], pb: &[Mono]) -> (Vec<Mono>, EqP) {
     let c_pb = canon_term(r, pb);
     match pa {
         [] => (
@@ -1182,7 +1182,7 @@ fn sum_concat(r: &Ring, la: &[Mono], lb: &[Mono]) -> EqP {
 
 /// Canonicalize a right-associated sum in arbitrary order:
 /// `sum_term list = canon poly`.
-fn sum_canon(r: &Ring, list: &[Mono]) -> (Vec<Mono>, EqP) {
+pub(crate) fn sum_canon(r: &Ring, list: &[Mono]) -> (Vec<Mono>, EqP) {
     match list {
         [] => (
             Vec::new(),
@@ -1258,7 +1258,7 @@ fn mono_mul(r: &Ring, m: &Mono, n: &Mono) -> (Mono, EqP) {
 
 /// `mul (mul ka aa) (mul kb bb) = mul (mul ka kb) (mul aa bb)` — the
 /// associativity/commutativity regrouping used by `mono_mul`.
-fn regroup(
+pub(crate) fn regroup(
     r: &Ring,
     ka: &Term,
     aa: &Term,

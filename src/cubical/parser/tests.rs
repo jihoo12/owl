@@ -763,3 +763,48 @@ fn tactic_def_assumption_typechecks() {
     let decls = parse_program(src).unwrap();
     assert_eq!(decls.len(), 2);
 }
+
+#[test]
+fn parses_constructor_less_datatype() {
+    let src = "inductive Empty where";
+    let decls = parse_program(src).unwrap();
+    assert_eq!(decls.len(), 1);
+    match &decls[0] {
+        Decl::Data(dt) => {
+            assert_eq!(dt.name, "Empty");
+            assert!(dt.cons.is_empty());
+            assert!(dt.pcons.is_empty());
+            assert!(dt.sqcons.is_empty());
+            assert!(dt.cellcons.is_empty());
+        }
+        _ => panic!("expected data declaration"),
+    }
+}
+
+#[test]
+fn parses_empty_match_elimination() {
+    let src = "inductive Empty where\ndef absurd : forall (A : U0), Empty -> A := fun A e => match e return A with";
+    let decls = parse_program(src).unwrap();
+    assert_eq!(decls.len(), 2);
+    match &decls[1] {
+        Decl::Def { name, val, .. } => {
+            assert_eq!(name, "absurd");
+            match val {
+                Term::TAbs(_, inner) => match inner.as_ref() {
+                    Term::TAbs(_, body) => {
+                        if let Term::TElim(motive, cases, scrut) = body.as_ref() {
+                            assert!(cases.is_empty());
+                            assert!(matches!(motive.as_ref(), Term::TAbs(_, _)));
+                            assert!(matches!(scrut.as_ref(), Term::TVar(0)));
+                        } else {
+                            panic!("expected TElim, got: {:?}", body);
+                        }
+                    }
+                    _ => panic!("expected inner TAbs"),
+                },
+                _ => panic!("expected outer TAbs"),
+            }
+        }
+        _ => panic!("expected def declaration"),
+    }
+}

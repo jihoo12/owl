@@ -1091,6 +1091,25 @@ impl<'a> TacticEngine<'a> {
                 self.result = Some(result);
                 Ok(())
             }
+
+            // ── field ─────────────────────────────────────────────────────
+            Tactic::Field(field_term) => {
+                let combined_ctx: Ctx = {
+                    let mut c = self.tactic_ctx.clone();
+                    c.extend_from_slice(outer_ctx);
+                    c
+                };
+                let result = crate::cubical::field::prove(
+                    self.dts,
+                    &combined_ctx,
+                    &self.goal_ty,
+                    self.tactic_ctx.len(),
+                    self.intro_names.len(),
+                    field_term.as_ref(),
+                )?;
+                self.result = Some(result);
+                Ok(())
+            }
         }?;
 
         // ── process any pending goal transition AFTER the tactic ─────────

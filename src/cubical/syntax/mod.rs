@@ -238,6 +238,19 @@ pub enum Tactic {
     /// In both modes the constructed proof is re-checked by the kernel, which
     /// is the soundness backstop.
     Ring(Option<Term>),
+    /// `field` — field identities with inverse reasoning, over an abstract
+    /// `Field` record bundled as `field with F`.
+    ///
+    /// Both sides of the goal `Path A u v` are reified to fractions
+    /// `(N, D)` with a proof `t = mul (canon N) (inv (canon D))` (denominator
+    /// always a single monomial); add/mul combine through common-denominator
+    /// rewrites, and `inv` swaps numerator and denominator (restricted to a
+    /// single coefficient-1 monomial numerator).  The final step derives the
+    /// goal from the ring-proved cross-multiplication via a scale lemma.
+    /// Nonzero obligations `(Path A zero x -> Empty)` are discharged
+    /// structurally against `nz_one`/`nz_mul` and context hypotheses.
+    /// See `src/cubical/field.rs`.
+    Field(Option<Term>),
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +558,7 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
         Tactic::Exact(t) => Tactic::Exact(shift(d, c, t)),
         Tactic::Apply(t) => Tactic::Apply(shift(d, c, t)),
         Tactic::Ring(t) => Tactic::Ring(t.as_ref().map(|t| shift(d, c, t))),
+        Tactic::Field(t) => Tactic::Field(t.as_ref().map(|t| shift(d, c, t))),
         Tactic::Reflexivity
         | Tactic::Symmetry
         | Tactic::Split
@@ -726,6 +740,7 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
         Tactic::Exact(t) => Tactic::Exact(subst(j, s, t)),
         Tactic::Apply(t) => Tactic::Apply(subst(j, s, t)),
         Tactic::Ring(t) => Tactic::Ring(t.as_ref().map(|t| subst(j, s, t))),
+        Tactic::Field(t) => Tactic::Field(t.as_ref().map(|t| subst(j, s, t))),
         Tactic::Reflexivity
         | Tactic::Symmetry
         | Tactic::Split

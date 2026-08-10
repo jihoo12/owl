@@ -1,0 +1,67 @@
+-- `by field with F` — the abstract field solver.
+--
+-- Binds an abstract `Field` record `F` and proves fraction identities over
+-- its operations using `by field with F`.  Nonzero obligations are encoded
+-- as hypotheses `h : Path A zero a -> Empty` (i.e. `a != 0`); the solver
+-- discharges products of nonzero atoms structurally and uses the ring
+-- machinery on the cross-multiplied equality.
+--
+-- Records can only be used at the root of a `def` (nested `fun => by ...`
+-- is not supported by the kernel driver), matching `by ring with C`.
+
+import "../lib/field_laws.owl"
+
+def field_demo_frac_mul :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (zero : A), forall (one : A),
+  forall (F : Field A add mul inv zero one),
+  forall (a : A), forall (b : A), forall (c : A), forall (d : A),
+  (Path A zero a -> Empty) -> (Path A zero b -> Empty) ->
+  (Path A zero c -> Empty) -> (Path A zero d -> Empty) ->
+  Path A (mul (mul a (inv b)) (mul c (inv d))) (mul (mul a c) (inv (mul b d))) :=
+  by intro A add mul inv zero one F a b c d ha hb hc hd; field with F
+
+def field_demo_frac_add :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (zero : A), forall (one : A),
+  forall (F : Field A add mul inv zero one),
+  forall (a : A), forall (b : A), forall (c : A), forall (d : A),
+  (Path A zero a -> Empty) -> (Path A zero b -> Empty) ->
+  (Path A zero c -> Empty) -> (Path A zero d -> Empty) ->
+  Path A (add (mul a (inv b)) (mul c (inv d))) (mul (add (mul a d) (mul c b)) (inv (mul b d))) :=
+  by intro A add mul inv zero one F a b c d ha hb hc hd; field with F
+
+def field_demo_frac_div :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (zero : A), forall (one : A),
+  forall (F : Field A add mul inv zero one),
+  forall (a : A), forall (b : A), forall (c : A), forall (d : A),
+  (Path A zero a -> Empty) -> (Path A zero b -> Empty) ->
+  (Path A zero c -> Empty) -> (Path A zero d -> Empty) ->
+  Path A (mul (mul a (inv b)) (inv (mul c (inv d)))) (mul (mul a d) (inv (mul b c))) :=
+  by intro A add mul inv zero one F a b c d ha hb hc hd; field with F
+
+def field_demo_inv_inv :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (zero : A), forall (one : A),
+  forall (F : Field A add mul inv zero one),
+  forall (a : A), (Path A zero a -> Empty) ->
+  Path A (inv (inv a)) a :=
+  by intro A add mul inv zero one F a ha; field with F
+
+def field_demo_inv_mul :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (zero : A), forall (one : A),
+  forall (F : Field A add mul inv zero one),
+  forall (a : A), forall (b : A),
+  (Path A zero a -> Empty) -> (Path A zero b -> Empty) ->
+  Path A (inv (mul a b)) (mul (inv a) (inv b)) :=
+  by intro A add mul inv zero one F a b ha hb; field with F
+
+def field_demo_mul_inv :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (zero : A), forall (one : A),
+  forall (F : Field A add mul inv zero one),
+  forall (a : A), (Path A zero a -> Empty) ->
+  Path A (mul a (inv a)) one :=
+  by intro A add mul inv zero one F a ha; field with F

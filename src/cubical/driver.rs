@@ -988,6 +988,91 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn field_demo_example_checks() {
+        // Guard against regressions in `by field with F`: the fraction
+        // reification/inverse machinery over an abstract `Field` record plus
+        // the law-application tree the kernel re-checks (frac mul/add/div,
+        // inv inv/mul, mul inv). The large proofs need a bigger stack than
+        // the default 2 MiB test-thread stack; the kernel re-check is also
+        // slow in debug builds (the biggest theorem takes ~1 min per pass).
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("field_demo.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn field check thread");
+        handle
+            .join()
+            .expect("field check thread panicked")
+            .expect("examples/field_demo.owl should typecheck");
+    }
+
+    #[test]
+    fn field_laws_lib_checks() {
+        // The field-law library is imported by the demos and resolved by name
+        // by `by field with F`; it must typecheck standalone as a library.
+        // Its large law-application normal forms need a bigger stack than the
+        // default 2 MiB test-thread stack.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("lib")
+            .join("field_laws.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn field laws check thread");
+        handle
+            .join()
+            .expect("field laws check thread panicked")
+            .expect("lib/field_laws.owl should typecheck");
+    }
+
+    #[test]
+    fn all_example_files_check() {
+        // Sweep every examples/*.owl file not already covered by a dedicated
+        // test above (cubical/HIT/path/param/quotient/tactics/record demos and
+        // the remaining stress files), so nothing in examples/ can silently
+        // regress. Each file is checked on a 64 MiB stack thread so large
+        // proof trees don't overflow the default 2 MiB test-thread stack.
+        let covered = [
+            "nat_path_algebra.owl",
+            "record_minimal.owl",
+            "record_types.owl",
+            "stress_record_types.owl",
+            "stress_update_or_patterns.owl",
+            "omega_demo.owl",
+            "ring_demo.owl",
+            "comm_ring_demo.owl",
+            "stress_mul_algebra.owl",
+            "field_demo.owl",
+        ];
+        let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        let mut files: Vec<_> = std::fs::read_dir(&examples)
+            .expect("examples/ should exist")
+            .map(|e| e.expect("read dir entry").file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".owl") && !covered.contains(&n.as_str()))
+            .collect();
+        files.sort();
+        assert!(!files.is_empty(), "expected at least one uncovered example file");
+        let handles: Vec<_> = files
+            .iter()
+            .cloned()
+            .map(|name| {
+                let path = examples.join(&name);
+                std::thread::Builder::new()
+                    .stack_size(64 * 1024 * 1024)
+                    .spawn(move || {
+                        check(&path).unwrap_or_else(|e| panic!("examples/{name} should typecheck: {e}"))
+                    })
+                    .expect("spawn example check thread")
+            })
+            .collect();
+        for (name, handle) in files.iter().zip(handles) {
+            handle.join().unwrap_or_else(|e| panic!("examples/{name} thread panicked: {e:?}"));
+        }
+    }
+
+    #[test]
     fn omega_rejects_unproved_comm() {
         // Without a pre-proved comm lemma omega cannot synthesize induction
         // yet; it must fail with a clear error rather than accept a circular

@@ -271,6 +271,10 @@ pub fn show_tactic(env: &[Name], t: &Tactic) -> String {
             Some(t) => format!("ring with {}", t),
             None => "ring".to_string(),
         },
+        Tactic::Field(f) => match f {
+            Some(t) => format!("field with {}", t),
+            None => "field".to_string(),
+        },
     }
 }
 

@@ -317,12 +317,8 @@ impl Parser {
                 cons.push(sig);
             }
         }
-        if cons.is_empty() && pcons.is_empty() && sqcons.is_empty() && cellcons.is_empty() {
-            return Err(self.error_here(format!(
-                "datatype '{}' must declare at least one constructor",
-                name
-            )));
-        }
+        // A datatype with no constructors at all is legal: it is the empty
+        // type (e.g. `Empty`), eliminated only by an empty `match`.
         // Remove parameter binders from term_env
         for _ in &params {
             self.term_env.remove(0);
@@ -622,7 +618,14 @@ impl Parser {
             }
             return Ok(Tactic::Ring(None));
         }
-        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', 'omega', 'ring', or 'ring with <term>'"))
+        if self.consume_ident("field") {
+            if self.consume_ident("with") {
+                let term = self.parse_term()?;
+                return Ok(Tactic::Field(Some(term)));
+            }
+            return Ok(Tactic::Field(None));
+        }
+        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', 'omega', 'ring', 'field', 'ring with <term>', or 'field with <term>'"))
     }
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {
@@ -1265,9 +1268,12 @@ impl Parser {
     }
 
     /// Parse the `| constructor binders => body` arms of a `match`.
+    /// A `match` with no `|` cases at all is legal — it eliminates the empty
+    /// type (`match e return A with`), whose type checker only fires when the
+    /// scrutinee normalizes to a value of an empty datatype.
     fn parse_match_cases(&mut self) -> Result<Vec<ElimCase>, ParseError> {
         if !self.at(&TokenKind::Pipe) {
-            return Err(self.error_here("expected '|' before match cases"));
+            return Ok(Vec::new());
         }
 
         let my_col = self.peek().col;
@@ -1929,6 +1935,7 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "trivial"
             | "omega"
             | "ring"
+            | "field"
             | "def"
             | "inductive"
             | "record"

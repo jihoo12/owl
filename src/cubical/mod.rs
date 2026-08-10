@@ -1,6 +1,7 @@
 pub mod driver;
 pub mod env;
 pub mod equality;
+pub mod field;
 pub mod interval;
 #[allow(dead_code)]
 pub mod nbe;

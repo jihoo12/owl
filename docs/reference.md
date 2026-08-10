@@ -1824,6 +1824,49 @@ constructed proof.
 
 See `examples/comm_ring_demo.owl`.
 
+#### `field with F` (abstract `Field`)
+
+`by field with F` proves fraction identities — polynomial identities extended
+with inverse/division reasoning — over an abstract field
+`F : Field A add mul inv zero one`. Like [`ring with C`](#ring-with-c-abstract-commring),
+the operations are recognized by head-symbol equality and the law/structural
+lemmas are taken from the record fields. The `Field` record bundles the
+`CommRing` laws plus:
+
+- the operation `inv : A -> A`; and
+- the field laws `inv_mul` (`nz a -> Path A (mul a (inv a)) one`),
+  `inv_one`, `inv_mul_dist` (`inv (mul x y) = mul (inv x) (inv y)`),
+  `inv_div` (`inv (mul x (inv y)) = mul y (inv x)`), `cong_inv`,
+  `nz_one`, `nz_mul`.
+
+Nonzero obligations are encoded as hypotheses `h : Path A zero a -> Empty`
+(i.e. `a ≠ 0`). Each atom appearing in a denominator must have such a
+hypothesis in scope; the solver discharges products structurally (`nz_one`,
+`nz_mul`, context hypotheses), so `(a·b)/(c·d)` needs `ha hb hc hd`.
+
+```
+def frac_add : forall (A : Type), forall (add : A -> A -> A),
+    forall (mul : A -> A -> A), forall (inv : A -> A),
+    forall (zero : A), forall (one : A),
+    forall (F : Field A add mul inv zero one),
+    forall (a : A), forall (b : A), forall (c : A), forall (d : A),
+    (Path A zero a -> Empty) -> (Path A zero b -> Empty) ->
+    (Path A zero c -> Empty) -> (Path A zero d -> Empty) ->
+    Path A (add (mul a (inv b)) (mul c (inv d)))
+           (mul (add (mul a d) (mul c b)) (inv (mul b d))) :=
+  by intro A add mul inv zero one F a b c d ha hb hc hd; field with F
+```
+
+The solver reifies each side of the goal to a fraction `(N, D)` (numerator a
+ring polynomial, denominator a single product of atoms) with a proof that it
+equals `mul (canon N) (inv D)`, cross-multiplies to a ring identity, and
+assembles a law-application tree that the kernel re-checks (structural guard
+skipped, as in `ring`).
+
+Scope: no `neg`/`sub`; `inv` of a sum or numeral multiple (e.g.
+`inv (add a b)`) is an explicit error; the `by` block must sit at the root of
+the `def`. See `examples/field_demo.owl` and `lib/field_laws.owl`.
+
 ### Example: Multi-Step Tactic Proof
 
 ```
