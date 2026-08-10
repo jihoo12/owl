@@ -1,3 +1,4 @@
+pub mod debug;
 pub mod driver;
 pub mod env;
 pub mod equality;
@@ -11,7 +12,6 @@ pub mod ring;
 pub mod syntax;
 pub mod tactics;
 pub mod typechecker;
-pub mod debug;
 
 #[cfg(test)]
 pub mod dependent_pi_transport_test;

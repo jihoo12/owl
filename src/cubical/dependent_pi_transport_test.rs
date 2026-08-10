@@ -9,7 +9,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::cubical::nbe::{eval_nbe, nbe_eval, Globals, Scope, Value};
+    use crate::cubical::nbe::{Globals, Scope, Value, eval_nbe, nbe_eval};
     use crate::cubical::syntax::Term;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -41,10 +41,7 @@ mod tests {
         );
         let input = Term::TAbs(
             "x".to_string(),
-            b(Term::TAbs(
-                "y".to_string(),
-                b(Term::TVar(0)),
-            )),
+            b(Term::TAbs("y".to_string(), b(Term::TVar(0)))),
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
@@ -119,10 +116,7 @@ mod tests {
         );
         let input = Term::TAbs(
             "x".to_string(),
-            b(Term::TAbs(
-                "y".to_string(),
-                b(Term::TVar(0)),
-            )),
+            b(Term::TAbs("y".to_string(), b(Term::TVar(0)))),
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
@@ -161,10 +155,7 @@ mod tests {
         );
         let input = Term::TAbs(
             "x".to_string(),
-            b(Term::TAbs(
-                "y".to_string(),
-                b(Term::TVar(1)),
-            )),
+            b(Term::TAbs("y".to_string(), b(Term::TVar(1)))),
         );
         let term = Term::TTransport(b(fam), b(input));
         let globals = empty_globals();
@@ -212,10 +203,7 @@ mod tests {
             "x".to_string(),
             b(Term::TAbs(
                 "y".to_string(),
-                b(Term::TAbs(
-                    "z".to_string(),
-                    b(Term::TVar(2)),
-                )),
+                b(Term::TAbs("z".to_string(), b(Term::TVar(2)))),
             )),
         );
         let term = Term::TTransport(b(fam), b(input));
@@ -259,10 +247,7 @@ mod tests {
             "x".to_string(),
             b(Term::TAbs(
                 "y".to_string(),
-                b(Term::TAbs(
-                    "z".to_string(),
-                    b(Term::TVar(0)),
-                )),
+                b(Term::TAbs("z".to_string(), b(Term::TVar(0)))),
             )),
         );
         let term = Term::TTransport(b(fam), b(input));
@@ -338,29 +323,17 @@ mod tests {
     #[test]
     fn uses_var_level_under_pi_domain() {
         // TPi("x", TVar(0), TUniv(0)) — domain references level 0
-        let pi = Term::TPi(
-            "x".to_string(),
-            b(Term::TVar(0)),
-            b(Term::TUniv(0)),
-        );
+        let pi = Term::TPi("x".to_string(), b(Term::TVar(0)), b(Term::TUniv(0)));
         assert!(crate::cubical::nbe::uses_var_at_level(&pi, 0));
     }
 
     #[test]
     fn uses_var_level_under_pi_codomain() {
         // TPi("x", TUniv(0), TVar(0)) — TVar(0) is captured by the binder
-        let pi = Term::TPi(
-            "x".to_string(),
-            b(Term::TUniv(0)),
-            b(Term::TVar(0)),
-        );
+        let pi = Term::TPi("x".to_string(), b(Term::TUniv(0)), b(Term::TVar(0)));
         assert!(!crate::cubical::nbe::uses_var_at_level(&pi, 0));
         // TPi("x", TUniv(0), TVar(1)) — TVar(1) under one binder = outer level 0
-        let pi2 = Term::TPi(
-            "x".to_string(),
-            b(Term::TUniv(0)),
-            b(Term::TVar(1)),
-        );
+        let pi2 = Term::TPi("x".to_string(), b(Term::TUniv(0)), b(Term::TVar(1)));
         assert!(crate::cubical::nbe::uses_var_at_level(&pi2, 0));
     }
 
@@ -425,10 +398,7 @@ mod tests {
             "x".to_string(),
             b(Term::TAbs(
                 "y".to_string(),
-                b(Term::TAbs(
-                    "z".to_string(),
-                    b(Term::TUniv(0)),
-                )),
+                b(Term::TAbs("z".to_string(), b(Term::TUniv(0)))),
             )),
         );
         let term = Term::TTransport(b(fam), b(input));

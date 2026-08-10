@@ -84,7 +84,10 @@ fn parses_nat_declaration() {
             assert_eq!(dt.cons.len(), 2);
             assert_eq!(dt.cons[0].name, "zero");
             assert_eq!(dt.cons[1].name, "suc");
-            assert_eq!(dt.cons[1].arg_tys, vec![Term::TData("Nat".to_string(), vec![])]);
+            assert_eq!(
+                dt.cons[1].arg_tys,
+                vec![Term::TData("Nat".to_string(), vec![])]
+            );
         }
         _ => panic!("expected data declaration"),
     }
@@ -106,7 +109,10 @@ fn parses_named_hole() {
     let term = parse_term("?goal").unwrap();
     match term {
         Term::Meta(id) => {
-            assert_eq!(crate::cubical::nbe::get_meta_name(id), Some("goal".to_string()));
+            assert_eq!(
+                crate::cubical::nbe::get_meta_name(id),
+                Some("goal".to_string())
+            );
         }
         _ => panic!("expected Meta, got {:?}", term),
     }
@@ -172,8 +178,14 @@ fn parses_lean_style_declarations() {
 
 #[test]
 fn parses_unicode_binders() {
-    assert!(matches!(parse_term("∀ (A : Type), A -> A").unwrap(), Term::TPi(_, _, _)));
-    assert!(matches!(parse_term("Σ (A : Type), A").unwrap(), Term::TSigma(_, _, _)));
+    assert!(matches!(
+        parse_term("∀ (A : Type), A -> A").unwrap(),
+        Term::TPi(_, _, _)
+    ));
+    assert!(matches!(
+        parse_term("Σ (A : Type), A").unwrap(),
+        Term::TSigma(_, _, _)
+    ));
 }
 
 #[test]
@@ -277,11 +289,7 @@ fn parses_match_dependent_return_type() {
 fn parses_or_patterns() {
     let src = "match n return Nat with | zero | suc m => z";
     let mut parser = Parser::new(Lexer::new(src).lex().unwrap());
-    parser.global_env = vec![
-        "z".to_string(),
-        "Nat".to_string(),
-        "n".to_string(),
-    ];
+    parser.global_env = vec!["z".to_string(), "Nat".to_string(), "n".to_string()];
     let term = parser.parse_term().unwrap();
     match term {
         Term::TElim(_, cases, scrut) => {
@@ -327,7 +335,8 @@ fn let_desugars_to_application_of_lambda() {
 
 #[test]
 fn parses_s1_declaration() {
-    let decls = parse_program("inductive S1 where | base : S1 | loop : S1 [ base , base ]").unwrap();
+    let decls =
+        parse_program("inductive S1 where | base : S1 | loop : S1 [ base , base ]").unwrap();
     match &decls[0] {
         Decl::Data(dt) => {
             assert_eq!(dt.name, "S1");
@@ -404,13 +413,15 @@ fn cumulativity_universe_levels() {
     // lambda just binds A and the body checks against the codomain.
     let val = parse_term("fun A x => x").unwrap();
     let ty = parse_term("∀ (A : U1), A -> A").unwrap();
-    check(&ctx, &val, &ty)
-        .expect("identity should be accepted at type ∀ (A : U1), A -> A");
+    check(&ctx, &val, &ty).expect("identity should be accepted at type ∀ (A : U1), A -> A");
 
     // Negative: a term that doesn't match the expected Pi should fail.
     let val2 = parse_term("U0").unwrap();
     let result = check(&ctx, &val2, &ty);
-    assert!(result.is_err(), "U0 should not be accepted at (A : U1) -> A -> A");
+    assert!(
+        result.is_err(),
+        "U0 should not be accepted at (A : U1) -> A -> A"
+    );
 }
 
 #[test]
@@ -419,7 +430,8 @@ fn cumulativity_pi_types() {
     let ctx = Vec::new();
     let val = parse_term("fun A x => x").unwrap();
     let ty = parse_term("∀ (A : U1), A -> A").unwrap();
-    check(&ctx, &val, &ty).expect("the lower-universe identity should be accepted at ∀ (A : U1), A -> A");
+    check(&ctx, &val, &ty)
+        .expect("the lower-universe identity should be accepted at ∀ (A : U1), A -> A");
 }
 
 #[test]

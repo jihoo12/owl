@@ -49,10 +49,7 @@ pub enum GuardStatus {
     Ok,
     /// The case body makes a recursive call where the recursive argument
     /// is not one of the case binders — possible non-termination.
-    Violation {
-        case: String,
-        msg: String,
-    },
+    Violation { case: String, msg: String },
 }
 
 /// Check that a `TElim` satisfies the structural recursion guard.
@@ -72,14 +69,9 @@ pub enum GuardStatus {
 /// self-references to the definition being checked, both on the same
 /// datatype. Each such call must pass a case binder
 /// (de Bruijn index in `0..binder_count`) as the recursive argument.
-pub fn check_guard(
-    d: &str,
-    cases: &[ElimCase],
-    def_idx: Option<i32>,
-) -> GuardStatus {
+pub fn check_guard(d: &str, cases: &[ElimCase], def_idx: Option<i32>) -> GuardStatus {
     for case in cases {
-        let binder_count = case.binders.len()
-            + if case.as_name.is_some() { 1 } else { 0 };
+        let binder_count = case.binders.len() + if case.as_name.is_some() { 1 } else { 0 };
         // The current definition sits just below the eliminator's case
         // binders, so its index is `def_idx + binder_count`.
         let case_def_idx = def_idx.map(|i| i + binder_count as i32);
@@ -159,9 +151,7 @@ fn check_body_guard(
         }
 
         // Lambda: extend binder count.
-        Term::TAbs(_, body) => {
-            check_body_guard(d, body, binder_count + 1, def_idx.map(|i| i + 1))
-        }
+        Term::TAbs(_, body) => check_body_guard(d, body, binder_count + 1, def_idx.map(|i| i + 1)),
         Term::PLam(_, body) => check_body_guard(d, body, binder_count, def_idx),
 
         // Recursive call via TApp/PApp spine: the head is a reference to the
@@ -295,9 +285,15 @@ fn check_body_guard(
         }
 
         // Atoms — no recursion possible.
-        Term::TVar(_) | Term::TUniv(_) | Term::TProp | Term::TSSet
-        | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_)
-        | Term::TData(_, _) | Term::Meta(_) => Ok(()),
+        Term::TVar(_)
+        | Term::TUniv(_)
+        | Term::TProp
+        | Term::TSSet
+        | Term::TIntervalTy
+        | Term::TInterval(_)
+        | Term::TCube(_)
+        | Term::TData(_, _)
+        | Term::Meta(_) => Ok(()),
 
         Term::TBy(_) | Term::TLift(_, _) | Term::TLower(_) => Ok(()),
 
@@ -338,8 +334,7 @@ fn motive_targets_datatype(d: &str, motive: &Term) -> bool {
     match motive {
         Term::TAbs(_, body) => motive_targets_datatype(d, body),
         Term::TApp(f, a) => {
-            matches!(a.as_ref(), Term::TData(name, _) if name == d)
-                || motive_targets_datatype(d, f)
+            matches!(a.as_ref(), Term::TData(name, _) if name == d) || motive_targets_datatype(d, f)
         }
         Term::TData(name, _) => name == d,
         _ => false,

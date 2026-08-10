@@ -30,7 +30,13 @@ pub fn stop_trace() -> Vec<ReductionStep> {
 /// Record a single reduction step (no-op when debug is inactive).
 pub fn record_step(rule: String, input: String, output: String) {
     if debug::is_active() {
-        REDUCTION_TRACE.with(|t| t.borrow_mut().push(ReductionStep { rule, input, output }));
+        REDUCTION_TRACE.with(|t| {
+            t.borrow_mut().push(ReductionStep {
+                rule,
+                input,
+                output,
+            })
+        });
     }
 }
 

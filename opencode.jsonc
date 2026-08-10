@@ -1,0 +1,59 @@
+{
+  // Owl project config for opencode.
+  // Local tooling only — git-ignored. See AGENTS.md §7 for the command table.
+  "$schema": "https://opencode.ai/config.json",
+
+  // Code-analysis database exposed as MCP tools (list_items, get_item,
+  // search_code, methods_of, call_graph_info, complexity_report, ...).
+  "mcp": {
+    "rust-analyzer-db": {
+      "type": "local",
+      "command": [".venv/bin/rust-analyzer-db", "mcp", "--db", "rust_code.db"],
+      "enabled": true
+    }
+  },
+
+  "command": {
+    "verify": {
+      "description": "Run the full verification pipeline and fix failures",
+      "template": "Run the full verification pipeline for this repo:\n1. Run `scripts/verify.sh` (or `scripts/verify.sh --quick` first for fast iteration, then the full run once green).\n2. If any step fails, fix the underlying issue and re-run until green.\n3. Follow AGENTS.md §6: build, cargo fmt --check, tests, `cargo run -- check` on any touched .owl files, rescan the rust-analyzer-db.\n4. Update TODO.md per AGENTS.md §3 if work was completed.\n5. Do not commit unless asked.\nReport which steps passed and what you fixed."
+    },
+    "test": {
+      "description": "Run cargo test with an optional filter",
+      "template": "Run `cargo test $ARGUMENTS` and report the result. If a test fails, investigate (use the rust-analyzer-db MCP tools to navigate the code), fix the issue, and re-run until green. Note: some example guards are slow in debug builds (field_demo ~5 min) and deliberately run on 64 MiB stack threads — that is expected. Do not commit unless asked."
+    },
+    "rescan": {
+      "description": "Rescan the project into the rust-analyzer-db and summarize stats",
+      "template": "Rescan the project into the code-analysis database with:\n`uvx rust-analyzer-db scan src --db rust_code.db`\nThen run `uvx rust-analyzer-db stats --db rust_code.db` and report the file/item counts, then `uvx rust-analyzer-db complexity --db rust_code.db` for the top complex functions."
+    },
+    "analyze": {
+      "description": "Deep-dive one item/function via the rust-analyzer-db",
+      "template": "Use the rust-analyzer-db (MCP tools or CLI) to deep-dive $ARGUMENTS: locate the item, show its source, complexity, and callers/callees, and summarize how it fits the project and what invariants it depends on. If $ARGUMENTS is empty, take the most complex function from `uvx rust-analyzer-db complexity --db rust_code.db` and analyze that instead. Quote file:line locations in your summary."
+    },
+    "sync-todo": {
+      "description": "Reconcile TODO.md with the actual state of the work",
+      "template": "Reconcile TODO.md with the actual state of the work:\n1. Inspect `git status`, `git log --oneline -10`, and the diff of uncommitted changes.\n2. Mark any completed items `[ ]` → `[x]` and move each to the top of the `## Completed (implementation log)` section as a dated paragraph in the existing style: what changed, why, how it was verified (test names / examples / commands), and any invariants the fix relies on.\n3. If an item is in progress, annotate it so the file reflects reality.\n4. Never fabricate completions — only mark an item done when the verification protocol (AGENTS.md §6) actually passed.\nReport exactly what you changed in TODO.md."
+    }
+  },
+
+  // Automation rules. Broad catch-all first, narrow rules last (last match wins).
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "cargo": "allow",
+      "cargo *": "allow",
+      "rustfmt": "allow",
+      "git": "allow",
+      "git *": "allow",
+      "uv": "allow",
+      "uv *": "allow",
+      "uvx": "allow",
+      "uvx *": "allow",
+      ".venv/bin/*": "allow",
+      "scripts/*": "allow",
+      "bash scripts/*": "allow",
+      "curl -s https://opencode.ai/config.json*": "allow",
+      "sqlite3 rust_code.db*": "allow"
+    }
+  }
+}

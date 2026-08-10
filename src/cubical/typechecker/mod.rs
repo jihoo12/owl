@@ -13,11 +13,13 @@ pub mod termination;
 pub use errors::{TypeError, err_pos};
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
-use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
 use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_leq, dnf_meet};
 use crate::cubical::nbe::{nbe_eval, nbe_eval_ctx};
-use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, Term, beta, shift, show_term, subst};
+use crate::cubical::syntax::{
+    Datatype, ElimCase, Level, Name, Term, beta, shift, show_term, subst,
+};
 use crate::cubical::syntax::{Variance, compute_param_variances};
+use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
 
 pub fn err_names(ctx: &Ctx) -> Vec<Name> {
     ctx.iter().map(|(n, _)| n.clone()).collect()
@@ -72,7 +74,12 @@ pub fn lookup_ctx(i: i32, ctx: &Ctx) -> Result<Term, TypeError> {
 /// to something with an inferable type (e.g. `(\x. x) U0` reduces to `U0`,
 /// and `fst (a, b)` reduces to `a`). We retry inference on the fully
 /// reduced term, and only give up if reduction made no progress.
-fn infer_via_reduction(dts: &[Datatype], ctx: &Ctx, t: &Term, original_err: TypeError) -> Result<Term, TypeError> {
+fn infer_via_reduction(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    t: &Term,
+    original_err: TypeError,
+) -> Result<Term, TypeError> {
     let reduced = nbe_eval_ctx(ctx.len(), t);
     if reduced == *t {
         Err(original_err)
@@ -87,7 +94,11 @@ fn infer_via_reduction(dts: &[Datatype], ctx: &Ctx, t: &Term, original_err: Type
 
 pub fn require_equal(ctx: &Ctx, expected: &Term, got: &Term) -> Result<(), TypeError> {
     let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
-    crate::debug_log!("require_equal: {} == {}", show_term(&names, expected), show_term(&names, got));
+    crate::debug_log!(
+        "require_equal: {} == {}",
+        show_term(&names, expected),
+        show_term(&names, got)
+    );
     match definitionally_equal_ctx_r(ctx, expected, got) {
         EtaResult::Equal => Ok(()),
         EtaResult::NotEqual => Err(TypeError::TypeMismatch {
@@ -173,11 +184,15 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
             };
             let a_ = nbe_eval_ctx(ctx.len(), a);
             let u_ty = match &a_ {
-                Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I0))),
+                Term::PLam(_, body) => {
+                    nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I0)))
+                }
                 p => p.clone(),
             };
             let v_ty = match &a_ {
-                Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I1))),
+                Term::PLam(_, body) => {
+                    nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I1)))
+                }
                 p => p.clone(),
             };
             check_dt(dts, ctx, u, &u_ty)?;
@@ -201,11 +216,12 @@ fn type_level_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Level, TypeErr
             Ok(i.max(j))
         }
         _ => match nbe_eval_ctx(ctx.len(), t) {
-            Term::TProp => Ok(0),   // Prop : U0
-            Term::TSSet => Ok(1),   // SSet : U1
+            Term::TProp => Ok(0), // Prop : U0
+            Term::TSSet => Ok(1), // SSet : U1
             Term::TUniv(n) => Ok(n),
             Term::TData(d, _) => {
-                let level = dts.iter()
+                let level = dts
+                    .iter()
                     .find(|dt| dt.name == d)
                     .and_then(|dt| dt.universe_level)
                     .unwrap_or(0);
@@ -334,22 +350,30 @@ fn apply_literal_inner(lit: &Literal, t: &Term) -> Term {
             )),
             Term::THComp(a, sys, u0) => nbe_eval(&Term::THComp(
                 Box::new(go(a, n, val)),
-                sys.iter().map(|(phi, t)| (go(phi, n, val), go(t, n, val))).collect(),
+                sys.iter()
+                    .map(|(phi, t)| (go(phi, n, val), go(t, n, val)))
+                    .collect(),
                 Box::new(go(u0, n, val)),
             )),
             Term::TComp(a, sys, u0) => nbe_eval(&Term::TComp(
                 Box::new(go(a, n, val)),
-                sys.iter().map(|(phi, t)| (go(phi, n, val), go(t, n, val))).collect(),
+                sys.iter()
+                    .map(|(phi, t)| (go(phi, n, val), go(t, n, val)))
+                    .collect(),
                 Box::new(go(u0, n, val)),
             )),
             Term::TFill(a, sys, u0) => nbe_eval(&Term::TFill(
                 Box::new(go(a, n, val)),
-                sys.iter().map(|(phi, t)| (go(phi, n, val), go(t, n, val))).collect(),
+                sys.iter()
+                    .map(|(phi, t)| (go(phi, n, val), go(t, n, val)))
+                    .collect(),
                 Box::new(go(u0, n, val)),
             )),
             Term::THFill(a, sys, u0) => nbe_eval(&Term::THFill(
                 Box::new(go(a, n, val)),
-                sys.iter().map(|(phi, t)| (go(phi, n, val), go(t, n, val))).collect(),
+                sys.iter()
+                    .map(|(phi, t)| (go(phi, n, val), go(t, n, val)))
+                    .collect(),
                 Box::new(go(u0, n, val)),
             )),
             Term::TEquiv(a, b) => Term::TEquiv(Box::new(go(a, n, val)), Box::new(go(b, n, val))),
@@ -680,8 +704,8 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         Term::TUniv(n) => Ok(Term::TUniv(n + 1)),
 
         // Subuniverses
-        Term::TProp => Ok(Term::TUniv(0)),   // Prop : U0
-        Term::TSSet => Ok(Term::TUniv(1)),   // SSet : U1
+        Term::TProp => Ok(Term::TUniv(0)), // Prop : U0
+        Term::TSSet => Ok(Term::TUniv(1)), // SSet : U1
 
         // Universe lifting: lift A m : U_{max(n,m)} when A : U_n
         Term::TLift(a, m) => {
@@ -689,22 +713,20 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             Ok(Term::TUniv(n.max(*m)))
         }
         // Universe lowering: lower A : U_n when A : U_{n+1}
-        Term::TLower(a) => {
-            match nbe_eval_ctx(ctx.len(), a) {
-                Term::TLift(inner, _m) => {
-                    let lvl = type_level_dt(dts, ctx, &inner)?;
-                    Ok(Term::TUniv(lvl))
-                }
-                other => {
-                    let ty = type_level_dt(dts, ctx, &other)?;
-                    if ty > 0 {
-                        Ok(Term::TUniv(ty - 1))
-                    } else {
-                        Ok(Term::TUniv(0))
-                    }
+        Term::TLower(a) => match nbe_eval_ctx(ctx.len(), a) {
+            Term::TLift(inner, _m) => {
+                let lvl = type_level_dt(dts, ctx, &inner)?;
+                Ok(Term::TUniv(lvl))
+            }
+            other => {
+                let ty = type_level_dt(dts, ctx, &other)?;
+                if ty > 0 {
+                    Ok(Term::TUniv(ty - 1))
+                } else {
+                    Ok(Term::TUniv(0))
                 }
             }
-        }
+        },
 
         // Application: f a  where  f : Π(x:A).B
         Term::TApp(f, a) => match infer_dt(dts, ctx, f) {
@@ -713,11 +735,13 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                     _ => match nbe_eval_ctx(ctx.len(), &f_ty) {
                         Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                        other => return Err(TypeError::ExpectedPi {
-                            ty: other,
-                            names: err_names(ctx),
-                            pos: err_pos(ctx, f),
-                        }),
+                        other => {
+                            return Err(TypeError::ExpectedPi {
+                                ty: other,
+                                names: err_names(ctx),
+                                pos: err_pos(ctx, f),
+                            });
+                        }
                     },
                 };
                 check_dt(dts, ctx, a, &a_ty)?;
@@ -753,11 +777,15 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             };
             let a_ty_ = nbe_eval_ctx(ctx.len(), a_ty);
             let u_ty = match &a_ty_ {
-                Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I0))),
+                Term::PLam(_, body) => {
+                    nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I0)))
+                }
                 p => p.clone(),
             };
             let v_ty = match &a_ty_ {
-                Term::PLam(_, body) => nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I1))),
+                Term::PLam(_, body) => {
+                    nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I1)))
+                }
                 p => p.clone(),
             };
             check_dt(dts, ctx, u, &u_ty)?;
@@ -1184,21 +1212,26 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                         return Ok(result);
                                     }
                                     return Err(TypeError::Other(format!(
-                                        "field '{}' has no type in record '{}'", field, dname
+                                        "field '{}' has no type in record '{}'",
+                                        field, dname
                                     )));
                                 }
                                 return Err(TypeError::Other(format!(
-                                    "field '{}' not found in record '{}'", field, dname
+                                    "field '{}' not found in record '{}'",
+                                    field, dname
                                 )));
                             }
                         }
                     }
                     Err(TypeError::Other(format!(
-                        "cannot project '{}' from non-record type", field
+                        "cannot project '{}' from non-record type",
+                        field
                     )))
                 }
                 other => Err(TypeError::Other(format!(
-                    "cannot project '{}' from type {}", field, show_term(&names, &other)
+                    "cannot project '{}' from type {}",
+                    field,
+                    show_term(&names, &other)
                 ))),
             },
             Err(e) => infer_via_reduction(dts, ctx, t, e),
@@ -1209,16 +1242,29 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let r_ty = infer_dt(dts, ctx, r)?;
             match nbe_eval(&r_ty) {
                 Term::TData(dname, params) => {
-                    let dt = dts.iter().find(|dt| dt.name == dname)
-                        .ok_or_else(|| TypeError::UnknownDatatype { name: dname.clone(), pos: err_pos(ctx, r) })?;
-                    let field_names = dt.field_names.as_ref()
-                        .ok_or_else(|| TypeError::Other(format!("'{}' is not a record type", dname)))?;
-                    let con_sig = dt.cons.first()
-                        .ok_or_else(|| TypeError::Other(format!("record '{}' has no constructor", dname)))?;
+                    let dt = dts.iter().find(|dt| dt.name == dname).ok_or_else(|| {
+                        TypeError::UnknownDatatype {
+                            name: dname.clone(),
+                            pos: err_pos(ctx, r),
+                        }
+                    })?;
+                    let field_names = dt.field_names.as_ref().ok_or_else(|| {
+                        TypeError::Other(format!("'{}' is not a record type", dname))
+                    })?;
+                    let con_sig = dt.cons.first().ok_or_else(|| {
+                        TypeError::Other(format!("record '{}' has no constructor", dname))
+                    })?;
                     let n = params.len() as i32;
                     for (field_name, new_val) in updates {
-                        let idx = field_names.iter().position(|f| f == field_name)
-                            .ok_or_else(|| TypeError::Other(format!("field '{}' not found in record '{}'", field_name, dname)))?;
+                        let idx = field_names
+                            .iter()
+                            .position(|f| f == field_name)
+                            .ok_or_else(|| {
+                                TypeError::Other(format!(
+                                    "field '{}' not found in record '{}'",
+                                    field_name, dname
+                                ))
+                            })?;
                         let mut field_ty = con_sig.arg_tys[idx].clone();
                         for (pi, param_val) in params.iter().enumerate() {
                             let db_idx = n - 1 - (pi as i32);
@@ -1263,7 +1309,9 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         let tube_ty = infer_dt(dts, ctx, &tube_)?;
                         match nbe_eval(&tube_ty) {
                             Term::TPath(a, u, v) => {
-                                if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_).is_equal() {
+                                if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_)
+                                    .is_equal()
+                                {
                                     return Err(TypeError::TypeMismatch {
                                         expected: Box::new(nbe_eval(&a_ty_)),
                                         got: Box::new(nbe_eval(&a)),
@@ -1276,11 +1324,13 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath {
-                                ty: other,
-                                names: err_names(ctx),
-                                pos: err_pos(ctx, &tube),
-                            }),
+                            other => {
+                                return Err(TypeError::ExpectedPath {
+                                    ty: other,
+                                    names: err_names(ctx),
+                                    pos: err_pos(ctx, &tube),
+                                });
+                            }
                         }
                     }
                 }
@@ -1318,15 +1368,25 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         match nbe_eval(&tube_ty) {
                             Term::TPath(_a, u, v) => {
                                 check_dt(dts, ctx, &nbe_eval(&u), &a_at0)?;
-                                check_dt(dts, ctx, &nbe_eval(&v), &nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I1)))))?;
+                                check_dt(
+                                    dts,
+                                    ctx,
+                                    &nbe_eval(&v),
+                                    &nbe_eval(&Term::PApp(
+                                        a_fam.clone(),
+                                        Box::new(Term::TInterval(I::I1)),
+                                    )),
+                                )?;
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath {
-                                ty: other,
-                                names: err_names(ctx),
-                                pos: err_pos(ctx, &tube),
-                            }),
+                            other => {
+                                return Err(TypeError::ExpectedPath {
+                                    ty: other,
+                                    names: err_names(ctx),
+                                    pos: err_pos(ctx, &tube),
+                                });
+                            }
                         }
                     }
                 }
@@ -1368,24 +1428,30 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         match nbe_eval(&tube_ty) {
                             Term::TPath(_a, u, v) => {
                                 check_dt(dts, ctx, &nbe_eval(&u), &a_at0)?;
-                                check_dt(dts, ctx, &nbe_eval(&v), &nbe_eval(&Term::PApp(a_fam.clone(), Box::new(Term::TInterval(I::I1)))))?;
+                                check_dt(
+                                    dts,
+                                    ctx,
+                                    &nbe_eval(&v),
+                                    &nbe_eval(&Term::PApp(
+                                        a_fam.clone(),
+                                        Box::new(Term::TInterval(I::I1)),
+                                    )),
+                                )?;
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath {
-                                ty: other,
-                                names: err_names(ctx),
-                                pos: err_pos(ctx, &tube),
-                            }),
+                            other => {
+                                return Err(TypeError::ExpectedPath {
+                                    ty: other,
+                                    names: err_names(ctx),
+                                    pos: err_pos(ctx, &tube),
+                                });
+                            }
                         }
                     }
                 }
             }
-            let comp_result = Term::TComp(
-                a_fam.clone(),
-                sys.clone(),
-                base.clone(),
-            );
+            let comp_result = Term::TComp(a_fam.clone(), sys.clone(), base.clone());
             Ok(Term::TPath(
                 Box::new(shift(1, 0, &a_fam_)),
                 Box::new(nbe_eval(base)),
@@ -1413,7 +1479,9 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         let tube_ty = infer_dt(dts, ctx, &tube_)?;
                         match nbe_eval(&tube_ty) {
                             Term::TPath(a, u, v) => {
-                                if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_).is_equal() {
+                                if !definitionally_equal_ctx_r(ctx, &nbe_eval(&a), &a_ty_)
+                                    .is_equal()
+                                {
                                     return Err(TypeError::TypeMismatch {
                                         expected: Box::new(nbe_eval(&a_ty_)),
                                         got: Box::new(nbe_eval(&a)),
@@ -1426,20 +1494,18 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 let phi_ = nbe_eval(&phi);
                                 check_faces(ctx, &phi_, &nbe_eval(&u), &nbe_eval(&base))?;
                             }
-                            other => return Err(TypeError::ExpectedPath {
-                                ty: other,
-                                names: err_names(ctx),
-                                pos: err_pos(ctx, &tube),
-                            }),
+                            other => {
+                                return Err(TypeError::ExpectedPath {
+                                    ty: other,
+                                    names: err_names(ctx),
+                                    pos: err_pos(ctx, &tube),
+                                });
+                            }
                         }
                     }
                 }
             }
-            let hcomp_result = Term::THComp(
-                a_ty.clone(),
-                sys.clone(),
-                base.clone(),
-            );
+            let hcomp_result = Term::THComp(a_ty.clone(), sys.clone(), base.clone());
             Ok(Term::TPath(
                 Box::new(shift(1, 0, &a_ty_)),
                 Box::new(nbe_eval(base)),
@@ -1456,10 +1522,13 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         // the type is U_k. If args are fewer than parameters, we build
         // a Pi type for the remaining parameters.
         Term::TData(d, args) => {
-            let dt = dts
-                .iter()
-                .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
+            let dt =
+                dts.iter()
+                    .find(|dt| &dt.name == d)
+                    .ok_or_else(|| TypeError::UnknownDatatype {
+                        name: d.clone(),
+                        pos: err_pos(ctx, t),
+                    })?;
 
             // If the datatype has a universe-level annotation, use it directly
             // for the fully-applied case.
@@ -1556,11 +1625,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 for (_i, (pname, pty)) in remaining.iter().enumerate().rev() {
                     // Shift the param type to account for the remaining binders
                     let shifted_pty = shift(offset, 0, pty);
-                    result = Term::TPi(
-                        pname.clone(),
-                        Box::new(shifted_pty),
-                        Box::new(result),
-                    );
+                    result = Term::TPi(pname.clone(), Box::new(shifted_pty), Box::new(result));
                     offset -= 1;
                 }
                 // Substitute provided args for the outermost params
@@ -1582,25 +1647,26 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         // indices (TVar(0) for first param). We infer parameter values from
         // argument types when they are free variables in the param range.
         Term::TCon(d, c, args) => {
-            let dt = dts
-                .iter()
-                .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
+            let dt =
+                dts.iter()
+                    .find(|dt| &dt.name == d)
+                    .ok_or_else(|| TypeError::UnknownDatatype {
+                        name: d.clone(),
+                        pos: err_pos(ctx, t),
+                    })?;
             // Check if this is an ordinary constructor.
             if let Some(sig) = dt.find_con(c) {
                 let num_params = dt.params.len();
-                let (param_terms, _checked_args) = infer_and_check_params(
-                    dts, ctx, &sig.arg_tys, args, num_params,
-                )?;
+                let (param_terms, _checked_args) =
+                    infer_and_check_params(dts, ctx, &sig.arg_tys, args, num_params)?;
                 let params = build_params(&param_terms);
                 Ok(Term::TData(d.clone(), params))
             // Path constructor used as a term (without explicit @).
             // Its type is Path (TData(d, params)) face0[args] face1[args].
             } else if let Some(sig) = dt.find_pcon(c) {
                 let num_params = dt.params.len();
-                let (param_terms, checked_args) = infer_and_check_params(
-                    dts, ctx, &sig.arg_tys, args, num_params,
-                )?;
+                let (param_terms, checked_args) =
+                    infer_and_check_params(dts, ctx, &sig.arg_tys, args, num_params)?;
                 let params = build_params(&param_terms);
                 let face0 = checked_args
                     .iter()
@@ -1616,19 +1682,30 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     Box::new(nbe_eval(&face1)),
                 ))
             } else {
-                Err(TypeError::UnknownConstructor { datatype: d.clone(), con: c.clone(), pos: err_pos(ctx, t) })
+                Err(TypeError::UnknownConstructor {
+                    datatype: d.clone(),
+                    con: c.clone(),
+                    pos: err_pos(ctx, t),
+                })
             }
         }
 
         // TPCon(d, pc, args, r) : Path (TData(d, params)) face0[args] face1[args]
         Term::TPCon(d, pc, args, r) => {
-            let dt = dts
-                .iter()
-                .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
+            let dt =
+                dts.iter()
+                    .find(|dt| &dt.name == d)
+                    .ok_or_else(|| TypeError::UnknownDatatype {
+                        name: d.clone(),
+                        pos: err_pos(ctx, t),
+                    })?;
             let sig = dt
                 .find_pcon(pc)
-                .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: pc.clone(), pos: err_pos(ctx, t) })?;
+                .ok_or_else(|| TypeError::UnknownConstructor {
+                    datatype: d.clone(),
+                    con: pc.clone(),
+                    pos: err_pos(ctx, t),
+                })?;
             if args.len() != sig.arity() {
                 return Err(TypeError::WrongNumberOfArgs {
                     con: pc.clone(),
@@ -1638,9 +1715,8 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 });
             }
             let num_params = dt.params.len();
-            let (param_terms, _checked_args) = infer_and_check_params(
-                dts, ctx, &sig.arg_tys, args, num_params,
-            )?;
+            let (param_terms, _checked_args) =
+                infer_and_check_params(dts, ctx, &sig.arg_tys, args, num_params)?;
             // Check interval argument.
             check_interval(ctx, r)?;
             let params = build_params(&param_terms);
@@ -1651,13 +1727,20 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         //   PathP (<i> PathP (<j> TData(d, params)) (face_i0 args j) (face_i1 args j))
         //               (face_j0 args i) (face_j1 args i)
         Term::TSqCon(d, sc, args, r, s) => {
-            let dt = dts
-                .iter()
-                .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
+            let dt =
+                dts.iter()
+                    .find(|dt| &dt.name == d)
+                    .ok_or_else(|| TypeError::UnknownDatatype {
+                        name: d.clone(),
+                        pos: err_pos(ctx, t),
+                    })?;
             let sig = dt
                 .find_sqcon(sc)
-                .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: sc.clone(), pos: err_pos(ctx, t) })?;
+                .ok_or_else(|| TypeError::UnknownConstructor {
+                    datatype: d.clone(),
+                    con: sc.clone(),
+                    pos: err_pos(ctx, t),
+                })?;
             if args.len() != sig.arity() {
                 return Err(TypeError::WrongNumberOfArgs {
                     con: sc.clone(),
@@ -1667,9 +1750,8 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 });
             }
             let num_params = dt.params.len();
-            let (param_terms, checked_args) = infer_and_check_params(
-                dts, ctx, &sig.arg_tys, args, num_params,
-            )?;
+            let (param_terms, checked_args) =
+                infer_and_check_params(dts, ctx, &sig.arg_tys, args, num_params)?;
             check_interval(ctx, r)?;
             check_interval(ctx, s)?;
             let params = build_params(&param_terms);
@@ -1698,10 +1780,12 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 match nbe_eval(t) {
                     Term::TInterval(i) => {
                         let dnf = crate::cubical::interval::eval_interval(&i);
-                        dnf == crate::cubical::interval::dnf_bot() || dnf == crate::cubical::interval::dnf_top()
+                        dnf == crate::cubical::interval::dnf_bot()
+                            || dnf == crate::cubical::interval::dnf_top()
                     }
                     Term::TCube(d) => {
-                        d == crate::cubical::interval::dnf_bot() || d == crate::cubical::interval::dnf_top()
+                        d == crate::cubical::interval::dnf_bot()
+                            || d == crate::cubical::interval::dnf_top()
                     }
                     _ => false,
                 }
@@ -1742,13 +1826,20 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
         // where each consecutive pair (face_{2k}, face_{2k+1}) is the boundary
         // at interval variable i_{n-k} = 0 / i_{n-k} = 1.
         Term::TCellCon(d, cc, args, ivars) => {
-            let dt = dts
-                .iter()
-                .find(|dt| &dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
+            let dt =
+                dts.iter()
+                    .find(|dt| &dt.name == d)
+                    .ok_or_else(|| TypeError::UnknownDatatype {
+                        name: d.clone(),
+                        pos: err_pos(ctx, t),
+                    })?;
             let sig = dt
                 .find_cellcon(cc)
-                .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: cc.clone(), pos: err_pos(ctx, t) })?;
+                .ok_or_else(|| TypeError::UnknownConstructor {
+                    datatype: d.clone(),
+                    con: cc.clone(),
+                    pos: err_pos(ctx, t),
+                })?;
             if args.len() != sig.arity() {
                 return Err(TypeError::WrongNumberOfArgs {
                     con: cc.clone(),
@@ -1767,9 +1858,8 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 });
             }
             let num_params = dt.params.len();
-            let (param_terms, checked_args) = infer_and_check_params(
-                dts, ctx, &sig.arg_tys, args, num_params,
-            )?;
+            let (param_terms, checked_args) =
+                infer_and_check_params(dts, ctx, &sig.arg_tys, args, num_params)?;
             // Check all interval arguments.
             for iv in ivars {
                 check_interval(ctx, iv)?;
@@ -1798,10 +1888,12 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 match nbe_eval(t) {
                     Term::TInterval(i) => {
                         let dnf = crate::cubical::interval::eval_interval(&i);
-                        dnf == crate::cubical::interval::dnf_bot() || dnf == crate::cubical::interval::dnf_top()
+                        dnf == crate::cubical::interval::dnf_bot()
+                            || dnf == crate::cubical::interval::dnf_top()
                     }
                     Term::TCube(d) => {
-                        d == crate::cubical::interval::dnf_bot() || d == crate::cubical::interval::dnf_top()
+                        d == crate::cubical::interval::dnf_bot()
+                            || d == crate::cubical::interval::dnf_top()
                     }
                     _ => false,
                 }
@@ -1815,9 +1907,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             // Type: PathP (<i_1> PathP (<i_2> ... PathP (<i_n> A) f_0 f_1) ... f_{2n-4} f_{2n-3}) f_{2n-2} f_{2n-1}
             //
             // Interval variable names: _i1, _i2, ..., _in (innermost to outermost)
-            let ivar_names: Vec<String> = (0..dim)
-                .map(|k| format!("_i{}", k + 1))
-                .collect();
+            let ivar_names: Vec<String> = (0..dim).map(|k| format!("_i{}", k + 1)).collect();
 
             // Start with the innermost PathP using the last interval variable.
             let mut result_type = Term::TPath(
@@ -1870,16 +1960,21 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let scrut_ty = infer_dt(dts, ctx, scrut)?;
             let (d, scrut_params) = match nbe_eval(&scrut_ty) {
                 Term::TData(d, params) => (d, params),
-                other => return Err(TypeError::ExpectedData {
-                    ty: other,
-                    names: err_names(ctx),
-                    pos: err_pos(ctx, scrut),
-                }),
+                other => {
+                    return Err(TypeError::ExpectedData {
+                        ty: other,
+                        names: err_names(ctx),
+                        pos: err_pos(ctx, scrut),
+                    });
+                }
             };
-            let dt = dts
-                .iter()
-                .find(|dt| dt.name == d)
-                .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, scrut) })?;
+            let dt =
+                dts.iter()
+                    .find(|dt| dt.name == d)
+                    .ok_or_else(|| TypeError::UnknownDatatype {
+                        name: d.clone(),
+                        pos: err_pos(ctx, scrut),
+                    })?;
 
             // Desugar record patterns: convert `{ field = binder }` to constructor pattern.
             let cases_owned: Vec<ElimCase> = {
@@ -1920,8 +2015,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             let motive_dom = Term::TData(d.clone(), scrut_params.clone());
             match motive.as_ref() {
                 Term::TAbs(x, body) => {
-                    let motive_ctx =
-                        extend_ctx(x.clone(), nbe_eval(&motive_dom), ctx);
+                    let motive_ctx = extend_ctx(x.clone(), nbe_eval(&motive_dom), ctx);
                     type_level_dt(dts, &motive_ctx, body)?;
                 }
                 _ => {
@@ -1932,11 +2026,13 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             let cod_ctx = extend_ctx(x, nbe_eval(&dom), ctx);
                             type_level_dt(dts, &cod_ctx, &cod)?;
                         }
-                        other => return Err(TypeError::ExpectedPi {
-                            ty: other,
-                            names: err_names(ctx),
-                            pos: err_pos(ctx, motive),
-                        }),
+                        other => {
+                            return Err(TypeError::ExpectedPi {
+                                ty: other,
+                                names: err_names(ctx),
+                                pos: err_pos(ctx, motive),
+                            });
+                        }
                     }
                 }
             }
@@ -1983,7 +2079,10 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let case = cases
                     .iter()
                     .find(|c| c.con == con_sig.name)
-                    .ok_or_else(|| TypeError::MissingCase { con: con_sig.name.clone(), pos: err_pos(ctx, scrut) })?;
+                    .ok_or_else(|| TypeError::MissingCase {
+                        con: con_sig.name.clone(),
+                        pos: err_pos(ctx, scrut),
+                    })?;
 
                 // Substitute params into arg_tys for this constructor.
                 let subst_arg_tys = subst_params(&con_sig.arg_tys, &scrut_params);
@@ -2044,7 +2143,10 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let case = cases
                     .iter()
                     .find(|c| c.con == pcon_sig.name)
-                    .ok_or_else(|| TypeError::MissingCase { con: pcon_sig.name.clone(), pos: err_pos(ctx, scrut) })?;
+                    .ok_or_else(|| TypeError::MissingCase {
+                        con: pcon_sig.name.clone(),
+                        pos: err_pos(ctx, scrut),
+                    })?;
 
                 let subst_arg_tys = subst_params(&pcon_sig.arg_tys, &scrut_params);
 
@@ -2087,9 +2189,8 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     .map(|k| Term::TVar((arity - 1 - k) as i32))
                     .collect();
                 let i_var = Term::TVar(0);
-                let ord_var: Vec<Term> = (0..arity)
-                    .map(|k| Term::TVar((arity - k) as i32))
-                    .collect();
+                let ord_var: Vec<Term> =
+                    (0..arity).map(|k| Term::TVar((arity - k) as i32)).collect();
 
                 let pcon_term = Term::TPCon(
                     d.clone(),
@@ -2127,27 +2228,19 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         nbe_eval(&shift(-1, 0, &reduced))
                     }
                     _ => {
-                        let papp = Term::PApp(
-                            case.body.clone(),
-                            Box::new(Term::TInterval(I::I0)),
-                        );
+                        let papp = Term::PApp(case.body.clone(), Box::new(Term::TInterval(I::I0)));
                         let reduced = reduce_pcon_endpoints_dt(dts, &papp);
                         nbe_eval(&reduced)
                     }
                 };
                 let body_at1 = match case.body.as_ref() {
                     Term::PLam(_, inner) => {
-                        let reduced = reduce_pcon_endpoints_dt(
-                            dts,
-                            &apply_literal(&Literal::Pos(0), inner),
-                        );
+                        let reduced =
+                            reduce_pcon_endpoints_dt(dts, &apply_literal(&Literal::Pos(0), inner));
                         nbe_eval(&shift(-1, 0, &reduced))
                     }
                     _ => {
-                        let papp = Term::PApp(
-                            case.body.clone(),
-                            Box::new(Term::TInterval(I::I1)),
-                        );
+                        let papp = Term::PApp(case.body.clone(), Box::new(Term::TInterval(I::I1)));
                         let reduced = reduce_pcon_endpoints_dt(dts, &papp);
                         nbe_eval(&reduced)
                     }
@@ -2161,7 +2254,10 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let case = cases
                     .iter()
                     .find(|c| c.con == sqcon_sig.name)
-                    .ok_or_else(|| TypeError::MissingCase { con: sqcon_sig.name.clone(), pos: err_pos(ctx, scrut) })?;
+                    .ok_or_else(|| TypeError::MissingCase {
+                        con: sqcon_sig.name.clone(),
+                        pos: err_pos(ctx, scrut),
+                    })?;
 
                 let subst_arg_tys = subst_params(&sqcon_sig.arg_tys, &scrut_params);
 
@@ -2227,14 +2323,34 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let face_j0_subst = subst_params_face(&sqcon_sig.face_j0, &scrut_params, arity_sq);
                 let face_j1_subst = subst_params_face(&sqcon_sig.face_j1, &scrut_params, arity_sq);
 
-                let face_i0_case =
-                    eval_elim_face(motive, cases, &face_i0_subst, &ord_var_no_rs, (arity_sq + 2) as i32);
-                let face_i1_case =
-                    eval_elim_face(motive, cases, &face_i1_subst, &ord_var_no_rs, (arity_sq + 2) as i32);
-                let face_j0_case =
-                    eval_elim_face(motive, cases, &face_j0_subst, &ord_var_no_rs, (arity_sq + 2) as i32);
-                let face_j1_case =
-                    eval_elim_face(motive, cases, &face_j1_subst, &ord_var_no_rs, (arity_sq + 2) as i32);
+                let face_i0_case = eval_elim_face(
+                    motive,
+                    cases,
+                    &face_i0_subst,
+                    &ord_var_no_rs,
+                    (arity_sq + 2) as i32,
+                );
+                let face_i1_case = eval_elim_face(
+                    motive,
+                    cases,
+                    &face_i1_subst,
+                    &ord_var_no_rs,
+                    (arity_sq + 2) as i32,
+                );
+                let face_j0_case = eval_elim_face(
+                    motive,
+                    cases,
+                    &face_j0_subst,
+                    &ord_var_no_rs,
+                    (arity_sq + 2) as i32,
+                );
+                let face_j1_case = eval_elim_face(
+                    motive,
+                    cases,
+                    &face_j1_subst,
+                    &ord_var_no_rs,
+                    (arity_sq + 2) as i32,
+                );
 
                 let inner_path = Term::TPath(
                     Box::new(Term::PLam(s_name.clone(), Box::new(motive_at_sqcon))),
@@ -2256,36 +2372,53 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 // interval variable.  Inside inner, IVar(0)=s (innermost)
                 // and IVar(1)=r (outermost).
                 if let Term::PLam(_, inner_box) = case.body.as_ref() {
-                if let Term::PLam(_, inner) = inner_box.as_ref() {
-                    // body @ r0 @ s0
-                    let body_r0_s0 = {
-                        let t = apply_literal(&Literal::NegVar(1), inner);
-                        let t = apply_literal(&Literal::NegVar(0), &t);
-                        nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
-                    };
-                    // body @ r0 @ s1
-                    let body_r0_s1 = {
-                        let t = apply_literal(&Literal::NegVar(1), inner);
-                        let t = apply_literal(&Literal::Pos(0), &t);
-                        nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
-                    };
-                    // body @ r1 @ s0
-                    let body_r1_s0 = {
-                        let t = apply_literal(&Literal::Pos(1), inner);
-                        let t = apply_literal(&Literal::NegVar(0), &t);
-                        nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
-                    };
-                    // body @ r1 @ s1
-                    let body_r1_s1 = {
-                        let t = apply_literal(&Literal::Pos(1), inner);
-                        let t = apply_literal(&Literal::Pos(0), &t);
-                        nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
-                    };
-                    require_equal_endpt(&case_ctx_sq, &shift(2, 0, &face_i0_case), &body_r0_s0)?;
-                    require_equal_endpt(&case_ctx_sq, &shift(2, 0, &face_i1_case), &body_r0_s1)?;
-                    require_equal_endpt(&case_ctx_sq, &shift(2, 0, &face_i0_case), &body_r1_s0)?;
-                    require_equal_endpt(&case_ctx_sq, &shift(2, 0, &face_i1_case), &body_r1_s1)?;
-                } }
+                    if let Term::PLam(_, inner) = inner_box.as_ref() {
+                        // body @ r0 @ s0
+                        let body_r0_s0 = {
+                            let t = apply_literal(&Literal::NegVar(1), inner);
+                            let t = apply_literal(&Literal::NegVar(0), &t);
+                            nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
+                        };
+                        // body @ r0 @ s1
+                        let body_r0_s1 = {
+                            let t = apply_literal(&Literal::NegVar(1), inner);
+                            let t = apply_literal(&Literal::Pos(0), &t);
+                            nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
+                        };
+                        // body @ r1 @ s0
+                        let body_r1_s0 = {
+                            let t = apply_literal(&Literal::Pos(1), inner);
+                            let t = apply_literal(&Literal::NegVar(0), &t);
+                            nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
+                        };
+                        // body @ r1 @ s1
+                        let body_r1_s1 = {
+                            let t = apply_literal(&Literal::Pos(1), inner);
+                            let t = apply_literal(&Literal::Pos(0), &t);
+                            nbe_eval(&shift(-2, 0, &reduce_pcon_endpoints_dt(dts, &t)))
+                        };
+                        require_equal_endpt(
+                            &case_ctx_sq,
+                            &shift(2, 0, &face_i0_case),
+                            &body_r0_s0,
+                        )?;
+                        require_equal_endpt(
+                            &case_ctx_sq,
+                            &shift(2, 0, &face_i1_case),
+                            &body_r0_s1,
+                        )?;
+                        require_equal_endpt(
+                            &case_ctx_sq,
+                            &shift(2, 0, &face_i0_case),
+                            &body_r1_s0,
+                        )?;
+                        require_equal_endpt(
+                            &case_ctx_sq,
+                            &shift(2, 0, &face_i1_case),
+                            &body_r1_s1,
+                        )?;
+                    }
+                }
             }
 
             // Check all n-dimensional cell constructor cases.
@@ -2293,7 +2426,10 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 let case = cases
                     .iter()
                     .find(|c| c.con == cellcon_sig.name)
-                    .ok_or_else(|| TypeError::MissingCase { con: cellcon_sig.name.clone(), pos: err_pos(ctx, scrut) })?;
+                    .ok_or_else(|| TypeError::MissingCase {
+                        con: cellcon_sig.name.clone(),
+                        pos: err_pos(ctx, scrut),
+                    })?;
 
                 let subst_arg_tys = subst_params(&cellcon_sig.arg_tys, &scrut_params);
                 let dim = cellcon_sig.dimension();
@@ -2326,7 +2462,8 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
                     let depth = k as i32;
                     cellcon_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
-                    case_ctx_cell = extend_ctx(binder_name.clone(), nbe_eval(&arg_ty), &case_ctx_cell);
+                    case_ctx_cell =
+                        extend_ctx(binder_name.clone(), nbe_eval(&arg_ty), &case_ctx_cell);
                 }
 
                 let arity_cell = subst_arg_tys.len();
@@ -2340,9 +2477,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     .map(|k| Term::TVar((arity_cell - 1 - k) as i32))
                     .collect();
                 // Interval variables: TVar(0) is the innermost, TVar(dim-1) is the outermost.
-                let ivar_vars: Vec<Term> = (0..dim)
-                    .map(|k| Term::TVar(k as i32))
-                    .collect();
+                let ivar_vars: Vec<Term> = (0..dim).map(|k| Term::TVar(k as i32)).collect();
                 let ord_var_cell: Vec<Term> = (0..arity_cell)
                     .map(|k| Term::TVar((arity_cell + dim - k) as i32))
                     .collect();
@@ -2367,13 +2502,24 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 // then build nested PathPs from innermost to outermost.
 
                 // Substitute scrutinee params into each face.
-                let substituted_faces: Vec<Term> = cellcon_sig.faces.iter()
+                let substituted_faces: Vec<Term> = cellcon_sig
+                    .faces
+                    .iter()
                     .map(|f| subst_params_face(f, &scrut_params, arity_cell))
                     .collect();
 
                 // For each face, compute the expected case body value at that face.
-                let face_cases: Vec<Term> = substituted_faces.iter()
-                    .map(|f| eval_elim_face(motive, cases, f, &ord_var_no_ivars, (arity_cell + dim) as i32))
+                let face_cases: Vec<Term> = substituted_faces
+                    .iter()
+                    .map(|f| {
+                        eval_elim_face(
+                            motive,
+                            cases,
+                            f,
+                            &ord_var_no_ivars,
+                            (arity_cell + dim) as i32,
+                        )
+                    })
                     .collect();
 
                 // Build nested PathP from innermost to outermost.
@@ -2383,7 +2529,10 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
 
                 // Start with the innermost PathP.
                 let mut expected_body_ty = Term::TPath(
-                    Box::new(Term::PLam(ivar_names[0].to_string(), Box::new(motive_at_cellcon))),
+                    Box::new(Term::PLam(
+                        ivar_names[0].to_string(),
+                        Box::new(motive_at_cellcon),
+                    )),
                     Box::new(shift(1, 0, &face_cases[0])),
                     Box::new(shift(1, 0, &face_cases[1])),
                 );
@@ -2436,7 +2585,11 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                         }
                         // Current var (keep_count) → I0
                         t_i0 = apply_literal(&Literal::NegVar(0), &t_i0);
-                        let at_i0 = nbe_eval(&shift(-(strip_count as i32), 0, &reduce_pcon_endpoints_dt(dts, &t_i0)));
+                        let at_i0 = nbe_eval(&shift(
+                            -(strip_count as i32),
+                            0,
+                            &reduce_pcon_endpoints_dt(dts, &t_i0),
+                        ));
 
                         // at_i1: outer k free vars = I0, current var = I1
                         let mut t_i1 = inner_at_k.clone();
@@ -2444,20 +2597,16 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                             t_i1 = apply_literal(&Literal::NegVar((v - keep_count) as i32), &t_i1);
                         }
                         t_i1 = apply_literal(&Literal::Pos(0), &t_i1);
-                        let at_i1 = nbe_eval(&shift(-(strip_count as i32), 0, &reduce_pcon_endpoints_dt(dts, &t_i1)));
+                        let at_i1 = nbe_eval(&shift(
+                            -(strip_count as i32),
+                            0,
+                            &reduce_pcon_endpoints_dt(dts, &t_i1),
+                        ));
 
                         let expected_i0 = shift(strip_count as i32, 0, &face_cases[face_idx]);
                         let expected_i1 = shift(strip_count as i32, 0, &face_cases[face_idx + 1]);
-                        require_equal_endpt(
-                            &case_ctx_cell,
-                            &expected_i0,
-                            &at_i0,
-                        )?;
-                        require_equal_endpt(
-                            &case_ctx_cell,
-                            &expected_i1,
-                            &at_i1,
-                        )?;
+                        require_equal_endpt(&case_ctx_cell, &expected_i0, &at_i0)?;
+                        require_equal_endpt(&case_ctx_cell, &expected_i1, &at_i1)?;
                     }
                 }
             }
@@ -2467,14 +2616,14 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                 // Index of the definition being checked in the current
                 // context (without the eliminator's own case binders). Used
                 // to detect recursive calls through the definition's name.
-                let def_idx = crate::cubical::typechecker::termination::current_def().and_then(|dn| {
-                    ctx.iter()
-                        .position(|(n, _)| n == &dn)
-                        .map(|p| p as i32)
-                });
+                let def_idx = crate::cubical::typechecker::termination::current_def()
+                    .and_then(|dn| ctx.iter().position(|(n, _)| n == &dn).map(|p| p as i32));
                 match crate::cubical::typechecker::termination::check_guard(&d, cases, def_idx) {
                     crate::cubical::typechecker::termination::GuardStatus::Ok => {}
-                    crate::cubical::typechecker::termination::GuardStatus::Violation { case, msg } => {
+                    crate::cubical::typechecker::termination::GuardStatus::Violation {
+                        case,
+                        msg,
+                    } => {
                         return Err(TypeError::TerminationViolation {
                             datatype: d.clone(),
                             case,
@@ -2486,10 +2635,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             }
 
             // Return type: motive applied to the scrutinee.
-            Ok(nbe_eval(&Term::TApp(
-                motive.clone(),
-                scrut.clone(),
-            )))
+            Ok(nbe_eval(&Term::TApp(motive.clone(), scrut.clone())))
         }
 
         // -- Coinduction ---------------------------------------------------------
@@ -2509,9 +2655,10 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
             // delay_ty should be Delay B for some B
             match nbe_eval(&delay_ty) {
                 Term::TDelay(b) => Ok(*b),
-                other => Err(TypeError::Other(
-                    format!("Force expects a Delay type, but got: {}", other),
-                )),
+                other => Err(TypeError::Other(format!(
+                    "Force expects a Delay type, but got: {}",
+                    other
+                ))),
             }
         }
     }
@@ -2531,35 +2678,44 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
             let (is_i0, is_i1) = match &r_nf {
                 Term::TInterval(i) => {
                     let dnf = crate::cubical::interval::eval_interval(i);
-                    (dnf == crate::cubical::interval::dnf_bot(), dnf == crate::cubical::interval::dnf_top())
+                    (
+                        dnf == crate::cubical::interval::dnf_bot(),
+                        dnf == crate::cubical::interval::dnf_top(),
+                    )
                 }
-                Term::TCube(d) => {
-                    (d == &crate::cubical::interval::dnf_bot(), d == &crate::cubical::interval::dnf_top())
-                }
+                Term::TCube(d) => (
+                    d == &crate::cubical::interval::dnf_bot(),
+                    d == &crate::cubical::interval::dnf_top(),
+                ),
                 _ => (false, false),
             };
             if is_i0 || is_i1 {
                 // Look up the face value from the PConSig.
                 if let Some(dt) = dts.iter().find(|dt| &dt.name == d)
-                    && let Some(sig) = dt.find_pcon(pc) {
-                        // face0/face1 are in a scope of sig.arity() ordinary args.
-                        // Substitute the checked args into the face term.
-                        let reduced_args: Vec<Term> =
-                            args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
-                        let face = if is_i0 { &sig.face0 } else { &sig.face1 };
-                        // Face parsing uses insert(0,...), so TVar(k) = arg_{num_args-1-k}.
-                        // Substitute from highest face-var index to lowest.
-                        let arity = reduced_args.len();
-                        let mut face_inst = face.clone();
-                        for k in (0..arity).rev() {
-                            face_inst = subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
-                        }
-                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face_inst));
+                    && let Some(sig) = dt.find_pcon(pc)
+                {
+                    // face0/face1 are in a scope of sig.arity() ordinary args.
+                    // Substitute the checked args into the face term.
+                    let reduced_args: Vec<Term> = args
+                        .iter()
+                        .map(|a| reduce_pcon_endpoints_dt(dts, a))
+                        .collect();
+                    let face = if is_i0 { &sig.face0 } else { &sig.face1 };
+                    // Face parsing uses insert(0,...), so TVar(k) = arg_{num_args-1-k}.
+                    // Substitute from highest face-var index to lowest.
+                    let arity = reduced_args.len();
+                    let mut face_inst = face.clone();
+                    for k in (0..arity).rev() {
+                        face_inst = subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
                     }
+                    return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face_inst));
+                }
             }
             // Not at an endpoint (or datatype not found): reduce sub-terms.
-            let reduced_args: Vec<Term> =
-                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
+            let reduced_args: Vec<Term> = args
+                .iter()
+                .map(|a| reduce_pcon_endpoints_dt(dts, a))
+                .collect();
             nbe_eval(&Term::TPCon(
                 d.clone(),
                 pc.clone(),
@@ -2574,56 +2730,73 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
             let (r_is_i0, r_is_i1) = match &r_nf {
                 Term::TInterval(i) => {
                     let dnf = crate::cubical::interval::eval_interval(i);
-                    (dnf == crate::cubical::interval::dnf_bot(), dnf == crate::cubical::interval::dnf_top())
+                    (
+                        dnf == crate::cubical::interval::dnf_bot(),
+                        dnf == crate::cubical::interval::dnf_top(),
+                    )
                 }
                 _ => (false, false),
             };
             let (s_is_i0, s_is_i1) = match &s_nf {
                 Term::TInterval(i) => {
                     let dnf = crate::cubical::interval::eval_interval(i);
-                    (dnf == crate::cubical::interval::dnf_bot(), dnf == crate::cubical::interval::dnf_top())
+                    (
+                        dnf == crate::cubical::interval::dnf_bot(),
+                        dnf == crate::cubical::interval::dnf_top(),
+                    )
                 }
                 _ => (false, false),
             };
             if let Some(dt) = dts.iter().find(|dt| &dt.name == d)
-                && let Some(sig) = dt.find_sqcon(sc) {
-                    let arity = sig.arity();
-                    let reduced_args: Vec<Term> =
-                        args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
-                    // Substitute args into face terms.
-                    let subst_face = |face: &Term| -> Term {
-                        let mut t = face.clone();
-                        for k in (0..arity).rev() {
-                            t = subst(k as i32, &reduced_args[arity - 1 - k], &t);
-                        }
-                        t
-                    };
-                    if r_is_i0 {
-                        // sq @ 0 @ s = face_j0 @ s (outer path at i=0 gives face_j0)
-                        let face = subst_face(&sig.face_j0);
-                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&Term::PApp(Box::new(face), s.clone())));
+                && let Some(sig) = dt.find_sqcon(sc)
+            {
+                let arity = sig.arity();
+                let reduced_args: Vec<Term> = args
+                    .iter()
+                    .map(|a| reduce_pcon_endpoints_dt(dts, a))
+                    .collect();
+                // Substitute args into face terms.
+                let subst_face = |face: &Term| -> Term {
+                    let mut t = face.clone();
+                    for k in (0..arity).rev() {
+                        t = subst(k as i32, &reduced_args[arity - 1 - k], &t);
                     }
-                    if r_is_i1 {
-                        // sq @ 1 @ s = face_j1 @ s (outer path at i=1 gives face_j1)
-                        let face = subst_face(&sig.face_j1);
-                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&Term::PApp(Box::new(face), s.clone())));
-                    }
-                    if s_is_i0 {
-                        // sq @ r @ 0 = face_i0 (inner path at j=0 gives face_i0, a point)
-                        let face = subst_face(&sig.face_i0);
-                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face));
-                    }
-                    if s_is_i1 {
-                        // sq @ r @ 1 = face_i1 (inner path at j=1 gives face_i1, a point)
-                        let face = subst_face(&sig.face_i1);
-                        return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face));
-                    }
+                    t
+                };
+                if r_is_i0 {
+                    // sq @ 0 @ s = face_j0 @ s (outer path at i=0 gives face_j0)
+                    let face = subst_face(&sig.face_j0);
+                    return reduce_pcon_endpoints_dt(
+                        dts,
+                        &nbe_eval(&Term::PApp(Box::new(face), s.clone())),
+                    );
                 }
+                if r_is_i1 {
+                    // sq @ 1 @ s = face_j1 @ s (outer path at i=1 gives face_j1)
+                    let face = subst_face(&sig.face_j1);
+                    return reduce_pcon_endpoints_dt(
+                        dts,
+                        &nbe_eval(&Term::PApp(Box::new(face), s.clone())),
+                    );
+                }
+                if s_is_i0 {
+                    // sq @ r @ 0 = face_i0 (inner path at j=0 gives face_i0, a point)
+                    let face = subst_face(&sig.face_i0);
+                    return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face));
+                }
+                if s_is_i1 {
+                    // sq @ r @ 1 = face_i1 (inner path at j=1 gives face_i1, a point)
+                    let face = subst_face(&sig.face_i1);
+                    return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face));
+                }
+            }
             // Not at an endpoint: reduce sub-terms.
             nbe_eval(&Term::TSqCon(
                 d.clone(),
                 sc.clone(),
-                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect(),
+                args.iter()
+                    .map(|a| reduce_pcon_endpoints_dt(dts, a))
+                    .collect(),
                 Box::new(r_nf),
                 Box::new(s_nf),
             ))
@@ -2632,55 +2805,67 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
             let dim = ivars.len();
             let ivar_nfs: Vec<Term> = ivars.iter().map(|v| nbe_eval(v)).collect();
             // Check which interval args are at endpoints.
-            let ivar_is_endpoint: Vec<(bool, bool)> = ivar_nfs.iter().map(|v| match v {
-                Term::TInterval(i) => {
-                    let dnf = crate::cubical::interval::eval_interval(i);
-                    (dnf == crate::cubical::interval::dnf_bot(), dnf == crate::cubical::interval::dnf_top())
-                }
-                Term::TCube(d) => {
-                    (d == &crate::cubical::interval::dnf_bot(), d == &crate::cubical::interval::dnf_top())
-                }
-                _ => (false, false),
-            }).collect();
-            if let Some(dt) = dts.iter().find(|dt| &dt.name == d)
-                && let Some(sig) = dt.find_cellcon(cc) {
-                    let arity = sig.arity();
-                    let reduced_args: Vec<Term> =
-                        args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
-                    let subst_face = |face: &Term| -> Term {
-                        let mut t = face.clone();
-                        for k in (0..arity).rev() {
-                            t = subst(k as i32, &reduced_args[arity - 1 - k], &t);
-                        }
-                        t
-                    };
-                    // Try outermost interval arg first (highest dimension).
-                    // cell @ r1 @ r2 @ ... @ rn: if r1 is endpoint, reduce via outer face pair.
-                    if ivar_is_endpoint[0].0 || ivar_is_endpoint[0].1 {
-                        let face = if ivar_is_endpoint[0].0 {
-                            &sig.faces[2 * dim - 2]  // face at outermost=0
-                        } else {
-                            &sig.faces[2 * dim - 1]  // face at outermost=1
-                        };
-                        let face_inst = subst_face(face);
-                        // The face is a (dim-1)-dimensional term; apply to remaining ivars.
-                        // ivar_nfs[0] is the consumed outermost endpoint; skip it.
-                        // Apply remaining in outermost-first order (matching PApp apply order).
-                        let mut result = nbe_eval(&face_inst);
-                        for iv in ivar_nfs[1..].iter() {
-                            result = reduce_pcon_endpoints_dt(dts, &Term::PApp(
-                                Box::new(result),
-                                Box::new(iv.clone()),
-                            ));
-                        }
-                        return reduce_pcon_endpoints_dt(dts, &result);
+            let ivar_is_endpoint: Vec<(bool, bool)> = ivar_nfs
+                .iter()
+                .map(|v| match v {
+                    Term::TInterval(i) => {
+                        let dnf = crate::cubical::interval::eval_interval(i);
+                        (
+                            dnf == crate::cubical::interval::dnf_bot(),
+                            dnf == crate::cubical::interval::dnf_top(),
+                        )
                     }
+                    Term::TCube(d) => (
+                        d == &crate::cubical::interval::dnf_bot(),
+                        d == &crate::cubical::interval::dnf_top(),
+                    ),
+                    _ => (false, false),
+                })
+                .collect();
+            if let Some(dt) = dts.iter().find(|dt| &dt.name == d)
+                && let Some(sig) = dt.find_cellcon(cc)
+            {
+                let arity = sig.arity();
+                let reduced_args: Vec<Term> = args
+                    .iter()
+                    .map(|a| reduce_pcon_endpoints_dt(dts, a))
+                    .collect();
+                let subst_face = |face: &Term| -> Term {
+                    let mut t = face.clone();
+                    for k in (0..arity).rev() {
+                        t = subst(k as i32, &reduced_args[arity - 1 - k], &t);
+                    }
+                    t
+                };
+                // Try outermost interval arg first (highest dimension).
+                // cell @ r1 @ r2 @ ... @ rn: if r1 is endpoint, reduce via outer face pair.
+                if ivar_is_endpoint[0].0 || ivar_is_endpoint[0].1 {
+                    let face = if ivar_is_endpoint[0].0 {
+                        &sig.faces[2 * dim - 2] // face at outermost=0
+                    } else {
+                        &sig.faces[2 * dim - 1] // face at outermost=1
+                    };
+                    let face_inst = subst_face(face);
+                    // The face is a (dim-1)-dimensional term; apply to remaining ivars.
+                    // ivar_nfs[0] is the consumed outermost endpoint; skip it.
+                    // Apply remaining in outermost-first order (matching PApp apply order).
+                    let mut result = nbe_eval(&face_inst);
+                    for iv in ivar_nfs[1..].iter() {
+                        result = reduce_pcon_endpoints_dt(
+                            dts,
+                            &Term::PApp(Box::new(result), Box::new(iv.clone())),
+                        );
+                    }
+                    return reduce_pcon_endpoints_dt(dts, &result);
                 }
+            }
             // Not at an endpoint: reduce sub-terms.
             nbe_eval(&Term::TCellCon(
                 d.clone(),
                 cc.clone(),
-                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect(),
+                args.iter()
+                    .map(|a| reduce_pcon_endpoints_dt(dts, a))
+                    .collect(),
                 ivar_nfs,
             ))
         }
@@ -2692,7 +2877,8 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
             let r_is_endpoint = match &r_nf {
                 Term::TInterval(i) => {
                     let dnf = crate::cubical::interval::eval_interval(i);
-                    dnf == crate::cubical::interval::dnf_bot() || dnf == crate::cubical::interval::dnf_top()
+                    dnf == crate::cubical::interval::dnf_bot()
+                        || dnf == crate::cubical::interval::dnf_top()
                 }
                 _ => false,
             };
@@ -2702,16 +2888,22 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
                         // Try pcon first
                         if let Some(sig) = dt.find_pcon(pc) {
                             let is_i0 = match &r_nf {
-                                Term::TInterval(i) => crate::cubical::interval::eval_interval(i) == crate::cubical::interval::dnf_bot(),
+                                Term::TInterval(i) => {
+                                    crate::cubical::interval::eval_interval(i)
+                                        == crate::cubical::interval::dnf_bot()
+                                }
                                 _ => false,
                             };
                             let face = if is_i0 { &sig.face0 } else { &sig.face1 };
                             let arity = args.len();
-                            let reduced_args: Vec<Term> =
-                                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
+                            let reduced_args: Vec<Term> = args
+                                .iter()
+                                .map(|a| reduce_pcon_endpoints_dt(dts, a))
+                                .collect();
                             let mut face_inst = face.clone();
                             for k in (0..arity).rev() {
-                                face_inst = subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
+                                face_inst =
+                                    subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
                             }
                             return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face_inst));
                         }
@@ -2720,16 +2912,22 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
                         // sq @ 0 = face_j0, sq @ 1 = face_j1
                         if let Some(sig) = dt.sqcons.iter().find(|c| &c.name == pc) {
                             let is_i0 = match &r_nf {
-                                Term::TInterval(i) => crate::cubical::interval::eval_interval(i) == crate::cubical::interval::dnf_bot(),
+                                Term::TInterval(i) => {
+                                    crate::cubical::interval::eval_interval(i)
+                                        == crate::cubical::interval::dnf_bot()
+                                }
                                 _ => false,
                             };
                             let face = if is_i0 { &sig.face_j0 } else { &sig.face_j1 };
                             let arity = args.len();
-                            let reduced_args: Vec<Term> =
-                                args.iter().map(|a| reduce_pcon_endpoints_dt(dts, a)).collect();
+                            let reduced_args: Vec<Term> = args
+                                .iter()
+                                .map(|a| reduce_pcon_endpoints_dt(dts, a))
+                                .collect();
                             let mut face_inst = face.clone();
                             for k in (0..arity).rev() {
-                                face_inst = subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
+                                face_inst =
+                                    subst(k as i32, &reduced_args[arity - 1 - k], &face_inst);
                             }
                             return reduce_pcon_endpoints_dt(dts, &nbe_eval(&face_inst));
                         }
@@ -2747,7 +2945,6 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term) -> Term {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Type Checking
 // ---------------------------------------------------------------------------
@@ -2760,7 +2957,12 @@ pub fn check(ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), TypeError> {
 /// Pass `&[]` when no datatypes are in scope.
 pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), TypeError> {
     let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
-    crate::debug_scope!("check {} : {} : ctx[{}]", show_term(&names, t), show_term(&names, ty), ctx.len());
+    crate::debug_scope!(
+        "check {} : {} : ctx[{}]",
+        show_term(&names, t),
+        show_term(&names, ty),
+        ctx.len()
+    );
     crate::cubical::nbe::set_current_dts(dts);
     match t {
         // Lambda introduction
@@ -2769,11 +2971,13 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                 _ => match nbe_eval_ctx(ctx.len(), ty) {
                     Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                    other => return Err(TypeError::ExpectedPi {
-                        ty: other,
-                        names: err_names(ctx),
-                        pos: err_pos(ctx, t),
-                    }),
+                    other => {
+                        return Err(TypeError::ExpectedPi {
+                            ty: other,
+                            names: err_names(ctx),
+                            pos: err_pos(ctx, t),
+                        });
+                    }
                 },
             };
             check_dt(
@@ -2787,16 +2991,20 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
         // Path-lambda introduction
         Term::PLam(i, body) => {
             let (a_ty, u, v) = match ty {
-                Term::TPath(a, u, v) => (a.as_ref().clone(), u.as_ref().clone(), v.as_ref().clone()),
+                Term::TPath(a, u, v) => {
+                    (a.as_ref().clone(), u.as_ref().clone(), v.as_ref().clone())
+                }
                 _ => match nbe_eval_ctx(ctx.len(), ty) {
                     Term::TPath(a, u, v) => {
                         (a.as_ref().clone(), u.as_ref().clone(), v.as_ref().clone())
                     }
-                    other => return Err(TypeError::ExpectedPath {
-                        ty: other,
-                        names: err_names(ctx),
-                        pos: err_pos(ctx, t),
-                    }),
+                    other => {
+                        return Err(TypeError::ExpectedPath {
+                            ty: other,
+                            names: err_names(ctx),
+                            pos: err_pos(ctx, t),
+                        });
+                    }
                 },
             };
             let ctx2 = extend_ctx(i.clone(), interval_ty(), ctx);
@@ -2818,17 +3026,13 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             // encodes the correct faces from the constructor declaration.
             if !SKIP_PLAM_ENDPT.with(|c| c.get()) {
                 let body_at0 = {
-                    let reduced = reduce_pcon_endpoints_dt(
-                        dts,
-                        &apply_literal(&Literal::NegVar(0), body),
-                    );
+                    let reduced =
+                        reduce_pcon_endpoints_dt(dts, &apply_literal(&Literal::NegVar(0), body));
                     nbe_eval_ctx(ctx.len(), &shift(-1, 0, &reduced))
                 };
                 let body_at1 = {
-                    let reduced = reduce_pcon_endpoints_dt(
-                        dts,
-                        &apply_literal(&Literal::Pos(0), body),
-                    );
+                    let reduced =
+                        reduce_pcon_endpoints_dt(dts, &apply_literal(&Literal::Pos(0), body));
                     nbe_eval_ctx(ctx.len(), &shift(-1, 0, &reduced))
                 };
                 require_equal_endpt(ctx, &nbe_eval_ctx(ctx.len(), &u), &body_at0)?;
@@ -2846,41 +3050,45 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 _ => &nbe_eval(ty),
             };
             match glue {
-            Term::TGlue(a_ty, phi_, te) => {
-                check_interval(ctx, phi)?;
-                require_equal(ctx, &nbe_eval(phi_), &nbe_eval(phi))?;
-                let t_ty = match nbe_eval(te) {
-                    Term::TMkEquiv(dom_a, _, _, _, _, _) => nbe_eval(&dom_a),
-                    Term::TEquiv(dom_a, _) => nbe_eval(&dom_a),
-                    Term::TPair(te_a, _) => nbe_eval(&te_a),
-                    Term::TAbs(_, body) => {
-                        let body_at_1 = beta(&body, &Term::TInterval(I::I1));
-                        match body_at_1 {
-                            Term::TPair(ref te_a, _) => nbe_eval(te_a),
-                            other => other,
+                Term::TGlue(a_ty, phi_, te) => {
+                    check_interval(ctx, phi)?;
+                    require_equal(ctx, &nbe_eval(phi_), &nbe_eval(phi))?;
+                    let t_ty = match nbe_eval(te) {
+                        Term::TMkEquiv(dom_a, _, _, _, _, _) => nbe_eval(&dom_a),
+                        Term::TEquiv(dom_a, _) => nbe_eval(&dom_a),
+                        Term::TPair(te_a, _) => nbe_eval(&te_a),
+                        Term::TAbs(_, body) => {
+                            let body_at_1 = beta(&body, &Term::TInterval(I::I1));
+                            match body_at_1 {
+                                Term::TPair(ref te_a, _) => nbe_eval(te_a),
+                                other => other,
+                            }
                         }
-                    }
-                    other => other,
-                };
-                // The cap may be a trivial path (lambda over the interval) or a
-                // direct element — handle both by wrapping in I -> dom_ty when
-                // the cap is syntactically a lambda.
-                let cap_ty = match &**t_inner {
-                    Term::TAbs(_, _) => {
-                        // Shift t_ty up by 1 because the TPi binder will be
-                        // pushed into the context during checking.
-                        let shifted_t_ty = shift(1, 0, &t_ty);
-                        Term::TPi("_".into(), Box::new(Term::TIntervalTy), Box::new(shifted_t_ty))
-                    }
-                    _ => t_ty.clone(),
-                };
-                check_dt(dts, ctx, t_inner, &cap_ty)?;
-                check_dt(dts, ctx, a, &nbe_eval(a_ty))
-            }
-            other => Err(TypeError::Other(format!(
-                "glue: expected Glue type, got: {}",
-                other
-            ))),
+                        other => other,
+                    };
+                    // The cap may be a trivial path (lambda over the interval) or a
+                    // direct element — handle both by wrapping in I -> dom_ty when
+                    // the cap is syntactically a lambda.
+                    let cap_ty = match &**t_inner {
+                        Term::TAbs(_, _) => {
+                            // Shift t_ty up by 1 because the TPi binder will be
+                            // pushed into the context during checking.
+                            let shifted_t_ty = shift(1, 0, &t_ty);
+                            Term::TPi(
+                                "_".into(),
+                                Box::new(Term::TIntervalTy),
+                                Box::new(shifted_t_ty),
+                            )
+                        }
+                        _ => t_ty.clone(),
+                    };
+                    check_dt(dts, ctx, t_inner, &cap_ty)?;
+                    check_dt(dts, ctx, a, &nbe_eval(a_ty))
+                }
+                other => Err(TypeError::Other(format!(
+                    "glue: expected Glue type, got: {}",
+                    other
+                ))),
             }
         }
 
@@ -2890,14 +3098,16 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Term::TSigma(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
                 _ => match nbe_eval(ty) {
                     Term::TSigma(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                    other => return Err(TypeError::ExpectedSigma {
-                        ty: other,
-                        names: err_names(ctx),
-                        pos: err_pos(ctx, t),
-                    }),
+                    other => {
+                        return Err(TypeError::ExpectedSigma {
+                            ty: other,
+                            names: err_names(ctx),
+                            pos: err_pos(ctx, t),
+                        });
+                    }
                 },
             };
-                            check_dt(dts, ctx, a, &nbe_eval(&a_ty))?;
+            check_dt(dts, ctx, a, &nbe_eval(&a_ty))?;
             check_dt(dts, ctx, b, &nbe_eval(&beta(&b_ty, a)))
         }
 
@@ -2929,10 +3139,12 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 }
                 _ => (d.clone(), vec![]),
             };
-            let dt = dts
-                .iter()
-                .find(|dt| dt.name == expected_d)
-                .ok_or_else(|| TypeError::UnknownDatatype { name: expected_d.clone(), pos: err_pos(ctx, t) })?;
+            let dt = dts.iter().find(|dt| dt.name == expected_d).ok_or_else(|| {
+                TypeError::UnknownDatatype {
+                    name: expected_d.clone(),
+                    pos: err_pos(ctx, t),
+                }
+            })?;
             if let Some(sig) = dt.find_con(c) {
                 if args.len() != sig.arity() {
                     return Err(TypeError::WrongNumberOfArgs {
@@ -2951,7 +3163,12 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                     .map(|i| expected_params.get(i).cloned())
                     .collect();
                 let (param_terms, _checked_args) = infer_and_check_params_seeded(
-                    dts, ctx, &sig.arg_tys, args, num_params, &initial,
+                    dts,
+                    ctx,
+                    &sig.arg_tys,
+                    args,
+                    num_params,
+                    &initial,
                 )?;
                 let params = build_params(&param_terms);
                 require_equal(ctx, &expected_ty_nf, &Term::TData(d.clone(), params))
@@ -2959,14 +3176,22 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 let inferred = infer_dt(dts, ctx, &Term::TCon(d.clone(), c.clone(), args.clone()))?;
                 require_equal(ctx, &expected_ty_nf, &nbe_eval(&inferred))
             } else {
-                Err(TypeError::UnknownConstructor { datatype: expected_d.clone(), con: c.clone(), pos: err_pos(ctx, t) })
+                Err(TypeError::UnknownConstructor {
+                    datatype: expected_d.clone(),
+                    con: c.clone(),
+                    pos: err_pos(ctx, t),
+                })
             }
         }
 
         Term::TPCon(d, pc, args, r) => {
             // Infer the full path type from the constructor signature, then
             // unify with the expected type so endpoint annotations are checked.
-            let inferred = infer_dt(dts, ctx, &Term::TPCon(d.clone(), pc.clone(), args.clone(), r.clone()))?;
+            let inferred = infer_dt(
+                dts,
+                ctx,
+                &Term::TPCon(d.clone(), pc.clone(), args.clone(), r.clone()),
+            )?;
             require_equal(ctx, &nbe_eval(ty), &nbe_eval(&inferred))
         }
 
@@ -2977,10 +3202,19 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             let expected_nf = nbe_eval(ty);
             if let Term::TData(ed, _) = &expected_nf {
                 if ed == d {
-                    let dt_ = dts.iter().find(|dt| &dt.name == d)
-                        .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
-                    let sig = dt_.find_sqcon(sc)
-                        .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: sc.clone(), pos: err_pos(ctx, t) })?;
+                    let dt_ = dts.iter().find(|dt| &dt.name == d).ok_or_else(|| {
+                        TypeError::UnknownDatatype {
+                            name: d.clone(),
+                            pos: err_pos(ctx, t),
+                        }
+                    })?;
+                    let sig = dt_
+                        .find_sqcon(sc)
+                        .ok_or_else(|| TypeError::UnknownConstructor {
+                            datatype: d.clone(),
+                            con: sc.clone(),
+                            pos: err_pos(ctx, t),
+                        })?;
                     if args.len() != sig.arity() {
                         return Err(TypeError::WrongNumberOfArgs {
                             con: sc.clone(),
@@ -2994,7 +3228,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                     return Ok(());
                 }
             }
-            let inferred = infer_dt(dts, ctx, &Term::TSqCon(d.clone(), sc.clone(), args.clone(), r.clone(), s.clone()))?;
+            let inferred = infer_dt(
+                dts,
+                ctx,
+                &Term::TSqCon(d.clone(), sc.clone(), args.clone(), r.clone(), s.clone()),
+            )?;
             require_equal(ctx, &nbe_eval(ty), &nbe_eval(&inferred))
         }
 
@@ -3002,10 +3240,19 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             let expected_nf = nbe_eval(ty);
             if let Term::TData(ed, _) = &expected_nf {
                 if ed == d {
-                    let dt_ = dts.iter().find(|dt| &dt.name == d)
-                        .ok_or_else(|| TypeError::UnknownDatatype { name: d.clone(), pos: err_pos(ctx, t) })?;
-                    let sig = dt_.find_cellcon(cc)
-                        .ok_or_else(|| TypeError::UnknownConstructor { datatype: d.clone(), con: cc.clone(), pos: err_pos(ctx, t) })?;
+                    let dt_ = dts.iter().find(|dt| &dt.name == d).ok_or_else(|| {
+                        TypeError::UnknownDatatype {
+                            name: d.clone(),
+                            pos: err_pos(ctx, t),
+                        }
+                    })?;
+                    let sig =
+                        dt_.find_cellcon(cc)
+                            .ok_or_else(|| TypeError::UnknownConstructor {
+                                datatype: d.clone(),
+                                con: cc.clone(),
+                                pos: err_pos(ctx, t),
+                            })?;
                     if args.len() != sig.arity() {
                         return Err(TypeError::WrongNumberOfArgs {
                             con: cc.clone(),
@@ -3028,7 +3275,11 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                     return Ok(());
                 }
             }
-            let inferred = infer_dt(dts, ctx, &Term::TCellCon(d.clone(), cc.clone(), args.clone(), ivars.clone()))?;
+            let inferred = infer_dt(
+                dts,
+                ctx,
+                &Term::TCellCon(d.clone(), cc.clone(), args.clone(), ivars.clone()),
+            )?;
             require_equal(ctx, &nbe_eval(ty), &nbe_eval(&inferred))
         }
 
@@ -3046,7 +3297,10 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             // comment at the fallback below), so skip it for this tactic's
             // output; every other tactic (e.g. `by exact`) keeps the guard.
             let prev = crate::cubical::typechecker::termination::should_skip_guard();
-            if tactics.iter().any(|t| matches!(t, crate::cubical::syntax::Tactic::Ring(_))) {
+            if tactics
+                .iter()
+                .any(|t| matches!(t, crate::cubical::syntax::Tactic::Ring(_)))
+            {
                 crate::cubical::typechecker::termination::set_skip_guard(true);
             }
             let r = check_dt(dts, ctx, &proof, ty);
@@ -3072,11 +3326,15 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Ok(_) => Ok(()),
                 Err(e) => {
                     let reduced = nbe_eval(t);
-                    if reduced == *t { Err(e) }
-                    else {
+                    if reduced == *t {
+                        Err(e)
+                    } else {
                         let nf = nbe_eval(&reduced);
-                        if nf == *t { Err(e) }
-                        else { check_dt(dts, ctx, &nf, ty) }
+                        if nf == *t {
+                            Err(e)
+                        } else {
+                            check_dt(dts, ctx, &nf, ty)
+                        }
                     }
                 }
             }
@@ -3099,11 +3357,15 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                 Ok(_) => Ok(()),
                 Err(e) => {
                     let reduced = nbe_eval(t);
-                    if reduced == *t { Err(e) }
-                    else {
+                    if reduced == *t {
+                        Err(e)
+                    } else {
                         let nf = nbe_eval(&reduced);
-                        if nf == *t { Err(e) }
-                        else { check_dt(dts, ctx, &nf, ty) }
+                        if nf == *t {
+                            Err(e)
+                        } else {
+                            check_dt(dts, ctx, &nf, ty)
+                        }
                     }
                 }
             }
@@ -3112,28 +3374,30 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
         // fill A [phi -> tube, ...] base : (j : I) -> A j
         // Inferred type is TPath(PLam j (A j), base, TComp A sys base), so
         // delegate to infer_dt for the full type, then check cumulativity.
-        Term::TFill(_, _, _) | Term::THFill(_, _, _) => {
-            match infer_dt(dts, ctx, t) {
-                Ok(inferred) => {
-                    let expected_nf = nbe_eval(ty);
-                    let inferred_nf = nbe_eval(&inferred);
-                    if cumulativity_check(&expected_nf, &inferred_nf, dts) {
-                        Ok(())
-                    } else {
-                        require_equal(ctx, &expected_nf, &inferred_nf)
-                    }
+        Term::TFill(_, _, _) | Term::THFill(_, _, _) => match infer_dt(dts, ctx, t) {
+            Ok(inferred) => {
+                let expected_nf = nbe_eval(ty);
+                let inferred_nf = nbe_eval(&inferred);
+                if cumulativity_check(&expected_nf, &inferred_nf, dts) {
+                    Ok(())
+                } else {
+                    require_equal(ctx, &expected_nf, &inferred_nf)
                 }
-                Err(e) => {
-                    let reduced = nbe_eval(t);
-                    if reduced == *t { Err(e) }
-                    else {
-                        let nf = nbe_eval(&reduced);
-                        if nf == *t { Err(e) }
-                        else { check_dt(dts, ctx, &nf, ty) }
+            }
+            Err(e) => {
+                let reduced = nbe_eval(t);
+                if reduced == *t {
+                    Err(e)
+                } else {
+                    let nf = nbe_eval(&reduced);
+                    if nf == *t {
+                        Err(e)
+                    } else {
+                        check_dt(dts, ctx, &nf, ty)
                     }
                 }
             }
-        }
+        },
 
         // Metavariable hole: the expected type is already known.
         Term::Meta(id) => {
@@ -3156,11 +3420,13 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             }
             Err(e) => {
                 let reduced = nbe_eval_ctx(ctx.len(), t);
-                if reduced == *t { Err(e) }
-                else {
+                if reduced == *t {
+                    Err(e)
+                } else {
                     let nf = nbe_eval_ctx(ctx.len(), &reduced);
-                    if nf == *t { Err(e) }
-                    else {
+                    if nf == *t {
+                        Err(e)
+                    } else {
                         // Re-check the fully-reduced term. Guard checking is a
                         // source-level structural-recursion check for
                         // definitions; the normal form only contains stuck
@@ -3178,7 +3444,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
                     }
                 }
             }
-        }
+        },
     }
 }
 
@@ -3224,9 +3490,7 @@ fn cumulativity_check(expected: &Term, inferred: &Term, dts: &[Datatype]) -> boo
             cumulativity_check(a_exp, a_inf, dts)
         }
         // Lower cumulativity: lower A ≤ lower B when A ≤ B
-        (Term::TLower(a_exp), Term::TLower(a_inf)) => {
-            cumulativity_check(a_exp, a_inf, dts)
-        }
+        (Term::TLower(a_exp), Term::TLower(a_inf)) => cumulativity_check(a_exp, a_inf, dts),
 
         // Universe cumulativity: U_n is subtype of U_m when n ≤ m
         (Term::TUniv(m), Term::TUniv(n)) => n <= m,
@@ -3277,7 +3541,12 @@ fn cumulativity_check(expected: &Term, inferred: &Term, dts: &[Datatype]) -> boo
             } else {
                 dts.iter()
                     .position(|d| &d.name == d_exp)
-                    .map(|i| compute_param_variances(dts).get(i).cloned().unwrap_or_default())
+                    .map(|i| {
+                        compute_param_variances(dts)
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_default()
+                    })
                     .unwrap_or_default()
             };
             ps_exp
@@ -3359,10 +3628,7 @@ pub fn infer_closed_dt(dts: &[Datatype], t: &Term) -> Result<Term, TypeError> {
 ///   - PApp(face_j0, I1) == face_i1   (face_j0 ends at face_i1)
 ///   - PApp(face_j1, I0) == face_i0   (face_j1 starts at face_i0)
 ///   - PApp(face_j1, I1) == face_i1   (face_j1 ends at face_i1)
-pub fn check_sqcon_coherence(
-    dts: &[Datatype],
-    dt: &Datatype,
-) -> Result<(), TypeError> {
+pub fn check_sqcon_coherence(dts: &[Datatype], dt: &Datatype) -> Result<(), TypeError> {
     for sqcon in &dt.sqcons {
         let i0 = Term::TInterval(I::I0);
         let i1 = Term::TInterval(I::I1);
@@ -3675,14 +3941,26 @@ mod tests {
         // Identical datatypes are reflexive (empty parameters).
         assert!(sub_t(&tdata("Nat", vec![]), &tdata("Nat", vec![])));
         // Covariant datatype parameters (records desugar to TData).
-        assert!(sub_t(&tdata("Pair", vec![t_univ(1), t_univ(1)]), &tdata("Pair", vec![t_univ(0), t_univ(0)])));
-        assert!(sub_t(&tdata("Pair", vec![t_univ(1), tdata("Nat", vec![])]), &tdata("Pair", vec![t_univ(0), tdata("Nat", vec![])])));
+        assert!(sub_t(
+            &tdata("Pair", vec![t_univ(1), t_univ(1)]),
+            &tdata("Pair", vec![t_univ(0), t_univ(0)])
+        ));
+        assert!(sub_t(
+            &tdata("Pair", vec![t_univ(1), tdata("Nat", vec![])]),
+            &tdata("Pair", vec![t_univ(0), tdata("Nat", vec![])])
+        ));
         // Negative: parameters are covariant, not contravariant.
-        assert!(!sub_t(&tdata("Pair", vec![t_univ(0), t_univ(0)]), &tdata("Pair", vec![t_univ(1), t_univ(1)])));
+        assert!(!sub_t(
+            &tdata("Pair", vec![t_univ(0), t_univ(0)]),
+            &tdata("Pair", vec![t_univ(1), t_univ(1)])
+        ));
         // Negative: different datatypes are incomparable.
         assert!(!sub_t(&tdata("Bool", vec![]), &tdata("Nat", vec![])));
         // Record params that are bound variables are reflexive.
-        assert!(sub_t(&tdata("Pair", vec![Term::TVar(0), Term::TVar(1)]), &tdata("Pair", vec![Term::TVar(0), Term::TVar(1)])));
+        assert!(sub_t(
+            &tdata("Pair", vec![Term::TVar(0), Term::TVar(1)]),
+            &tdata("Pair", vec![Term::TVar(0), Term::TVar(1)])
+        ));
     }
 
     #[test]
@@ -3699,7 +3977,11 @@ mod tests {
             Term::TPi(
                 "x".into(),
                 Box::new(Term::TUniv(0)),
-                Box::new(Term::TPi(String::new(), Box::new(Term::TVar(1)), Box::new(cod))),
+                Box::new(Term::TPi(
+                    String::new(),
+                    Box::new(Term::TVar(1)),
+                    Box::new(cod),
+                )),
             )
         };
         assert!(!sub_t(&pi_x_to(t_univ(1)), &pi_x_to(tdata("Nat", vec![]))));
@@ -3720,8 +4002,17 @@ mod tests {
 
     #[test]
     fn lift_and_lower_cumulativity() {
-        assert!(sub_t(&Term::TLift(Box::new(t_univ(1)), 1), &Term::TLift(Box::new(t_univ(0)), 1)));
-        assert!(sub_t(&Term::TLower(Box::new(t_univ(1))), &Term::TLower(Box::new(t_univ(0)))));
-        assert!(!sub_t(&Term::TLift(Box::new(t_univ(0)), 1), &Term::TLift(Box::new(t_univ(1)), 1)));
+        assert!(sub_t(
+            &Term::TLift(Box::new(t_univ(1)), 1),
+            &Term::TLift(Box::new(t_univ(0)), 1)
+        ));
+        assert!(sub_t(
+            &Term::TLower(Box::new(t_univ(1))),
+            &Term::TLower(Box::new(t_univ(0)))
+        ));
+        assert!(!sub_t(
+            &Term::TLift(Box::new(t_univ(0)), 1),
+            &Term::TLift(Box::new(t_univ(1)), 1)
+        ));
     }
 }

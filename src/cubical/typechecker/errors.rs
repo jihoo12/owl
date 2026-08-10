@@ -264,7 +264,10 @@ pub enum TypeError {
         pos: Option<Pos>,
     },
     Other(String),
-    UnknownDatatype { name: Name, pos: Option<Pos> },
+    UnknownDatatype {
+        name: Name,
+        pos: Option<Pos>,
+    },
     UnknownConstructor {
         datatype: Name,
         con: Name,
@@ -281,7 +284,10 @@ pub enum TypeError {
         msg: String,
         pos: Option<Pos>,
     },
-    MissingCase { con: Name, pos: Option<Pos> },
+    MissingCase {
+        con: Name,
+        pos: Option<Pos>,
+    },
     ExpectedData {
         ty: Term,
         names: Vec<Name>,
@@ -462,9 +468,18 @@ impl fmt::Display for TypeError {
                 write_pos(f, *pos)
             }
             TypeError::PathPNotTypeFamily { ty, names } => {
-                write!(f, "  PathP requires a type family, but found:\n    {}", show_term(names, ty))
+                write!(
+                    f,
+                    "  PathP requires a type family, but found:\n    {}",
+                    show_term(names, ty)
+                )
             }
-            TypeError::TerminationViolation { datatype, case, msg, pos } => {
+            TypeError::TerminationViolation {
+                datatype,
+                case,
+                msg,
+                pos,
+            } => {
                 write!(
                     f,
                     "  Termination violation in '{}' case of '{}':\n    {}",
@@ -481,17 +496,8 @@ impl fmt::Display for TypeError {
                         format!("?{}", hole_name)
                     };
                     match expected {
-                        Some(ty) => writeln!(
-                            f,
-                            "    {} : {}",
-                            display,
-                            show_term(names, ty),
-                        )?,
-                        None => writeln!(
-                            f,
-                            "    {} : <no expected type known>",
-                            display,
-                        )?,
+                        Some(ty) => writeln!(f, "    {} : {}", display, show_term(names, ty),)?,
+                        None => writeln!(f, "    {} : <no expected type known>", display,)?,
                     }
                 }
                 write!(

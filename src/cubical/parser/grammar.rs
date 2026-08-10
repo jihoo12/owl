@@ -2,10 +2,12 @@
 //! [`Lexer`](super::lexer::Lexer) and builds [`Term`]s / [`Decl`]s, resolving
 //! variables to de Bruijn indices along the way.
 
-use super::lexer::{err, Token, TokenKind};
+use super::lexer::{Token, TokenKind, err};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
-use crate::cubical::syntax::{CellConSig, ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift};
+use crate::cubical::syntax::{
+    CellConSig, ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift,
+};
 use crate::cubical::typechecker::errors::Pos;
 
 pub(super) struct Parser {
@@ -73,7 +75,12 @@ impl Parser {
         // Allow the definition body to refer to itself (and later globals).
         self.global_env.insert(0, name.clone());
         let val = self.parse_term()?;
-        Ok(Decl::Def { name, ty, val, by_wf })
+        Ok(Decl::Def {
+            name,
+            ty,
+            val,
+            by_wf,
+        })
     }
 
     pub(super) fn parse_data_decl(&mut self) -> Result<Decl, ParseError> {
@@ -102,7 +109,9 @@ impl Parser {
                     }
                     if self.peek_ident() != "inductive" {
                         self.datatypes.truncate(old_dts_len);
-                        return Err(self.error_here("expected 'inductive' after 'with' in mutual block"));
+                        return Err(
+                            self.error_here("expected 'inductive' after 'with' in mutual block")
+                        );
                     }
                     self.expect_ident("expected 'inductive'")?;
                 }
@@ -111,13 +120,19 @@ impl Parser {
             } else {
                 // Induction-recursion: `with f : T := e`
                 let func_name = self.expect_ident("expected function name after 'with'")?;
-                self.expect(TokenKind::Colon, format!("expected ':' after '{}'", func_name))?;
+                self.expect(
+                    TokenKind::Colon,
+                    format!("expected ':' after '{}'", func_name),
+                )?;
                 // Parse the function type with the datatype visible.
                 let old_dts_len = self.datatypes.len();
                 self.datatypes.push(first_dt.clone());
                 let func_ty = self.parse_term()?;
                 self.datatypes.truncate(old_dts_len);
-                self.expect(TokenKind::ColonEquals, format!("expected ':=' after type of '{}'", func_name))?;
+                self.expect(
+                    TokenKind::ColonEquals,
+                    format!("expected ':=' after type of '{}'", func_name),
+                )?;
                 // Parse the function value with the datatype visible and the function name in scope.
                 self.global_env.insert(0, func_name.clone());
                 let old_dts_len = self.datatypes.len();
@@ -225,18 +240,32 @@ impl Parser {
                         // Square constructor: `sqcon : A [[ face_i0, face_i1, face_j0, face_j1 ]]`
                         let num_args = arg_tys.len();
                         for k in 0..num_args {
-                            self.term_env
-                                .insert(0, format!("{}_{}", con_name, k));
+                            self.term_env.insert(0, format!("{}_{}", con_name, k));
                         }
                         let face_i0 = self.parse_face_with_extra_datatype(&local_dt)?;
-                        self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                        self.expect(
+                            TokenKind::Comma,
+                            "expected ',' between square-constructor faces",
+                        )?;
                         let face_i1 = self.parse_face_with_extra_datatype(&local_dt)?;
-                        self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                        self.expect(
+                            TokenKind::Comma,
+                            "expected ',' between square-constructor faces",
+                        )?;
                         let face_j0 = self.parse_face_with_extra_datatype(&local_dt)?;
-                        self.expect(TokenKind::Comma, "expected ',' between square-constructor faces")?;
+                        self.expect(
+                            TokenKind::Comma,
+                            "expected ',' between square-constructor faces",
+                        )?;
                         let face_j1 = self.parse_face_with_extra_datatype(&local_dt)?;
-                        self.expect(TokenKind::RBracket, "expected ']' after square-constructor faces")?;
-                        self.expect(TokenKind::RBracket, "expected ']]' after square-constructor faces")?;
+                        self.expect(
+                            TokenKind::RBracket,
+                            "expected ']' after square-constructor faces",
+                        )?;
+                        self.expect(
+                            TokenKind::RBracket,
+                            "expected ']]' after square-constructor faces",
+                        )?;
                         for _ in 0..num_args {
                             self.term_env.remove(0);
                         }
@@ -254,19 +283,28 @@ impl Parser {
                         // N-dimensional cell constructor: `cellcon : A [[[ ... dim faces ... ]]]`
                         let num_args = arg_tys.len();
                         for k in 0..num_args {
-                            self.term_env
-                                .insert(0, format!("{}_{}", con_name, k));
+                            self.term_env.insert(0, format!("{}_{}", con_name, k));
                         }
                         let mut faces = Vec::new();
                         for fi in 0..(2 * dim) {
                             if fi > 0 {
-                                self.expect(TokenKind::Comma, "expected ',' between cell-constructor faces")?;
+                                self.expect(
+                                    TokenKind::Comma,
+                                    "expected ',' between cell-constructor faces",
+                                )?;
                             }
                             faces.push(self.parse_face_with_extra_datatype(&local_dt)?);
                         }
                         // Close all brackets: dim closing brackets.
                         for bi in 0..dim {
-                            self.expect(TokenKind::RBracket, &format!("expected ']' to close cell-constructor brackets ({} of {})", bi + 1, dim))?;
+                            self.expect(
+                                TokenKind::RBracket,
+                                &format!(
+                                    "expected ']' to close cell-constructor brackets ({} of {})",
+                                    bi + 1,
+                                    dim
+                                ),
+                            )?;
                         }
                         for _ in 0..num_args {
                             self.term_env.remove(0);
@@ -283,8 +321,7 @@ impl Parser {
                     // Path constructor: `pcon : A [ face0, face1 ]`
                     let num_args = arg_tys.len();
                     for k in 0..num_args {
-                        self.term_env
-                            .insert(0, format!("{}_{}", con_name, k));
+                        self.term_env.insert(0, format!("{}_{}", con_name, k));
                     }
                     let face0 = self.parse_face_with_extra_datatype(&local_dt)?;
                     self.expect(
@@ -323,7 +360,16 @@ impl Parser {
         for _ in &params {
             self.term_env.remove(0);
         }
-        Ok(Datatype { name, params, cons, pcons, sqcons, cellcons, universe_level: uni_level, field_names: None })
+        Ok(Datatype {
+            name,
+            params,
+            cons,
+            pcons,
+            sqcons,
+            cellcons,
+            universe_level: uni_level,
+            field_names: None,
+        })
     }
 
     /// Parse a record declaration:
@@ -556,8 +602,7 @@ impl Parser {
             let mut names = Vec::new();
             loop {
                 match self.peek().kind {
-                    TokenKind::Ident(ref name) if !is_tactic_keyword(name) =>
-                    {
+                    TokenKind::Ident(ref name) if !is_tactic_keyword(name) => {
                         let name = self.expect_ident("expected name after 'intro'")?;
                         self.term_env.insert(0, name.clone());
                         *intro_count += 1;
@@ -716,7 +761,10 @@ impl Parser {
                     // Cell constructor: parse `dim` interval args
                     let mut interval_args = Vec::new();
                     for _ in 0..dim {
-                        self.expect(TokenKind::At, "expected '@' for cell constructor interval arg")?;
+                        self.expect(
+                            TokenKind::At,
+                            "expected '@' for cell constructor interval arg",
+                        )?;
                         interval_args.push(self.parse_interval_arg()?);
                     }
                     if let Term::TCon(dt, con, args) = term {
@@ -728,7 +776,10 @@ impl Parser {
                 // parse_papp recursion (which would consume the second @)
                 self.consume(&TokenKind::At);
                 let rhs = self.parse_interval_arg()?;
-                self.expect(TokenKind::At, "expected '@' for square constructor second interval")?;
+                self.expect(
+                    TokenKind::At,
+                    "expected '@' for square constructor second interval",
+                )?;
                 let rhs2 = self.parse_interval_arg()?;
                 if let Term::TCon(dt, con, args) = term {
                     term = Term::TSqCon(dt, con, args, Box::new(rhs), Box::new(rhs2));
@@ -807,7 +858,11 @@ impl Parser {
                 // named `field`, treat this as a constructor reference: `Foo.field`.
                 // Only use projection when the term is NOT a datatype name.
                 if let Term::TData(ref dt_name, _) = term {
-                    if self.datatypes.iter().any(|dt| dt.name == *dt_name && dt.cons.iter().any(|c| c.name == field)) {
+                    if self
+                        .datatypes
+                        .iter()
+                        .any(|dt| dt.name == *dt_name && dt.cons.iter().any(|c| c.name == field))
+                    {
                         self.pos += 1;
                         return Ok(Term::TCon(dt_name.clone(), field, Vec::new()));
                     }
@@ -826,7 +881,10 @@ impl Parser {
                 self.stop_at_comma = true;
                 loop {
                     let field = self.expect_ident("expected field name in record update")?;
-                    self.expect(TokenKind::Equals, format!("expected '=' after field '{}' in record update", field))?;
+                    self.expect(
+                        TokenKind::Equals,
+                        format!("expected '=' after field '{}' in record update", field),
+                    )?;
                     let value = self.parse_term()?;
                     updates.push((field, value));
                     if !self.consume(&TokenKind::Comma) {
@@ -910,11 +968,7 @@ impl Parser {
                 vec![(phi, u)]
             };
             let u0 = self.parse_prefix_or_atom()?;
-            return Ok(Term::THComp(
-                Box::new(a),
-                system,
-                Box::new(u0),
-            ));
+            return Ok(Term::THComp(Box::new(a), system, Box::new(u0)));
         }
         if self.consume_ident("comp") {
             let a = self.parse_prefix_or_atom()?;
@@ -926,11 +980,7 @@ impl Parser {
                 vec![(phi, u)]
             };
             let u0 = self.parse_prefix_or_atom()?;
-            return Ok(Term::TComp(
-                Box::new(a),
-                system,
-                Box::new(u0),
-            ));
+            return Ok(Term::TComp(Box::new(a), system, Box::new(u0)));
         }
         if self.consume_ident("fill") {
             let a = self.parse_prefix_or_atom()?;
@@ -942,11 +992,7 @@ impl Parser {
                 vec![(phi, u)]
             };
             let u0 = self.parse_prefix_or_atom()?;
-            return Ok(Term::TFill(
-                Box::new(a),
-                system,
-                Box::new(u0),
-            ));
+            return Ok(Term::TFill(Box::new(a), system, Box::new(u0)));
         }
         if self.consume_ident("hfill") {
             let a = self.parse_prefix_or_atom()?;
@@ -958,11 +1004,7 @@ impl Parser {
                 vec![(phi, u)]
             };
             let u0 = self.parse_prefix_or_atom()?;
-            return Ok(Term::THFill(
-                Box::new(a),
-                system,
-                Box::new(u0),
-            ));
+            return Ok(Term::THFill(Box::new(a), system, Box::new(u0)));
         }
         if self.consume_ident("Equiv") {
             let a = self.parse_prefix_or_atom()?;
@@ -1021,7 +1063,10 @@ impl Parser {
                     if let Some(TokenKind::Pipe) = self.tokens.get(self.pos + 2).map(|t| &t.kind) {
                         self.pos += 3; // consume [ _ |
                         let phi = self.parse_join()?;
-                        self.expect(TokenKind::RBracket, "expected ']' after phi in partial type")?;
+                        self.expect(
+                            TokenKind::RBracket,
+                            "expected ']' after phi in partial type",
+                        )?;
                         let a = self.parse_prefix_or_atom()?;
                         return Ok(Term::TPartial(Box::new(phi), Box::new(a)));
                     }
@@ -1154,9 +1199,11 @@ impl Parser {
                     }
                     if names.is_empty() {
                         self.term_env.drain(0..binders.len());
-                        return Err(self.error_here("expected binder name after '('") );
+                        return Err(self.error_here("expected binder name after '('"));
                     }
-                    if let Err(error) = self.expect(TokenKind::Colon, "expected ':' in typed lambda binder") {
+                    if let Err(error) =
+                        self.expect(TokenKind::Colon, "expected ':' in typed lambda binder")
+                    {
                         self.term_env.drain(0..binders.len());
                         return Err(error);
                     }
@@ -1167,7 +1214,9 @@ impl Parser {
                         self.term_env.drain(0..binders.len());
                         return Err(error);
                     }
-                    if let Err(error) = self.expect(TokenKind::RParen, "unmatched '(' in lambda binder") {
+                    if let Err(error) =
+                        self.expect(TokenKind::RParen, "unmatched '(' in lambda binder")
+                    {
                         self.term_env.drain(0..binders.len());
                         return Err(error);
                     }
@@ -1294,17 +1343,14 @@ impl Parser {
                     self.consume(&TokenKind::LBrace);
                     if !self.at(&TokenKind::RBrace) {
                         loop {
-                            let field = self
-                                .expect_ident("expected field name in record pattern")?;
+                            let field =
+                                self.expect_ident("expected field name in record pattern")?;
                             self.expect(
                                 TokenKind::Equals,
-                                format!(
-                                    "expected '=' after field '{}' in record pattern",
-                                    field
-                                ),
+                                format!("expected '=' after field '{}' in record pattern", field),
                             )?;
-                            let binder = self
-                                .expect_ident("expected binder name in record pattern")?;
+                            let binder =
+                                self.expect_ident("expected binder name in record pattern")?;
                             bindings.push((field, binder));
                             if !self.consume(&TokenKind::Comma) {
                                 break;
@@ -1318,7 +1364,9 @@ impl Parser {
                     record_bindings = Some(bindings);
                     pats.push(("".to_string(), Vec::new()));
                 } else {
-                    let con = self.expect_ident("expected constructor name or record pattern in eliminator case")?;
+                    let con = self.expect_ident(
+                        "expected constructor name or record pattern in eliminator case",
+                    )?;
                     let mut binders = Vec::new();
                     while let TokenKind::Ident(name) = self.peek().kind.clone() {
                         if name == "=>" || name == "|" || name == "as" {
@@ -1332,8 +1380,7 @@ impl Parser {
 
                 // Check for as-pattern: ... as name (after binders, before => or |)
                 if self.consume_ident("as") {
-                    let as_n = self
-                        .expect_ident("expected name after 'as' in as-pattern")?;
+                    let as_n = self.expect_ident("expected name after 'as' in as-pattern")?;
                     as_name = Some(as_n);
                     break; // as-pattern ends the pattern group
                 }
@@ -1455,7 +1502,8 @@ impl Parser {
     /// Record a variable name occurrence for the current declaration so the
     /// typechecker can attach a source position to errors involving it.
     fn record_name_pos(&mut self, name: &Name, line: usize, col: usize, is_introduction: bool) {
-        self.decl_positions.push((name.clone(), Pos { line, col }, is_introduction));
+        self.decl_positions
+            .push((name.clone(), Pos { line, col }, is_introduction));
     }
 
     fn resolve_ident(&mut self, name: Name) -> Result<Term, ParseError> {
@@ -1577,27 +1625,32 @@ impl Parser {
         }
         if self.stop_at_with
             && let TokenKind::Ident(name) = &self.peek().kind
-                && name == "with" {
-                    return false;
-                }
+            && name == "with"
+        {
+            return false;
+        }
         if self.stop_at_in
             && let TokenKind::Ident(name) = &self.peek().kind
-                && name == "in" {
-                    return false;
+            && name == "in"
+        {
+            return false;
         }
         if self.stop_at_by_wf
             && let TokenKind::Ident(name) = &self.peek().kind
-                && name == "by_wf" {
-                    return false;
+            && name == "by_wf"
+        {
+            return false;
         }
         if self.stop_at_field
             && let TokenKind::Ident(name) = &self.peek().kind
-                && name == "field" {
-                    return false;
+            && name == "field"
+        {
+            return false;
         }
         if let TokenKind::Ident(name) = &self.peek().kind
-            && name == "return" {
-                return false;
+            && name == "return"
+        {
+            return false;
         }
         matches!(
             &self.peek().kind,
@@ -1765,11 +1818,7 @@ impl Parser {
                 Box::new(Term::TPi(
                     "_".to_string(),
                     Box::new(ty_p),
-                    Box::new(Term::TPi(
-                        "_".to_string(),
-                        Box::new(ty_q),
-                        Box::new(body),
-                    )),
+                    Box::new(Term::TPi("_".to_string(), Box::new(ty_q), Box::new(body))),
                 )),
             )),
         )
@@ -1842,11 +1891,7 @@ impl Parser {
                         Box::new(Term::TPi(
                             "_".to_string(),
                             Box::new(ty_r),
-                            Box::new(Term::TPi(
-                                "_".to_string(),
-                                Box::new(ty_s),
-                                Box::new(body),
-                            )),
+                            Box::new(Term::TPi("_".to_string(), Box::new(ty_s), Box::new(body))),
                         )),
                     )),
                 )),

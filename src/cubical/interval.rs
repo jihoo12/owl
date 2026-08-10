@@ -202,9 +202,9 @@ pub fn dnf_leq(a: &DNF, b: &DNF) -> bool {
         return true;
     }
     // For each cube ca in a, there must exist a cube cb in b with ca ⊆ cb.
-    a.cubes.iter().all(|ca| {
-        b.cubes.iter().any(|cb| cb.is_subset(ca))
-    })
+    a.cubes
+        .iter()
+        .all(|ca| b.cubes.iter().any(|cb| cb.is_subset(ca)))
 }
 
 /// Check face equivalence: `a ⇔ b` (i.e. `a ⇒ b ∧ b ⇒ a`).

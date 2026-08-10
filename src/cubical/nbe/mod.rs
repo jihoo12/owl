@@ -8,7 +8,10 @@ use std::rc::Rc;
 
 use crate::cubical::equality::definitionally_equal;
 use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_top, eval_interval};
-use crate::cubical::syntax::{Datatype, ElimCase, Level, Name, System, Tactic, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, show_term, subst};
+use crate::cubical::syntax::{
+    Datatype, ElimCase, Level, Name, System, Tactic, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf,
+    max_var, shift, show_term, subst,
+};
 
 use crate::cubical::debug;
 use trace::record_step;
@@ -34,9 +37,7 @@ pub fn set_current_dts(dts: &[Datatype]) {
 
 /// Get the current datatype definitions. Returns empty vec if not set.
 fn current_dts() -> Vec<Datatype> {
-    CURRENT_DTS.with(|cell| {
-        cell.borrow().clone()
-    })
+    CURRENT_DTS.with(|cell| cell.borrow().clone())
 }
 
 /// Set the current global definition values used by `nbe_eval_ctx`.
@@ -65,28 +66,51 @@ pub struct Scope {
 }
 
 impl Scope {
-    pub fn empty() -> Scope { Scope { local: vec![], parent: None, len: 0 } }
+    pub fn empty() -> Scope {
+        Scope {
+            local: vec![],
+            parent: None,
+            len: 0,
+        }
+    }
 
     /// Extend with a single innermost binding. O(1).
     pub fn extend(&self, v: Value) -> Scope {
-        Scope { local: vec![v], parent: Some(Rc::new(self.clone())), len: self.len + 1 }
+        Scope {
+            local: vec![v],
+            parent: Some(Rc::new(self.clone())),
+            len: self.len + 1,
+        }
     }
 
     /// Chain values as innermost bindings, with self as parent. O(|values|).
     pub fn chain(&self, values: Vec<Value>) -> Scope {
-        if values.is_empty() { return self.clone(); }
+        if values.is_empty() {
+            return self.clone();
+        }
         let vlen = values.len();
-        Scope { local: values, parent: Some(Rc::new(self.clone())), len: self.len + vlen }
+        Scope {
+            local: values,
+            parent: Some(Rc::new(self.clone())),
+            len: self.len + vlen,
+        }
     }
 
     /// Look up the value at de Bruijn index `i` (0 = innermost). O(depth).
     pub fn lookup(&self, i: usize) -> &Value {
-        if i < self.local.len() { &self.local[i] }
-        else { self.parent.as_ref().unwrap().lookup(i - self.local.len()) }
+        if i < self.local.len() {
+            &self.local[i]
+        } else {
+            self.parent.as_ref().unwrap().lookup(i - self.local.len())
+        }
     }
 
-    pub fn len(&self) -> usize { self.len }
-    pub fn is_empty(&self) -> bool { self.len == 0 }
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 
     pub fn to_vec(&self) -> Vec<Value> {
         let mut result = Vec::with_capacity(self.len);
@@ -95,7 +119,9 @@ impl Scope {
     }
 
     fn collect_into(&self, result: &mut Vec<Value>) {
-        if let Some(ref p) = self.parent { p.collect_into(result); }
+        if let Some(ref p) = self.parent {
+            p.collect_into(result);
+        }
         result.extend(self.local.iter().rev().cloned());
     }
 }
@@ -267,12 +293,14 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
     fn go_i(i: &I, target: i32, val: &I) -> I {
         match i {
             I::Var(k) if *k == target => val.clone(),
-            I::Meet(a, b) => {
-                I::Meet(Box::new(go_i(a, target, val)), Box::new(go_i(b, target, val)))
-            }
-            I::Join(a, b) => {
-                I::Join(Box::new(go_i(a, target, val)), Box::new(go_i(b, target, val)))
-            }
+            I::Meet(a, b) => I::Meet(
+                Box::new(go_i(a, target, val)),
+                Box::new(go_i(b, target, val)),
+            ),
+            I::Join(a, b) => I::Join(
+                Box::new(go_i(a, target, val)),
+                Box::new(go_i(b, target, val)),
+            ),
             I::Neg(a) => I::Neg(Box::new(go_i(a, target, val))),
             other => other.clone(),
         }
@@ -298,10 +326,9 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                 });
                 Term::TInterval(combined)
             }
-            Term::TApp(f, a) => Term::TApp(
-                Box::new(go(f, target, val)),
-                Box::new(go(a, target, val)),
-            ),
+            Term::TApp(f, a) => {
+                Term::TApp(Box::new(go(f, target, val)), Box::new(go(a, target, val)))
+            }
             Term::TAbs(x, b) => Term::TAbs(x.clone(), Box::new(go(b, target, val))),
             Term::TPi(x, a, b) => Term::TPi(
                 x.clone(),
@@ -314,10 +341,9 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                 Box::new(go(v, target, val)),
             ),
             Term::PLam(x, b) => Term::PLam(x.clone(), Box::new(go(b, target + 1, val))),
-            Term::PApp(p, r) => Term::PApp(
-                Box::new(go(p, target, val)),
-                Box::new(go(r, target, val)),
-            ),
+            Term::PApp(p, r) => {
+                Term::PApp(Box::new(go(p, target, val)), Box::new(go(r, target, val)))
+            }
             Term::THComp(a, sys, base) => Term::THComp(
                 Box::new(go(a, target, val)),
                 sys.iter()
@@ -357,15 +383,13 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                 Box::new(go(eta, target, val)),
                 Box::new(go(eps, target, val)),
             ),
-            Term::TEquivFwd(e, x) => Term::TEquivFwd(
-                Box::new(go(e, target, val)),
-                Box::new(go(x, target, val)),
-            ),
+            Term::TEquivFwd(e, x) => {
+                Term::TEquivFwd(Box::new(go(e, target, val)), Box::new(go(x, target, val)))
+            }
             Term::TUa(e) => Term::TUa(Box::new(go(e, target, val))),
-            Term::TTransport(p, x) => Term::TTransport(
-                Box::new(go(p, target, val)),
-                Box::new(go(x, target, val)),
-            ),
+            Term::TTransport(p, x) => {
+                Term::TTransport(Box::new(go(p, target, val)), Box::new(go(x, target, val)))
+            }
             Term::TGlue(a, ph, te) => Term::TGlue(
                 Box::new(go(a, target, val)),
                 Box::new(go(ph, target, val)),
@@ -381,10 +405,9 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                 Box::new(go(te, target, val)),
                 Box::new(go(g, target, val)),
             ),
-            Term::TPartial(ph, a) => Term::TPartial(
-                Box::new(go(ph, target, val)),
-                Box::new(go(a, target, val)),
-            ),
+            Term::TPartial(ph, a) => {
+                Term::TPartial(Box::new(go(ph, target, val)), Box::new(go(a, target, val)))
+            }
             Term::TSystemType(sys) => Term::TSystemType(
                 sys.iter()
                     .map(|(phi, a)| (go(phi, target, val), go(a, target, val)))
@@ -442,10 +465,9 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                     .collect(),
                 Box::new(go(scrut, target, val)),
             ),
-            Term::TProj(field, record) => Term::TProj(
-                field.clone(),
-                Box::new(go(record, target, val)),
-            ),
+            Term::TProj(field, record) => {
+                Term::TProj(field.clone(), Box::new(go(record, target, val)))
+            }
             Term::TRecordUpdate(record, fields) => Term::TRecordUpdate(
                 Box::new(go(record, target, val)),
                 fields
@@ -525,7 +547,8 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             }
         }
         Term::TApp(f, a) => do_apply(
-            globals, global_offset,
+            globals,
+            global_offset,
             eval_nbe(env, globals, global_offset, f),
             eval_nbe(env, globals, global_offset, a),
         ),
@@ -541,10 +564,9 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
         Term::TUniv(n) => Value::VUniv(*n),
         Term::TProp => Value::VProp,
         Term::TSSet => Value::VSSet,
-        Term::TLift(a, lvl) => Value::VLift(
-            Box::new(eval_nbe(env, globals, global_offset, a)),
-            *lvl,
-        ),
+        Term::TLift(a, lvl) => {
+            Value::VLift(Box::new(eval_nbe(env, globals, global_offset, a)), *lvl)
+        }
         Term::TLower(a) => Value::VLower(Box::new(eval_nbe(env, globals, global_offset, a))),
         Term::TIntervalTy => Value::VIntervalTy,
         Term::TPi(x, a, b) => Value::VPi(
@@ -574,30 +596,35 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             },
         ),
         Term::PApp(p, r) => do_papp(
-            globals, global_offset,
+            globals,
+            global_offset,
             eval_nbe(env, globals, global_offset, p),
             eval_nbe(env, globals, global_offset, r),
         ),
         Term::THComp(a, sys, base) => do_hcomp(
-            globals, global_offset,
+            globals,
+            global_offset,
             eval_nbe(env, globals, global_offset, a),
             eval_system(env, globals, global_offset, sys),
             eval_nbe(env, globals, global_offset, base),
         ),
         Term::TComp(a, sys, base) => do_comp(
-            globals, global_offset,
+            globals,
+            global_offset,
             eval_nbe(env, globals, global_offset, a),
             eval_system(env, globals, global_offset, sys),
             eval_nbe(env, globals, global_offset, base),
         ),
         Term::TFill(a, sys, base) => do_fill(
-            globals, global_offset,
+            globals,
+            global_offset,
             eval_nbe(env, globals, global_offset, a),
             eval_system(env, globals, global_offset, sys),
             eval_nbe(env, globals, global_offset, base),
         ),
         Term::THFill(a, sys, base) => do_hfill(
-            globals, global_offset,
+            globals,
+            global_offset,
             eval_nbe(env, globals, global_offset, a),
             eval_system(env, globals, global_offset, sys),
             eval_nbe(env, globals, global_offset, base),
@@ -615,7 +642,8 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             Box::new(eval_nbe(env, globals, global_offset, eps)),
         ),
         Term::TEquivFwd(e, x) => do_equiv_fwd(
-            globals, global_offset,
+            globals,
+            global_offset,
             eval_nbe(env, globals, global_offset, e),
             eval_nbe(env, globals, global_offset, x),
         ),
@@ -651,7 +679,11 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             } else if phi == dnf_bot() {
                 eval_nbe(env, globals, global_offset, a)
             } else {
-                Value::VGlue(Box::new(eval_nbe(env, globals, global_offset, a)), phi, Box::new(te))
+                Value::VGlue(
+                    Box::new(eval_nbe(env, globals, global_offset, a)),
+                    phi,
+                    Box::new(te),
+                )
             }
         }
         Term::TPartial(phi, a) => {
@@ -685,7 +717,11 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             } else if phi_dnf == dnf_bot() {
                 a_val
             } else {
-                Value::VGlueElem(phi_dnf, Box::new(eval_nbe(env, globals, global_offset, t)), Box::new(a_val))
+                Value::VGlueElem(
+                    phi_dnf,
+                    Box::new(eval_nbe(env, globals, global_offset, t)),
+                    Box::new(a_val),
+                )
             }
         }
         Term::TUnglue(phi, te, g) => {
@@ -717,12 +753,21 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             Box::new(eval_nbe(env, globals, global_offset, a)),
             Box::new(eval_nbe(env, globals, global_offset, b)),
         ),
-        Term::TFst(p) => do_fst(globals, global_offset, eval_nbe(env, globals, global_offset, p)),
-        Term::TSnd(p) => do_snd(globals, global_offset, eval_nbe(env, globals, global_offset, p)),
+        Term::TFst(p) => do_fst(
+            globals,
+            global_offset,
+            eval_nbe(env, globals, global_offset, p),
+        ),
+        Term::TSnd(p) => do_snd(
+            globals,
+            global_offset,
+            eval_nbe(env, globals, global_offset, p),
+        ),
         Term::TProj(field, r) => do_proj(field, eval_nbe(env, globals, global_offset, r)),
         Term::TRecordUpdate(r, updates) => {
             let r_val = eval_nbe(env, globals, global_offset, r);
-            let updates_val: Vec<(Name, Value)> = updates.iter()
+            let updates_val: Vec<(Name, Value)> = updates
+                .iter()
                 .map(|(f, e)| (f.clone(), eval_nbe(env, globals, global_offset, e)))
                 .collect();
             // Eagerly desugar when the record evaluates to a VCon.
@@ -746,42 +791,54 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
         }
         Term::TData(d, params) => Value::VData(
             d.clone(),
-            params.iter().map(|p| eval_nbe(env, globals, global_offset, p)).collect(),
+            params
+                .iter()
+                .map(|p| eval_nbe(env, globals, global_offset, p))
+                .collect(),
         ),
         Term::TCon(data, con, args) => Value::VCon(
             data.clone(),
             con.clone(),
-            args.iter().map(|a| eval_nbe(env, globals, global_offset, a)).collect(),
+            args.iter()
+                .map(|a| eval_nbe(env, globals, global_offset, a))
+                .collect(),
         ),
         Term::TPCon(data, con, args, r) => Value::VPCon(
             data.clone(),
             con.clone(),
-            args.iter().map(|a| eval_nbe(env, globals, global_offset, a)).collect(),
+            args.iter()
+                .map(|a| eval_nbe(env, globals, global_offset, a))
+                .collect(),
             Box::new(eval_nbe(env, globals, global_offset, r)),
         ),
         Term::TSqCon(data, con, args, r, s) => Value::VSqCon(
             data.clone(),
             con.clone(),
-            args.iter().map(|a| eval_nbe(env, globals, global_offset, a)).collect(),
+            args.iter()
+                .map(|a| eval_nbe(env, globals, global_offset, a))
+                .collect(),
             Box::new(eval_nbe(env, globals, global_offset, r)),
             Box::new(eval_nbe(env, globals, global_offset, s)),
         ),
         Term::TCellCon(data, con, args, ivars) => Value::VCellCon(
             data.clone(),
             con.clone(),
-            args.iter().map(|a| eval_nbe(env, globals, global_offset, a)).collect(),
-            ivars.iter().map(|v| eval_nbe(env, globals, global_offset, v)).collect(),
+            args.iter()
+                .map(|a| eval_nbe(env, globals, global_offset, a))
+                .collect(),
+            ivars
+                .iter()
+                .map(|v| eval_nbe(env, globals, global_offset, v))
+                .collect(),
         ),
-        Term::TElim(motive, cases, scrut) => {
-            do_elim(
-                eval_nbe(env, globals, global_offset, motive),
-                cases,
-                eval_nbe(env, globals, global_offset, scrut),
-                env,
-                globals,
-                global_offset,
-            )
-        }
+        Term::TElim(motive, cases, scrut) => do_elim(
+            eval_nbe(env, globals, global_offset, motive),
+            cases,
+            eval_nbe(env, globals, global_offset, scrut),
+            env,
+            globals,
+            global_offset,
+        ),
         Term::Meta(i) => {
             if *i >= 0 {
                 if let Some(solution) = get_meta_solution(*i) {
@@ -804,7 +861,11 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
 pub fn do_force(v: Value, globals: &Globals, global_offset: usize) -> Value {
     match v {
         Value::VNext(inner) => {
-            record_step("force-next".into(), "Force (Next _)".into(), value_str(globals, global_offset, &inner));
+            record_step(
+                "force-next".into(),
+                "Force (Next _)".into(),
+                value_str(globals, global_offset, &inner),
+            );
             *inner
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::NForce(Box::new(n))),
@@ -816,7 +877,11 @@ pub fn do_apply(globals: &Globals, global_offset: usize, f: Value, a: Value) -> 
     match f {
         Value::VLam(ref x, ref clos) => {
             let result = clos.apply(a);
-            record_step("beta".into(), format!("(λ{}. _) _", x), value_str(globals, global_offset, &result));
+            record_step(
+                "beta".into(),
+                format!("(λ{}. _) _", x),
+                value_str(globals, global_offset, &result),
+            );
             result
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::NApp(Box::new(n), Box::new(a))),
@@ -826,19 +891,34 @@ pub fn do_apply(globals: &Globals, global_offset: usize, f: Value, a: Value) -> 
 
 pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> Value {
     if let Some(i) = value_to_endpoint(&r)
-        && let Value::VPLam(_, clos) = p {
-            let end_lbl = if i == I::I0 { "0" } else { "1" };
-            let result = clos.apply_i(i);
-            record_step("path-app".into(), format!("_ @ {}", end_lbl), value_str(globals, global_offset, &result));
-            return result;
-        }
+        && let Value::VPLam(_, clos) = p
+    {
+        let end_lbl = if i == I::I0 { "0" } else { "1" };
+        let result = clos.apply_i(i);
+        record_step(
+            "path-app".into(),
+            format!("_ @ {}", end_lbl),
+            value_str(globals, global_offset, &result),
+        );
+        return result;
+    }
 
     match p {
         Value::VPLam(_, clos) => match r {
             Value::VInterval(ref i) => {
-                let end_lbl = if *i == I::I0 { "0".to_string() } else if *i == I::I1 { "1".to_string() } else { format!("{}", i) };
+                let end_lbl = if *i == I::I0 {
+                    "0".to_string()
+                } else if *i == I::I1 {
+                    "1".to_string()
+                } else {
+                    format!("{}", i)
+                };
                 let result = clos.apply_i(i.clone());
-                record_step("path-app".into(), format!("_ @ {}", end_lbl), value_str(globals, global_offset, &result));
+                record_step(
+                    "path-app".into(),
+                    format!("_ @ {}", end_lbl),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
             Value::VIntervalVar(level) => clos.apply_i_var(level),
@@ -856,15 +936,28 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             if let Some(endpoint) = value_to_endpoint(&r) {
                 match endpoint {
                     I::I0 => {
-                        record_step("hcomp-papp-0".into(), "hcomp _ _ _ @ 0".into(), value_str(globals, global_offset, &base));
+                        record_step(
+                            "hcomp-papp-0".into(),
+                            "hcomp _ _ _ @ 0".into(),
+                            value_str(globals, global_offset, &base),
+                        );
                         *base
                     }
                     I::I1 => {
                         // At i=1, any tube applied to I1 gives the result
                         // (all tubes agree at endpoints by well-formedness)
                         if let Some((_, first_tube)) = sys.first() {
-                            let result = do_papp(globals, global_offset, first_tube.clone(), Value::VInterval(I::I1));
-                            record_step("hcomp-papp-1".into(), "hcomp _ _ _ @ 1".into(), value_str(globals, global_offset, &result));
+                            let result = do_papp(
+                                globals,
+                                global_offset,
+                                first_tube.clone(),
+                                Value::VInterval(I::I1),
+                            );
+                            record_step(
+                                "hcomp-papp-1".into(),
+                                "hcomp _ _ _ @ 1".into(),
+                                value_str(globals, global_offset, &result),
+                            );
                             result
                         } else {
                             // Empty system: shouldn't happen (filtered earlier), but fallback
@@ -876,19 +969,27 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             } else {
                 Value::VPApp(Box::new(Value::VHComp(a, sys, base)), Box::new(r))
             }
-        },
+        }
         // fill boundary reduction: (fill A sys base) @ 0 = base
         //                          (fill A sys base) @ 1 = comp A sys base
         Value::VFill(a, sys, base) => {
             if let Some(endpoint) = value_to_endpoint(&r) {
                 match endpoint {
                     I::I0 => {
-                        record_step("fill-papp-0".into(), "fill _ _ _ @ 0".into(), value_str(globals, global_offset, &base));
+                        record_step(
+                            "fill-papp-0".into(),
+                            "fill _ _ _ @ 0".into(),
+                            value_str(globals, global_offset, &base),
+                        );
                         *base
                     }
                     I::I1 => {
                         let result = do_comp(globals, global_offset, *a, sys.clone(), *base);
-                        record_step("fill-papp-1".into(), "fill _ _ _ @ 1".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "fill-papp-1".into(),
+                            "fill _ _ _ @ 1".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         result
                     }
                     _ => Value::VPApp(Box::new(Value::VFill(a, sys, base)), Box::new(r)),
@@ -896,19 +997,27 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             } else {
                 Value::VPApp(Box::new(Value::VFill(a, sys, base)), Box::new(r))
             }
-        },
+        }
         // hfill boundary reduction: (hfill A sys base) @ 0 = base
         //                           (hfill A sys base) @ 1 = hcomp A sys base
         Value::VHFill(a, sys, base) => {
             if let Some(endpoint) = value_to_endpoint(&r) {
                 match endpoint {
                     I::I0 => {
-                        record_step("hfill-papp-0".into(), "hfill _ _ _ @ 0".into(), value_str(globals, global_offset, &base));
+                        record_step(
+                            "hfill-papp-0".into(),
+                            "hfill _ _ _ @ 0".into(),
+                            value_str(globals, global_offset, &base),
+                        );
                         *base
                     }
                     I::I1 => {
                         let result = do_hcomp(globals, global_offset, *a, sys.clone(), *base);
-                        record_step("hfill-papp-1".into(), "hfill _ _ _ @ 1".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "hfill-papp-1".into(),
+                            "hfill _ _ _ @ 1".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         result
                     }
                     _ => Value::VPApp(Box::new(Value::VHFill(a, sys, base)), Box::new(r)),
@@ -916,7 +1025,7 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             } else {
                 Value::VPApp(Box::new(Value::VHFill(a, sys, base)), Box::new(r))
             }
-        },
+        }
         // Square constructor boundary reduction.
         //
         // A square constructor has type:
@@ -929,32 +1038,58 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             if let Some(endpoint) = value_to_endpoint(&r) {
                 let dts = current_dts();
                 if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
-                    && let Some(sig) = dt.sqcons.iter().find(|c| &c.name == con) {
-                        let arity = sig.arity();
-                        let face = match endpoint {
-                            I::I0 => &sig.face_j0,
-                            I::I1 => &sig.face_j1,
-                            _ => unreachable!(),
-                        };
-                        let mut face_inst = face.clone();
-                        let arg_terms: Vec<Term> = args.iter()
-                            .map(|a| quote(0, globals, global_offset, a.clone()))
-                            .collect();
-                        for k in (0..arity).rev() {
-                            face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
-                        }
-                        let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
-                        let face_val = eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst);
-                        record_step("sqcon-boundary".into(),
-                            format!("{} @ {} @ _", con, if endpoint == I::I0 { "0" } else { "1" }),
-                            value_str(globals, global_offset, &face_val));
-                        return do_papp(globals, global_offset, face_val, (**sq_s).clone());
+                    && let Some(sig) = dt.sqcons.iter().find(|c| &c.name == con)
+                {
+                    let arity = sig.arity();
+                    let face = match endpoint {
+                        I::I0 => &sig.face_j0,
+                        I::I1 => &sig.face_j1,
+                        _ => unreachable!(),
+                    };
+                    let mut face_inst = face.clone();
+                    let arg_terms: Vec<Term> = args
+                        .iter()
+                        .map(|a| quote(0, globals, global_offset, a.clone()))
+                        .collect();
+                    for k in (0..arity).rev() {
+                        face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
                     }
-                Value::VPApp(Box::new(Value::VSqCon(data.clone(), con.clone(), args.clone(), sq_r.clone(), sq_s.clone())), Box::new(r))
+                    let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
+                    let face_val = eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst);
+                    record_step(
+                        "sqcon-boundary".into(),
+                        format!(
+                            "{} @ {} @ _",
+                            con,
+                            if endpoint == I::I0 { "0" } else { "1" }
+                        ),
+                        value_str(globals, global_offset, &face_val),
+                    );
+                    return do_papp(globals, global_offset, face_val, (**sq_s).clone());
+                }
+                Value::VPApp(
+                    Box::new(Value::VSqCon(
+                        data.clone(),
+                        con.clone(),
+                        args.clone(),
+                        sq_r.clone(),
+                        sq_s.clone(),
+                    )),
+                    Box::new(r),
+                )
             } else {
-                Value::VPApp(Box::new(Value::VSqCon(data.clone(), con.clone(), args.clone(), sq_r.clone(), sq_s.clone())), Box::new(r))
+                Value::VPApp(
+                    Box::new(Value::VSqCon(
+                        data.clone(),
+                        con.clone(),
+                        args.clone(),
+                        sq_r.clone(),
+                        sq_s.clone(),
+                    )),
+                    Box::new(r),
+                )
             }
-        },
+        }
         // N-dimensional cell constructor boundary reduction.
         //
         // A cell constructor with n interval args and faces
@@ -969,40 +1104,64 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             if let Some(endpoint) = value_to_endpoint(&r) {
                 let dts = current_dts();
                 if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
-                    && let Some(sig) = dt.cellcons.iter().find(|c| &c.name == con) {
-                        let arity = sig.arity();
-                        let dim = sig.dimension();
-                        // The outermost face pair is the last pair in the faces list.
-                        let face = match endpoint {
-                            I::I0 => &sig.faces[2 * dim - 2],
-                            I::I1 => &sig.faces[2 * dim - 1],
-                            _ => unreachable!(),
-                        };
-                        let mut face_inst = face.clone();
-                        let arg_terms: Vec<Term> = args.iter()
-                            .map(|a| quote(0, globals, global_offset, a.clone()))
-                            .collect();
-                        for k in (0..arity).rev() {
-                            face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
-                        }
-                        let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
-                        let mut face_val = eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst);
-                        record_step("cellcon-boundary".into(),
-                            format!("{} @ {} @ ...", con, if endpoint == I::I0 { "0" } else { "1" }),
-                            value_str(globals, global_offset, &face_val));
-                        // Apply the face value to the remaining (n-1) interval args.
-                        for iv in ivars.iter().rev().skip(1) {
-                            face_val = do_papp(globals, global_offset, face_val, iv.clone());
-                        }
-                        return face_val;
+                    && let Some(sig) = dt.cellcons.iter().find(|c| &c.name == con)
+                {
+                    let arity = sig.arity();
+                    let dim = sig.dimension();
+                    // The outermost face pair is the last pair in the faces list.
+                    let face = match endpoint {
+                        I::I0 => &sig.faces[2 * dim - 2],
+                        I::I1 => &sig.faces[2 * dim - 1],
+                        _ => unreachable!(),
+                    };
+                    let mut face_inst = face.clone();
+                    let arg_terms: Vec<Term> = args
+                        .iter()
+                        .map(|a| quote(0, globals, global_offset, a.clone()))
+                        .collect();
+                    for k in (0..arity).rev() {
+                        face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
                     }
-                Value::VPApp(Box::new(Value::VCellCon(data.clone(), con.clone(), args.clone(), ivars.clone())), Box::new(r))
+                    let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
+                    let mut face_val = eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst);
+                    record_step(
+                        "cellcon-boundary".into(),
+                        format!(
+                            "{} @ {} @ ...",
+                            con,
+                            if endpoint == I::I0 { "0" } else { "1" }
+                        ),
+                        value_str(globals, global_offset, &face_val),
+                    );
+                    // Apply the face value to the remaining (n-1) interval args.
+                    for iv in ivars.iter().rev().skip(1) {
+                        face_val = do_papp(globals, global_offset, face_val, iv.clone());
+                    }
+                    return face_val;
+                }
+                Value::VPApp(
+                    Box::new(Value::VCellCon(
+                        data.clone(),
+                        con.clone(),
+                        args.clone(),
+                        ivars.clone(),
+                    )),
+                    Box::new(r),
+                )
             } else {
                 // Non-endpoint interval arg: build nested PApp for remaining ivars.
-                let result = Value::VPApp(Box::new(Value::VCellCon(data.clone(), con.clone(), args.clone(), ivars.clone())), Box::new(r));
+                let result = Value::VPApp(
+                    Box::new(Value::VCellCon(
+                        data.clone(),
+                        con.clone(),
+                        args.clone(),
+                        ivars.clone(),
+                    )),
+                    Box::new(r),
+                );
                 result
             }
-        },
+        }
         // Zero-arg path constructor: VCon(d, c, []) applied to interval endpoint.
         // A zero-arg path constructor like `line2` has type PathP, so PApp(line2, r)
         // should reduce via the PConSig faces.
@@ -1010,21 +1169,28 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             if let Some(endpoint) = value_to_endpoint(&r) {
                 let dts = current_dts();
                 if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
-                    && let Some(sig) = dt.pcons.iter().find(|c| &c.name == con) {
-                        let face = match endpoint {
-                            I::I0 => &sig.face0,
-                            I::I1 => &sig.face1,
-                            _ => unreachable!(),
-                        };
-                        let face_val = eval_nbe(&Scope::empty(), &Rc::new(RefCell::new(Vec::new())), 0, face);
-                        record_step("pcon-zero-arg-boundary".into(),
-                            format!("{} @ {}", con, if endpoint == I::I0 { "0" } else { "1" }),
-                            value_str(globals, global_offset, &face_val));
-                        return face_val;
-                    }
+                    && let Some(sig) = dt.pcons.iter().find(|c| &c.name == con)
+                {
+                    let face = match endpoint {
+                        I::I0 => &sig.face0,
+                        I::I1 => &sig.face1,
+                        _ => unreachable!(),
+                    };
+                    let face_val =
+                        eval_nbe(&Scope::empty(), &Rc::new(RefCell::new(Vec::new())), 0, face);
+                    record_step(
+                        "pcon-zero-arg-boundary".into(),
+                        format!("{} @ {}", con, if endpoint == I::I0 { "0" } else { "1" }),
+                        value_str(globals, global_offset, &face_val),
+                    );
+                    return face_val;
+                }
             }
-            Value::VPApp(Box::new(Value::VCon(data.clone(), con.clone(), args.clone())), Box::new(r))
-        },
+            Value::VPApp(
+                Box::new(Value::VCon(data.clone(), con.clone(), args.clone())),
+                Box::new(r),
+            )
+        }
         // VGlueElem endpoint reduction:
         //   VGlueElem(phi, t, a) @ 0 = a       (the base A-element)
         //   VGlueElem(phi, t, a) @ 1 = t       (the cap B-element)
@@ -1032,19 +1198,33 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
             if let Some(endpoint) = value_to_endpoint(&r) {
                 match endpoint {
                     I::I0 => {
-                        record_step("glue-elem-papp-0".into(), "glue-elem _ _ _ @ 0".into(), value_str(globals, global_offset, a));
+                        record_step(
+                            "glue-elem-papp-0".into(),
+                            "glue-elem _ _ _ @ 0".into(),
+                            value_str(globals, global_offset, a),
+                        );
                         (**a).clone()
                     }
                     I::I1 => {
-                        record_step("glue-elem-papp-1".into(), "glue-elem _ _ _ @ 1".into(), value_str(globals, global_offset, t));
+                        record_step(
+                            "glue-elem-papp-1".into(),
+                            "glue-elem _ _ _ @ 1".into(),
+                            value_str(globals, global_offset, t),
+                        );
                         (**t).clone()
                     }
-                    _ => Value::VPApp(Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())), Box::new(r)),
+                    _ => Value::VPApp(
+                        Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())),
+                        Box::new(r),
+                    ),
                 }
             } else {
-                Value::VPApp(Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())), Box::new(r))
+                Value::VPApp(
+                    Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())),
+                    Box::new(r),
+                )
             }
-        },
+        }
         other => Value::VPApp(Box::new(other), Box::new(r)),
     }
 }
@@ -1052,7 +1232,11 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
 pub fn do_fst(globals: &Globals, global_offset: usize, p: Value) -> Value {
     match p {
         Value::VPair(a, _) => {
-            record_step("fst-pair".into(), "fst (_, _)".into(), value_str(globals, global_offset, &a));
+            record_step(
+                "fst-pair".into(),
+                "fst (_, _)".into(),
+                value_str(globals, global_offset, &a),
+            );
             *a
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::NFst(Box::new(n))),
@@ -1063,7 +1247,11 @@ pub fn do_fst(globals: &Globals, global_offset: usize, p: Value) -> Value {
 pub fn do_snd(globals: &Globals, global_offset: usize, p: Value) -> Value {
     match p {
         Value::VPair(_, b) => {
-            record_step("snd-pair".into(), "snd (_, _)".into(), value_str(globals, global_offset, &b));
+            record_step(
+                "snd-pair".into(),
+                "snd (_, _)".into(),
+                value_str(globals, global_offset, &b),
+            );
             *b
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::NSnd(Box::new(n))),
@@ -1090,7 +1278,10 @@ pub fn do_proj(field: &str, r: Value) -> Value {
                     }
                 }
             }
-            Value::VProj(field.to_string(), Box::new(Value::VRecordUpdate(r_inner, updates.clone())))
+            Value::VProj(
+                field.to_string(),
+                Box::new(Value::VRecordUpdate(r_inner, updates.clone())),
+            )
         }
         Value::VCon(_, _, ref args) => {
             let dts = current_dts();
@@ -1116,192 +1307,344 @@ pub fn do_proj(field: &str, r: Value) -> Value {
     }
 }
 
-pub fn do_elim(motive: Value, cases: &[ElimCase], scrut: Value, env: &Scope, globals: &Globals, global_offset: usize) -> Value {
+pub fn do_elim(
+    motive: Value,
+    cases: &[ElimCase],
+    scrut: Value,
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+) -> Value {
     match scrut {
-        Value::VCon(ref data, ref con, ref args) => match cases.iter().find(|case| case.con == *con) {
-            Some(case) => {
-                let mut env2_values: Vec<Value> = args.iter().rev().cloned().collect();
-                if case.as_name.is_some() {
-                    env2_values.insert(0, Value::VCon(data.clone(), con.clone(), args.clone()));
+        Value::VCon(ref data, ref con, ref args) => {
+            match cases.iter().find(|case| case.con == *con) {
+                Some(case) => {
+                    let mut env2_values: Vec<Value> = args.iter().rev().cloned().collect();
+                    if case.as_name.is_some() {
+                        env2_values.insert(0, Value::VCon(data.clone(), con.clone(), args.clone()));
+                    }
+                    let env2 = env.chain(env2_values);
+                    let result = eval_nbe(&env2, globals, global_offset, &case.body);
+                    record_step(
+                        "elim-con".into(),
+                        format!("elim _ [{}] ({} {})", con, data, con),
+                        value_str(globals, global_offset, &result),
+                    );
+                    result
                 }
-                let env2 = env.chain(env2_values);
-                let result = eval_nbe(&env2, globals, global_offset, &case.body);
-                record_step("elim-con".into(), format!("elim _ [{}] ({} {})", con, data, con), value_str(globals, global_offset, &result));
-                result
+                None => Value::VElim(
+                    Box::new(motive),
+                    cases.to_vec(),
+                    Box::new(Value::VCon("".into(), con.clone(), args.clone())),
+                    env.clone(),
+                    global_offset,
+                ),
             }
-            None => Value::VElim(
-                Box::new(motive),
-                cases.to_vec(),
-                Box::new(Value::VCon("".into(), con.clone(), args.clone())),
-                env.clone(),
-                global_offset,
-            ),
-        },
-        Value::VPCon(ref data, ref con, ref args, ref r) => match cases.iter().find(|case| case.con == *con) {
-            Some(case) => {
-                let env2 = env.chain(args.iter().rev().cloned().collect());
-                let body = eval_nbe(&env2, globals, global_offset, &case.body);
-                let result = do_papp(globals, global_offset, body, (**r).clone());
-                record_step("elim-pcon".into(), format!("elim _ [{}] ({} {})", con, data, con), value_str(globals, global_offset, &result));
-                result
+        }
+        Value::VPCon(ref data, ref con, ref args, ref r) => {
+            match cases.iter().find(|case| case.con == *con) {
+                Some(case) => {
+                    let env2 = env.chain(args.iter().rev().cloned().collect());
+                    let body = eval_nbe(&env2, globals, global_offset, &case.body);
+                    let result = do_papp(globals, global_offset, body, (**r).clone());
+                    record_step(
+                        "elim-pcon".into(),
+                        format!("elim _ [{}] ({} {})", con, data, con),
+                        value_str(globals, global_offset, &result),
+                    );
+                    result
+                }
+                None => Value::VElim(
+                    Box::new(motive),
+                    cases.to_vec(),
+                    Box::new(Value::VPCon(
+                        "".into(),
+                        con.clone(),
+                        args.clone(),
+                        r.clone(),
+                    )),
+                    env.clone(),
+                    global_offset,
+                ),
             }
-            None => Value::VElim(
-                Box::new(motive),
-                cases.to_vec(),
-                Box::new(Value::VPCon("".into(), con.clone(), args.clone(), r.clone())),
-                env.clone(),
-                global_offset,
-            ),
-        },
+        }
         // Square constructor elimination: body has 2 interval binders.
         // Evaluate body with args in scope, then apply to both interval args.
-        Value::VSqCon(ref data, ref con, ref args, ref r, ref s) => match cases.iter().find(|case| case.con == *con) {
-            Some(case) => {
-                let env2 = env.chain(args.iter().rev().cloned().collect());
-                let body = eval_nbe(&env2, globals, global_offset, &case.body);
-                // Body is PLam-shaped with 2 interval binders: apply to both r and s.
-                let body_at_r = do_papp(globals, global_offset, body, (**r).clone());
-                let result = do_papp(globals, global_offset, body_at_r, (**s).clone());
-                record_step("elim-sqcon".into(), format!("elim _ [{}] ({} {})", con, data, con), value_str(globals, global_offset, &result));
-                result
+        Value::VSqCon(ref data, ref con, ref args, ref r, ref s) => {
+            match cases.iter().find(|case| case.con == *con) {
+                Some(case) => {
+                    let env2 = env.chain(args.iter().rev().cloned().collect());
+                    let body = eval_nbe(&env2, globals, global_offset, &case.body);
+                    // Body is PLam-shaped with 2 interval binders: apply to both r and s.
+                    let body_at_r = do_papp(globals, global_offset, body, (**r).clone());
+                    let result = do_papp(globals, global_offset, body_at_r, (**s).clone());
+                    record_step(
+                        "elim-sqcon".into(),
+                        format!("elim _ [{}] ({} {})", con, data, con),
+                        value_str(globals, global_offset, &result),
+                    );
+                    result
+                }
+                None => Value::VElim(
+                    Box::new(motive),
+                    cases.to_vec(),
+                    Box::new(Value::VSqCon(
+                        "".into(),
+                        con.clone(),
+                        args.clone(),
+                        r.clone(),
+                        s.clone(),
+                    )),
+                    env.clone(),
+                    global_offset,
+                ),
             }
-            None => Value::VElim(
-                Box::new(motive),
-                cases.to_vec(),
-                Box::new(Value::VSqCon("".into(), con.clone(), args.clone(), r.clone(), s.clone())),
-                env.clone(),
-                global_offset,
-            ),
-        },
+        }
         // N-dimensional cell constructor elimination: body has n interval binders.
         // Evaluate body with args in scope, then apply to all interval args.
-        Value::VCellCon(ref data, ref con, ref args, ref ivars) => match cases.iter().find(|case| case.con == *con) {
-            Some(case) => {
-                let env2 = env.chain(args.iter().rev().cloned().collect());
-                let body = eval_nbe(&env2, globals, global_offset, &case.body);
-                // Apply body to all interval args (innermost first).
-                let mut result = body;
-                for iv in ivars.iter() {
-                    result = do_papp(globals, global_offset, result, iv.clone());
+        Value::VCellCon(ref data, ref con, ref args, ref ivars) => {
+            match cases.iter().find(|case| case.con == *con) {
+                Some(case) => {
+                    let env2 = env.chain(args.iter().rev().cloned().collect());
+                    let body = eval_nbe(&env2, globals, global_offset, &case.body);
+                    // Apply body to all interval args (innermost first).
+                    let mut result = body;
+                    for iv in ivars.iter() {
+                        result = do_papp(globals, global_offset, result, iv.clone());
+                    }
+                    record_step(
+                        "elim-cellcon".into(),
+                        format!("elim _ [{}] ({} {})", con, data, con),
+                        value_str(globals, global_offset, &result),
+                    );
+                    result
                 }
-                record_step("elim-cellcon".into(), format!("elim _ [{}] ({} {})", con, data, con), value_str(globals, global_offset, &result));
-                result
+                None => Value::VElim(
+                    Box::new(motive),
+                    cases.to_vec(),
+                    Box::new(Value::VCellCon(
+                        "".into(),
+                        con.clone(),
+                        args.clone(),
+                        ivars.clone(),
+                    )),
+                    env.clone(),
+                    global_offset,
+                ),
             }
-            None => Value::VElim(
-                Box::new(motive),
-                cases.to_vec(),
-                Box::new(Value::VCellCon("".into(), con.clone(), args.clone(), ivars.clone())),
-                env.clone(),
-                global_offset,
-            ),
-        },
+        }
         Value::VNeutral(n) => stuck_elim(motive, cases, n, env, global_offset),
-        other => Value::VElim(Box::new(motive), cases.to_vec(), Box::new(other), env.clone(), global_offset),
+        other => Value::VElim(
+            Box::new(motive),
+            cases.to_vec(),
+            Box::new(other),
+            env.clone(),
+            global_offset,
+        ),
     }
 }
 
-pub fn do_transport(env: &Scope, globals: &Globals, global_offset: usize, p: Value, x: Value) -> Value {
+pub fn do_transport(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    p: Value,
+    x: Value,
+) -> Value {
     match p {
         Value::VUa(e) => {
             let result = do_equiv_fwd(globals, global_offset, *e, x);
-            record_step("transport-ua".into(), "transport (ua _) _".into(), value_str(globals, global_offset, &result));
+            record_step(
+                "transport-ua".into(),
+                "transport (ua _) _".into(),
+                value_str(globals, global_offset, &result),
+            );
             result
         }
         Value::VPLam(ref i_name, ref clos) => {
             let b0 = clos.apply_i(I::I0);
             let b1 = clos.apply_i(I::I1);
-            if quote(0, globals, global_offset, b0.clone()) == quote(0, globals, global_offset, b1.clone()) {
-                record_step("transport-const".into(), "transport (λi. A) x [A constant]".into(), value_str(globals, global_offset, &x));
+            if quote(0, globals, global_offset, b0.clone())
+                == quote(0, globals, global_offset, b1.clone())
+            {
+                record_step(
+                    "transport-const".into(),
+                    "transport (λi. A) x [A constant]".into(),
+                    value_str(globals, global_offset, &x),
+                );
                 return x;
             }
 
-
             match (&b0, &b1) {
                 (Value::VUniv(_), Value::VUniv(_)) => {
-                    record_step("transport-univ".into(), "transport (λi. Univ) _".into(), value_str(globals, global_offset, &x));
+                    record_step(
+                        "transport-univ".into(),
+                        "transport (λi. Univ) _".into(),
+                        value_str(globals, global_offset, &x),
+                    );
                     x
                 }
 
                 // Prop/SSet transport (constant type families, same as Univ)
                 (Value::VProp, Value::VProp) | (Value::VSSet, Value::VSSet) => {
-                    record_step("transport-prop-ss".into(), "transport (λi. Prop/SSet) _".into(), value_str(globals, global_offset, &x));
+                    record_step(
+                        "transport-prop-ss".into(),
+                        "transport (λi. Prop/SSet) _".into(),
+                        value_str(globals, global_offset, &x),
+                    );
                     x
                 }
 
                 // Lift transport: transport (λi. Lift (A i) lvl) x
-                (Value::VLift(_, _), Value::VLift(_, _)) => {
-                    Value::VTransport(Box::new(Value::VPLam(i_name.to_string(), clos.clone())), Box::new(x))
-                }
+                (Value::VLift(_, _), Value::VLift(_, _)) => Value::VTransport(
+                    Box::new(Value::VPLam(i_name.to_string(), clos.clone())),
+                    Box::new(x),
+                ),
 
                 // Lower transport: same fallback
-                (Value::VLower(_), Value::VLower(_)) => {
-                    Value::VTransport(Box::new(Value::VPLam(i_name.to_string(), clos.clone())), Box::new(x))
-                }
+                (Value::VLower(_), Value::VLower(_)) => Value::VTransport(
+                    Box::new(Value::VPLam(i_name.to_string(), clos.clone())),
+                    Box::new(x),
+                ),
 
                 // Pi transport (non-dependent codomain only)
                 (Value::VPi(arg_name, _, _), Value::VPi(_, _, _)) => {
-                    let result = transport_pi(env, globals, global_offset, i_name, clos, arg_name, x);
-                    record_step("transport-pi".into(), "transport (λi. Π _ _) _".into(), value_str(globals, global_offset, &result));
+                    let result =
+                        transport_pi(env, globals, global_offset, i_name, clos, arg_name, x);
+                    record_step(
+                        "transport-pi".into(),
+                        "transport (λi. Π _ _) _".into(),
+                        value_str(globals, global_offset, &result),
+                    );
                     result
                 }
 
                 // Path transport
                 (Value::VPath(_, _, _), Value::VPath(_, _, _)) => {
                     let result = transport_path(env, globals, global_offset, i_name, clos, x);
-                    record_step("transport-path".into(), "transport (λi. Path _ _ _) _".into(), value_str(globals, global_offset, &result));
+                    record_step(
+                        "transport-path".into(),
+                        "transport (λi. Path _ _ _) _".into(),
+                        value_str(globals, global_offset, &result),
+                    );
                     result
                 }
 
                 // Sigma transport (pair only)
-                (Value::VSigma(_, _, _), Value::VSigma(_, _, _)) => {
-                    match x {
-                        Value::VPair(ref a, ref b) => {
-                            let result = transport_sigma_pair(env, globals, global_offset, i_name, clos, a, b);
-                            record_step("transport-sigma".into(), "transport (λi. Σ _ _) (_, _)".into(), value_str(globals, global_offset, &result));
-                            result
-                        }
-                        _ => Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(x)),
+                (Value::VSigma(_, _, _), Value::VSigma(_, _, _)) => match x {
+                    Value::VPair(ref a, ref b) => {
+                        let result =
+                            transport_sigma_pair(env, globals, global_offset, i_name, clos, a, b);
+                        record_step(
+                            "transport-sigma".into(),
+                            "transport (λi. Σ _ _) (_, _)".into(),
+                            value_str(globals, global_offset, &result),
+                        );
+                        result
                     }
-                }
+                    _ => Value::VTransport(
+                        Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                        Box::new(x),
+                    ),
+                },
 
                 // Glue transport (phi=bot or phi=top)
                 (Value::VGlue(_, phi0, _), Value::VGlue(_, _, _)) => {
                     let r = transport_glue(env, globals, global_offset, i_name, clos, phi0, &x);
                     r.unwrap_or_else(|| {
-                        Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(x))
+                        Value::VTransport(
+                            Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                            Box::new(x),
+                        )
                     })
                 }
 
                 // Data type transport: transport through a constant data type family
                 // (λi. D params) where D doesn't depend on i.
                 // Transport a constructor by transporting each argument through its type.
-                (Value::VData(d0, _), Value::VData(d1, _)) if d0 == d1 => {
-                    match x {
-                        Value::VCon(ref d, ref con, ref args) if d == d0 => {
-                            let result = transport_data_con(env, globals, global_offset, i_name, clos, con, args);
-                            record_step("transport-data".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
-                            result
-                        }
-                        Value::VPCon(ref d, ref con, ref args, ref r) if d == d0 => {
-                            let result = transport_data_pcon(env, globals, global_offset, i_name, clos, con, args, r);
-                            record_step("transport-data-pcon".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
-                            result
-                        }
-                        Value::VSqCon(ref d, ref con, ref args, ref r, ref s) if d == d0 => {
-                            let result = transport_data_sqcon(env, globals, global_offset, i_name, clos, con, args, r, s);
-                            record_step("transport-data-sqcon".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
-                            result
-                        }
-                        Value::VCellCon(ref d, ref con, ref args, ref ivars) if d == d0 => {
-                            let result = transport_data_cellcon(env, globals, global_offset, i_name, clos, con, args, ivars);
-                            record_step("transport-data-cellcon".into(), format!("transport (λi. {}) ({} ...)", d, con), value_str(globals, global_offset, &result));
-                            result
-                        }
-                        _ => Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(x)),
+                (Value::VData(d0, _), Value::VData(d1, _)) if d0 == d1 => match x {
+                    Value::VCon(ref d, ref con, ref args) if d == d0 => {
+                        let result = transport_data_con(
+                            env,
+                            globals,
+                            global_offset,
+                            i_name,
+                            clos,
+                            con,
+                            args,
+                        );
+                        record_step(
+                            "transport-data".into(),
+                            format!("transport (λi. {}) ({} ...)", d, con),
+                            value_str(globals, global_offset, &result),
+                        );
+                        result
                     }
-                }
+                    Value::VPCon(ref d, ref con, ref args, ref r) if d == d0 => {
+                        let result = transport_data_pcon(
+                            env,
+                            globals,
+                            global_offset,
+                            i_name,
+                            clos,
+                            con,
+                            args,
+                            r,
+                        );
+                        record_step(
+                            "transport-data-pcon".into(),
+                            format!("transport (λi. {}) ({} ...)", d, con),
+                            value_str(globals, global_offset, &result),
+                        );
+                        result
+                    }
+                    Value::VSqCon(ref d, ref con, ref args, ref r, ref s) if d == d0 => {
+                        let result = transport_data_sqcon(
+                            env,
+                            globals,
+                            global_offset,
+                            i_name,
+                            clos,
+                            con,
+                            args,
+                            r,
+                            s,
+                        );
+                        record_step(
+                            "transport-data-sqcon".into(),
+                            format!("transport (λi. {}) ({} ...)", d, con),
+                            value_str(globals, global_offset, &result),
+                        );
+                        result
+                    }
+                    Value::VCellCon(ref d, ref con, ref args, ref ivars) if d == d0 => {
+                        let result = transport_data_cellcon(
+                            env,
+                            globals,
+                            global_offset,
+                            i_name,
+                            clos,
+                            con,
+                            args,
+                            ivars,
+                        );
+                        record_step(
+                            "transport-data-cellcon".into(),
+                            format!("transport (λi. {}) ({} ...)", d, con),
+                            value_str(globals, global_offset, &result),
+                        );
+                        result
+                    }
+                    _ => Value::VTransport(
+                        Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                        Box::new(x),
+                    ),
+                },
 
-                _ => Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(x)),
+                _ => Value::VTransport(
+                    Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                    Box::new(x),
+                ),
             }
         }
         other => Value::VNeutral(Neutral::NTransport(Box::new(other), Box::new(x))),
@@ -1310,11 +1653,13 @@ pub fn do_transport(env: &Scope, globals: &Globals, global_offset: usize, p: Val
 
 /// Evaluate the body of a PLam at a formal interval variable (TVar(0) in the
 /// returned term will be the interval binder).
-fn eval_body_at_formal_interval(env: &Scope, globals: &Globals, global_offset: usize, clos: &IClosure) -> (Scope, Value) {
-    let body_with_var = beta(
-        &shift(1, 0, &clos.body),
-        &Term::TVar(0),
-    );
+fn eval_body_at_formal_interval(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    clos: &IClosure,
+) -> (Scope, Value) {
+    let body_with_var = beta(&shift(1, 0, &clos.body), &Term::TVar(0));
     let formal_env = env.extend(Value::VIntervalVar(env.len()));
     let evaluated = eval_nbe(&formal_env, globals, global_offset, &body_with_var);
     (formal_env, evaluated)
@@ -1334,25 +1679,72 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TApp(f, a) => uses_var_at_level(f, level) || uses_var_at_level(a, level),
         Term::TAbs(_, b) => uses_var_at_level(b, level + 1),
         Term::TPi(_, a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level + 1),
-        Term::TPath(a, u, v) => uses_var_at_level(a, level) || uses_var_at_level(u, level) || uses_var_at_level(v, level),
+        Term::TPath(a, u, v) => {
+            uses_var_at_level(a, level)
+                || uses_var_at_level(u, level)
+                || uses_var_at_level(v, level)
+        }
         Term::PLam(_, b) => uses_var_at_level(b, level + 1),
         Term::PApp(p, r) => uses_var_at_level(p, level) || uses_var_at_level(r, level),
-        Term::THComp(a, sys, base) => uses_var_at_level(a, level) || sys.iter().any(|(phi, tube)| uses_var_at_level(phi, level) || uses_var_at_level(tube, level)) || uses_var_at_level(base, level),
-        Term::TComp(a, sys, base) => uses_var_at_level(a, level) || sys.iter().any(|(phi, tube)| uses_var_at_level(phi, level) || uses_var_at_level(tube, level)) || uses_var_at_level(base, level),
-        Term::TFill(a, sys, base) => uses_var_at_level(a, level) || sys.iter().any(|(phi, tube)| uses_var_at_level(phi, level) || uses_var_at_level(tube, level)) || uses_var_at_level(base, level),
-        Term::THFill(a, sys, base) => uses_var_at_level(a, level) || sys.iter().any(|(phi, tube)| uses_var_at_level(phi, level) || uses_var_at_level(tube, level)) || uses_var_at_level(base, level),
+        Term::THComp(a, sys, base) => {
+            uses_var_at_level(a, level)
+                || sys.iter().any(|(phi, tube)| {
+                    uses_var_at_level(phi, level) || uses_var_at_level(tube, level)
+                })
+                || uses_var_at_level(base, level)
+        }
+        Term::TComp(a, sys, base) => {
+            uses_var_at_level(a, level)
+                || sys.iter().any(|(phi, tube)| {
+                    uses_var_at_level(phi, level) || uses_var_at_level(tube, level)
+                })
+                || uses_var_at_level(base, level)
+        }
+        Term::TFill(a, sys, base) => {
+            uses_var_at_level(a, level)
+                || sys.iter().any(|(phi, tube)| {
+                    uses_var_at_level(phi, level) || uses_var_at_level(tube, level)
+                })
+                || uses_var_at_level(base, level)
+        }
+        Term::THFill(a, sys, base) => {
+            uses_var_at_level(a, level)
+                || sys.iter().any(|(phi, tube)| {
+                    uses_var_at_level(phi, level) || uses_var_at_level(tube, level)
+                })
+                || uses_var_at_level(base, level)
+        }
         Term::TEquiv(a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level),
         Term::TMkEquiv(a, b, f, g, eta, eps) => {
-            uses_var_at_level(a, level) || uses_var_at_level(b, level) || uses_var_at_level(f, level) || uses_var_at_level(g, level) || uses_var_at_level(eta, level) || uses_var_at_level(eps, level)
+            uses_var_at_level(a, level)
+                || uses_var_at_level(b, level)
+                || uses_var_at_level(f, level)
+                || uses_var_at_level(g, level)
+                || uses_var_at_level(eta, level)
+                || uses_var_at_level(eps, level)
         }
         Term::TEquivFwd(e, x) => uses_var_at_level(e, level) || uses_var_at_level(x, level),
         Term::TUa(e) => uses_var_at_level(e, level),
         Term::TTransport(p, x) => uses_var_at_level(p, level) || uses_var_at_level(x, level),
-        Term::TGlue(a, phi, te) => uses_var_at_level(a, level) || uses_var_at_level(phi, level) || uses_var_at_level(te, level),
-        Term::TGlueElem(phi, t, a) => uses_var_at_level(phi, level) || uses_var_at_level(t, level) || uses_var_at_level(a, level),
-        Term::TUnglue(phi, te, g) => uses_var_at_level(phi, level) || uses_var_at_level(te, level) || uses_var_at_level(g, level),
+        Term::TGlue(a, phi, te) => {
+            uses_var_at_level(a, level)
+                || uses_var_at_level(phi, level)
+                || uses_var_at_level(te, level)
+        }
+        Term::TGlueElem(phi, t, a) => {
+            uses_var_at_level(phi, level)
+                || uses_var_at_level(t, level)
+                || uses_var_at_level(a, level)
+        }
+        Term::TUnglue(phi, te, g) => {
+            uses_var_at_level(phi, level)
+                || uses_var_at_level(te, level)
+                || uses_var_at_level(g, level)
+        }
         Term::TPartial(phi, a) => uses_var_at_level(phi, level) || uses_var_at_level(a, level),
-        Term::TSystemType(sys) => sys.iter().any(|(phi, a)| uses_var_at_level(phi, level) || uses_var_at_level(a, level)),
+        Term::TSystemType(sys) => sys
+            .iter()
+            .any(|(phi, a)| uses_var_at_level(phi, level) || uses_var_at_level(a, level)),
         Term::TSigma(_, a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level + 1),
         Term::TPair(a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level),
         Term::TFst(p) => uses_var_at_level(p, level),
@@ -1361,16 +1753,32 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TRecordUpdate(r, updates) => {
             uses_var_at_level(r, level) || updates.iter().any(|(_, e)| uses_var_at_level(e, level))
         }
-        Term::TUniv(_) | Term::TProp | Term::TSSet | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => false,
+        Term::TUniv(_)
+        | Term::TProp
+        | Term::TSSet
+        | Term::TIntervalTy
+        | Term::TInterval(_)
+        | Term::TCube(_) => false,
         Term::TLift(a, _) => uses_var_at_level(a, level),
         Term::TLower(a) => uses_var_at_level(a, level),
         Term::TData(_, params) => params.iter().any(|p| uses_var_at_level(p, level)),
         Term::TCon(_, _, args) => args.iter().any(|a| uses_var_at_level(a, level)),
-        Term::TPCon(_, _, args, r) => args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level),
-        Term::TSqCon(_, _, args, r, s) => args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level) || uses_var_at_level(s, level),
-        Term::TCellCon(_, _, args, ivars) => args.iter().any(|a| uses_var_at_level(a, level)) || ivars.iter().any(|v| uses_var_at_level(v, level)),
+        Term::TPCon(_, _, args, r) => {
+            args.iter().any(|a| uses_var_at_level(a, level)) || uses_var_at_level(r, level)
+        }
+        Term::TSqCon(_, _, args, r, s) => {
+            args.iter().any(|a| uses_var_at_level(a, level))
+                || uses_var_at_level(r, level)
+                || uses_var_at_level(s, level)
+        }
+        Term::TCellCon(_, _, args, ivars) => {
+            args.iter().any(|a| uses_var_at_level(a, level))
+                || ivars.iter().any(|v| uses_var_at_level(v, level))
+        }
         Term::TElim(motive, cases, scrut) => {
-            uses_var_at_level(motive, level) || uses_var_at_level(scrut, level) || cases.iter().any(|c| uses_var_at_level(&c.body, level + 1))
+            uses_var_at_level(motive, level)
+                || uses_var_at_level(scrut, level)
+                || cases.iter().any(|c| uses_var_at_level(&c.body, level + 1))
         }
         Term::Meta(_) => false,
         Term::TBy(_) => false,
@@ -1379,19 +1787,33 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
 }
 
 /// Transport through Pi types.
-fn transport_pi(env: &Scope, globals: &Globals, global_offset: usize, i_name: &str, clos: &IClosure, arg_name: &str, x: Value) -> Value {
+fn transport_pi(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    i_name: &str,
+    clos: &IClosure,
+    arg_name: &str,
+    x: Value,
+) -> Value {
     let (formal_env, pi_at_var) = eval_body_at_formal_interval(env, globals, global_offset, clos);
     let cod_clos = match &pi_at_var {
         Value::VPi(_, _, cod_clos) => cod_clos,
-        _ => return Value::VTransport(
-            Box::new(Value::VPLam("_".to_string(), clos.clone())),
-            Box::new(x),
-        ),
+        _ => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(x),
+            );
+        }
     };
 
     if !uses_var_at_level(&cod_clos.body, 0i32) {
         let b_val = apply_non_dep(cod_clos);
-        let b_body = shift(1, 1, &quote(formal_env.len(), globals, global_offset, b_val));
+        let b_body = shift(
+            1,
+            1,
+            &quote(formal_env.len(), globals, global_offset, b_val),
+        );
         let b_fam = Term::PLam(i_name.to_string(), Box::new(b_body));
         let x_term = quote(env.len(), globals, global_offset, x);
         let result = Term::TAbs(
@@ -1406,7 +1828,12 @@ fn transport_pi(env: &Scope, globals: &Globals, global_offset: usize, i_name: &s
         );
         eval_nbe(env, globals, global_offset, &result)
     } else {
-        let p_term = quote(env.len(), globals, global_offset, Value::VPLam(i_name.to_string(), clos.clone()));
+        let p_term = quote(
+            env.len(),
+            globals,
+            global_offset,
+            Value::VPLam(i_name.to_string(), clos.clone()),
+        );
         let x_term = quote(env.len(), globals, global_offset, x.clone());
         let reduced = transport_term_fallback(p_term, x_term);
         match reduced {
@@ -1420,16 +1847,29 @@ fn transport_pi(env: &Scope, globals: &Globals, global_offset: usize, i_name: &s
 }
 
 /// Transport through Path types.
-fn transport_path(env: &Scope, globals: &Globals, global_offset: usize, i_name: &str, clos: &IClosure, x: Value) -> Value {
+fn transport_path(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    i_name: &str,
+    clos: &IClosure,
+    x: Value,
+) -> Value {
     let (formal_env, path_at_var) = eval_body_at_formal_interval(env, globals, global_offset, clos);
     let a_val = match &path_at_var {
         Value::VPath(a, _, _) => *a.clone(),
-        _ => return Value::VTransport(
-            Box::new(Value::VPLam("_".to_string(), clos.clone())),
-            Box::new(x),
-        ),
+        _ => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(x),
+            );
+        }
     };
-    let a_body = shift(1, 1, &quote(formal_env.len(), globals, global_offset, a_val));
+    let a_body = shift(
+        1,
+        1,
+        &quote(formal_env.len(), globals, global_offset, a_val),
+    );
     let a_fam = Term::PLam(i_name.to_string(), Box::new(a_body));
     let x_term = quote(env.len(), globals, global_offset, x);
     let a_fam_s = shift(1, 0, &a_fam);
@@ -1456,30 +1896,49 @@ fn transport_sigma_pair(
     a: &Value,
     b: &Value,
 ) -> Value {
-    let (formal_env, sigma_at_var) = eval_body_at_formal_interval(env, globals, global_offset, clos);
+    let (formal_env, sigma_at_var) =
+        eval_body_at_formal_interval(env, globals, global_offset, clos);
     let a_val = match &sigma_at_var {
         Value::VSigma(_, a_val, _) => *a_val.clone(),
         _ => Value::VUniv(0),
     };
-    let a_body = shift(1, 1, &quote(formal_env.len(), globals, global_offset, a_val));
+    let a_body = shift(
+        1,
+        1,
+        &quote(formal_env.len(), globals, global_offset, a_val),
+    );
     let a_fam = Term::PLam(i_name.to_string(), Box::new(a_body));
 
-    let a_prime = eval_nbe(env, globals, global_offset, &Term::TTransport(
-        Box::new(a_fam.clone()),
-        Box::new(quote(env.len(), globals, global_offset, a.clone())),
-    ));
+    let a_prime = eval_nbe(
+        env,
+        globals,
+        global_offset,
+        &Term::TTransport(
+            Box::new(a_fam.clone()),
+            Box::new(quote(env.len(), globals, global_offset, a.clone())),
+        ),
+    );
 
     let b_val = match &sigma_at_var {
         Value::VSigma(_, _, cod_clos) => apply_non_dep(cod_clos),
         _ => Value::VUniv(0),
     };
-    let b_body = shift(1, 1, &quote(formal_env.len(), globals, global_offset, b_val));
+    let b_body = shift(
+        1,
+        1,
+        &quote(formal_env.len(), globals, global_offset, b_val),
+    );
     let b_fam = Term::PLam(i_name.to_string(), Box::new(b_body));
 
-    let b_prime = eval_nbe(env, globals, global_offset, &Term::TTransport(
-        Box::new(b_fam),
-        Box::new(quote(env.len(), globals, global_offset, b.clone())),
-    ));
+    let b_prime = eval_nbe(
+        env,
+        globals,
+        global_offset,
+        &Term::TTransport(
+            Box::new(b_fam),
+            Box::new(quote(env.len(), globals, global_offset, b.clone())),
+        ),
+    );
 
     Value::VPair(Box::new(a_prime), Box::new(b_prime))
 }
@@ -1504,15 +1963,30 @@ fn transport_data_con(
     let dts = current_dts();
     let d_name = match clos.apply_i(I::I0) {
         Value::VData(name, _) => name,
-        _ => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCon("".into(), con_name.into(), args.to_vec()))),
+        _ => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VCon("".into(), con_name.into(), args.to_vec())),
+            );
+        }
     };
     let dt = match dts.iter().find(|dt| dt.name == d_name) {
         Some(dt) => dt.clone(),
-        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec()))),
+        None => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec())),
+            );
+        }
     };
     let con_sig = match dt.find_con(con_name) {
         Some(sig) => sig.clone(),
-        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec()))),
+        None => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec())),
+            );
+        }
     };
 
     let n = con_sig.arity();
@@ -1544,10 +2018,15 @@ fn transport_data_con(
         // ty_shifted now has: outermost binder for interval i, then variable 0 is arg k
         // Wrap as (λi. ty_shifted) with var 0 being the interval
         let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
-        let transported = eval_nbe(env, globals, global_offset, &Term::TTransport(
-            Box::new(ty_fam),
-            Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
-        ));
+        let transported = eval_nbe(
+            env,
+            globals,
+            global_offset,
+            &Term::TTransport(
+                Box::new(ty_fam),
+                Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
+            ),
+        );
         result_args.push(transported);
     }
 
@@ -1569,15 +2048,45 @@ fn transport_data_pcon(
     let dts = current_dts();
     let d_name = match clos.apply_i(I::I0) {
         Value::VData(name, _) => name,
-        _ => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VPCon("".into(), con_name.into(), args.to_vec(), Box::new(r.clone())))),
+        _ => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VPCon(
+                    "".into(),
+                    con_name.into(),
+                    args.to_vec(),
+                    Box::new(r.clone()),
+                )),
+            );
+        }
     };
     let dt = match dts.iter().find(|dt| dt.name == d_name) {
         Some(dt) => dt.clone(),
-        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VPCon(d_name.clone(), con_name.into(), args.to_vec(), Box::new(r.clone())))),
+        None => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VPCon(
+                    d_name.clone(),
+                    con_name.into(),
+                    args.to_vec(),
+                    Box::new(r.clone()),
+                )),
+            );
+        }
     };
     let con_sig = match dt.find_pcon(con_name) {
         Some(sig) => sig.clone(),
-        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VPCon(d_name.clone(), con_name.into(), args.to_vec(), Box::new(r.clone())))),
+        None => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VPCon(
+                    d_name.clone(),
+                    con_name.into(),
+                    args.to_vec(),
+                    Box::new(r.clone()),
+                )),
+            );
+        }
     };
 
     let n = con_sig.arity();
@@ -1599,14 +2108,24 @@ fn transport_data_pcon(
             ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
         }
         let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
-        let transported = eval_nbe(env, globals, global_offset, &Term::TTransport(
-            Box::new(ty_fam),
-            Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
-        ));
+        let transported = eval_nbe(
+            env,
+            globals,
+            global_offset,
+            &Term::TTransport(
+                Box::new(ty_fam),
+                Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
+            ),
+        );
         result_args.push(transported);
     }
 
-    Value::VPCon(d_name.clone(), con_name.into(), result_args, Box::new(r.clone()))
+    Value::VPCon(
+        d_name.clone(),
+        con_name.into(),
+        result_args,
+        Box::new(r.clone()),
+    )
 }
 
 /// Transport a square constructor `sqcon c a₁ ... aₙ r s` through a constant data type family.
@@ -1624,20 +2143,59 @@ fn transport_data_sqcon(
     let dts = current_dts();
     let d_name = match clos.apply_i(I::I0) {
         Value::VData(name, _) => name,
-        _ => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VSqCon("".into(), con_name.into(), args.to_vec(), Box::new(r.clone()), Box::new(s.clone())))),
+        _ => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VSqCon(
+                    "".into(),
+                    con_name.into(),
+                    args.to_vec(),
+                    Box::new(r.clone()),
+                    Box::new(s.clone()),
+                )),
+            );
+        }
     };
     let dt = match dts.iter().find(|dt| dt.name == d_name) {
         Some(dt) => dt.clone(),
-        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VSqCon(d_name.clone(), con_name.into(), args.to_vec(), Box::new(r.clone()), Box::new(s.clone())))),
+        None => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VSqCon(
+                    d_name.clone(),
+                    con_name.into(),
+                    args.to_vec(),
+                    Box::new(r.clone()),
+                    Box::new(s.clone()),
+                )),
+            );
+        }
     };
     let con_sig = match dt.find_sqcon(con_name) {
         Some(sig) => sig.clone(),
-        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VSqCon(d_name.clone(), con_name.into(), args.to_vec(), Box::new(r.clone()), Box::new(s.clone())))),
+        None => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VSqCon(
+                    d_name.clone(),
+                    con_name.into(),
+                    args.to_vec(),
+                    Box::new(r.clone()),
+                    Box::new(s.clone()),
+                )),
+            );
+        }
     };
 
     let n = con_sig.arity();
     if n == 0 {
-        return Value::VSqCon(d_name.clone(), con_name.into(), vec![], Box::new(r.clone()), Box::new(s.clone()));
+        return Value::VSqCon(
+            d_name.clone(),
+            con_name.into(),
+            vec![],
+            Box::new(r.clone()),
+            Box::new(s.clone()),
+        );
     }
 
     let mut result_args: Vec<Value> = Vec::new();
@@ -1654,14 +2212,25 @@ fn transport_data_sqcon(
             ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
         }
         let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
-        let transported = eval_nbe(env, globals, global_offset, &Term::TTransport(
-            Box::new(ty_fam),
-            Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
-        ));
+        let transported = eval_nbe(
+            env,
+            globals,
+            global_offset,
+            &Term::TTransport(
+                Box::new(ty_fam),
+                Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
+            ),
+        );
         result_args.push(transported);
     }
 
-    Value::VSqCon(d_name.clone(), con_name.into(), result_args, Box::new(r.clone()), Box::new(s.clone()))
+    Value::VSqCon(
+        d_name.clone(),
+        con_name.into(),
+        result_args,
+        Box::new(r.clone()),
+        Box::new(s.clone()),
+    )
 }
 
 /// Transport an n-dimensional cell constructor through a constant data type family.
@@ -1679,15 +2248,45 @@ fn transport_data_cellcon(
     let dts = current_dts();
     let d_name = match clos.apply_i(I::I0) {
         Value::VData(name, _) => name,
-        _ => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCellCon("".into(), con_name.into(), args.to_vec(), ivars.to_vec()))),
+        _ => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VCellCon(
+                    "".into(),
+                    con_name.into(),
+                    args.to_vec(),
+                    ivars.to_vec(),
+                )),
+            );
+        }
     };
     let dt = match dts.iter().find(|dt| dt.name == d_name) {
         Some(dt) => dt.clone(),
-        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCellCon(d_name.clone(), con_name.into(), args.to_vec(), ivars.to_vec()))),
+        None => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VCellCon(
+                    d_name.clone(),
+                    con_name.into(),
+                    args.to_vec(),
+                    ivars.to_vec(),
+                )),
+            );
+        }
     };
     let con_sig = match dt.find_cellcon(con_name) {
         Some(sig) => sig.clone(),
-        None => return Value::VTransport(Box::new(Value::VPLam("_".to_string(), clos.clone())), Box::new(Value::VCellCon(d_name.clone(), con_name.into(), args.to_vec(), ivars.to_vec()))),
+        None => {
+            return Value::VTransport(
+                Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                Box::new(Value::VCellCon(
+                    d_name.clone(),
+                    con_name.into(),
+                    args.to_vec(),
+                    ivars.to_vec(),
+                )),
+            );
+        }
     };
 
     let n = con_sig.arity();
@@ -1709,10 +2308,15 @@ fn transport_data_cellcon(
             ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
         }
         let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
-        let transported = eval_nbe(env, globals, global_offset, &Term::TTransport(
-            Box::new(ty_fam),
-            Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
-        ));
+        let transported = eval_nbe(
+            env,
+            globals,
+            global_offset,
+            &Term::TTransport(
+                Box::new(ty_fam),
+                Box::new(quote(env.len(), globals, global_offset, args[k].clone())),
+            ),
+        );
         result_args.push(transported);
     }
 
@@ -1730,19 +2334,30 @@ fn transport_glue(
     x: &Value,
 ) -> Option<Value> {
     if *phi0 == dnf_bot() {
-        let (formal_env, glue_at_var) = eval_body_at_formal_interval(env, globals, global_offset, clos);
+        let (formal_env, glue_at_var) =
+            eval_body_at_formal_interval(env, globals, global_offset, clos);
         let a_val = match &glue_at_var {
             Value::VGlue(a, _, _) => *a.clone(),
             _ => return None,
         };
-        let a_body = shift(1, 1, &quote(formal_env.len(), globals, global_offset, a_val));
+        let a_body = shift(
+            1,
+            1,
+            &quote(formal_env.len(), globals, global_offset, a_val),
+        );
         let a_fam = Term::PLam(i_name.to_string(), Box::new(a_body));
-        Some(eval_nbe(env, globals, global_offset, &Term::TTransport(
-            Box::new(a_fam),
-            Box::new(quote(env.len(), globals, global_offset, x.clone())),
-        )))
+        Some(eval_nbe(
+            env,
+            globals,
+            global_offset,
+            &Term::TTransport(
+                Box::new(a_fam),
+                Box::new(quote(env.len(), globals, global_offset, x.clone())),
+            ),
+        ))
     } else if *phi0 == dnf_top() {
-        let (formal_env, glue_at_var) = eval_body_at_formal_interval(env, globals, global_offset, clos);
+        let (formal_env, glue_at_var) =
+            eval_body_at_formal_interval(env, globals, global_offset, clos);
         let te_val = match &glue_at_var {
             Value::VGlue(_, _, te) => *te.clone(),
             _ => return None,
@@ -1750,10 +2365,15 @@ fn transport_glue(
         let dom = equiv_dom_value(te_val);
         let dom_body = shift(1, 1, &quote(formal_env.len(), globals, global_offset, dom));
         let dom_fam = Term::PLam(i_name.to_string(), Box::new(dom_body));
-        Some(eval_nbe(env, globals, global_offset, &Term::TTransport(
-            Box::new(dom_fam),
-            Box::new(quote(env.len(), globals, global_offset, x.clone())),
-        )))
+        Some(eval_nbe(
+            env,
+            globals,
+            global_offset,
+            &Term::TTransport(
+                Box::new(dom_fam),
+                Box::new(quote(env.len(), globals, global_offset, x.clone())),
+            ),
+        ))
     } else {
         // Non-trivial face: decompose glue elements using the cubical Glue transport rule.
         // transp (λi. Glue A [φ] te) (glue [φ] t a)
@@ -1762,7 +2382,8 @@ fn transport_glue(
         // via hcomp to maintain the boundary condition on face φ.
         match x {
             Value::VGlueElem(phi_elem, t, a) if *phi_elem == *phi0 => {
-                let (_, glue_at_var) = eval_body_at_formal_interval(env, globals, global_offset, clos);
+                let (_, glue_at_var) =
+                    eval_body_at_formal_interval(env, globals, global_offset, clos);
                 let a_ty = match &glue_at_var {
                     Value::VGlue(a, _, _) => *a.clone(),
                     _ => return None,
@@ -1834,12 +2455,17 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
                             arg_name,
                             Box::new(nbe_eval(&Term::TTransport(
                                 Box::new(b_fam),
-                                Box::new(nbe_eval(&Term::TApp(Box::new(x_shifted), Box::new(Term::TVar(0))))),
+                                Box::new(nbe_eval(&Term::TApp(
+                                    Box::new(x_shifted),
+                                    Box::new(Term::TVar(0)),
+                                ))),
                             ))),
                         )
                     } else {
                         let b_non_dep = match &b0 {
-                            Term::TPi(_, _, b0_body) => subst(0, &Term::TUniv(0), b0_body) == **b0_body,
+                            Term::TPi(_, _, b0_body) => {
+                                subst(0, &Term::TUniv(0), b0_body) == **b0_body
+                            }
                             _ => false,
                         };
                         if b_non_dep {
@@ -1849,17 +2475,22 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
                             };
                             let b_fam = Term::PLam(
                                 i_name.clone(),
-                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
-                                    Term::TPi(_, _, b_i) => *b_i,
-                                    _ => shift(1, 0, &b0_body),
-                                }),
+                                Box::new(
+                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                        Term::TPi(_, _, b_i) => *b_i,
+                                        _ => shift(1, 0, &b0_body),
+                                    },
+                                ),
                             );
                             let x_shifted = shift(1, 0, &x_);
                             Term::TAbs(
                                 arg_name,
                                 Box::new(nbe_eval(&Term::TTransport(
                                     Box::new(b_fam),
-                                    Box::new(nbe_eval(&Term::TApp(Box::new(x_shifted), Box::new(Term::TVar(0))))),
+                                    Box::new(nbe_eval(&Term::TApp(
+                                        Box::new(x_shifted),
+                                        Box::new(Term::TVar(0)),
+                                    ))),
                                 ))),
                             )
                         } else {
@@ -1960,64 +2591,62 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
                     )
                 }
 
-                (Term::TSigma(_, _, _), Term::TSigma(_, _, _)) => {
-                    match x_ {
-                        Term::TPair(ref a, ref b) => {
-                            let i_name = i_name.clone();
+                (Term::TSigma(_, _, _), Term::TSigma(_, _, _)) => match x_ {
+                    Term::TPair(ref a, ref b) => {
+                        let i_name = i_name.clone();
 
-                            let b0_a = match &b0 {
-                                Term::TSigma(_, a, _) => (**a).clone(),
-                                _ => b0.clone(),
-                            };
-                            let b0_b = match &b0 {
-                                Term::TSigma(_, _, bz) => (**bz).clone(),
-                                _ => b0.clone(),
-                            };
+                        let b0_a = match &b0 {
+                            Term::TSigma(_, a, _) => (**a).clone(),
+                            _ => b0.clone(),
+                        };
+                        let b0_b = match &b0 {
+                            Term::TSigma(_, _, bz) => (**bz).clone(),
+                            _ => b0.clone(),
+                        };
 
-                            let a_fam = Term::PLam(
-                                i_name.clone(),
-                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
-                                    Term::TSigma(_, a_i, _) => *a_i,
-                                    _ => shift(1, 0, &b0_a),
-                                }),
-                            );
+                        let a_fam = Term::PLam(
+                            i_name.clone(),
+                            Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                Term::TSigma(_, a_i, _) => *a_i,
+                                _ => shift(1, 0, &b0_a),
+                            }),
+                        );
 
-                            let a_prime =
-                                nbe_eval(&Term::TTransport(Box::new(a_fam.clone()), a.clone()));
+                        let a_prime =
+                            nbe_eval(&Term::TTransport(Box::new(a_fam.clone()), a.clone()));
 
-                            let a_clone = (**a).clone();
-                            let b_fam = Term::PLam(
-                                i_name.clone(),
-                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
-                                    Term::TSigma(_, _, b_i) => {
-                                        let fill_at_i = nbe_eval(&Term::TTransport(
-                                            Box::new(Term::PLam(
-                                                "j".to_string(),
-                                                Box::new(nbe_eval(&Term::PApp(
-                                                    Box::new(shift(2, 0, &a_fam)),
-                                                    Box::new(Term::TInterval(I::Meet(
-                                                        Box::new(I::Var(1)),
-                                                        Box::new(I::Var(0)),
-                                                    ))),
+                        let a_clone = (**a).clone();
+                        let b_fam = Term::PLam(
+                            i_name.clone(),
+                            Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                Term::TSigma(_, _, b_i) => {
+                                    let fill_at_i = nbe_eval(&Term::TTransport(
+                                        Box::new(Term::PLam(
+                                            "j".to_string(),
+                                            Box::new(nbe_eval(&Term::PApp(
+                                                Box::new(shift(2, 0, &a_fam)),
+                                                Box::new(Term::TInterval(I::Meet(
+                                                    Box::new(I::Var(1)),
+                                                    Box::new(I::Var(0)),
                                                 ))),
-                                            )),
-                                            Box::new(shift(1, 0, &a_clone)),
-                                        ));
-                                        nbe_eval(&beta(&b_i, &fill_at_i))
-                                    }
-                                    _ => shift(1, 0, &b0_b),
-                                }),
-                            );
+                                            ))),
+                                        )),
+                                        Box::new(shift(1, 0, &a_clone)),
+                                    ));
+                                    nbe_eval(&beta(&b_i, &fill_at_i))
+                                }
+                                _ => shift(1, 0, &b0_b),
+                            }),
+                        );
 
-                            let b_prime = nbe_eval(&Term::TTransport(Box::new(b_fam), b.clone()));
-                            Term::TPair(Box::new(a_prime), Box::new(b_prime))
-                        }
-                        _ => Term::TTransport(
-                            Box::new(Term::PLam(i_name.clone(), body.clone())),
-                            Box::new(x_),
-                        ),
+                        let b_prime = nbe_eval(&Term::TTransport(Box::new(b_fam), b.clone()));
+                        Term::TPair(Box::new(a_prime), Box::new(b_prime))
                     }
-                }
+                    _ => Term::TTransport(
+                        Box::new(Term::PLam(i_name.clone(), body.clone())),
+                        Box::new(x_),
+                    ),
+                },
 
                 (Term::TGlue(_, phi0, _), Term::TGlue(_, _, _)) => {
                     let i_name = i_name.clone();
@@ -2025,10 +2654,12 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
                         nbe_eval(&Term::TTransport(
                             Box::new(Term::PLam(
                                 i_name.clone(),
-                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
-                                    Term::TGlue(a, _, _) => *a,
-                                    other => other,
-                                }),
+                                Box::new(
+                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                        Term::TGlue(a, _, _) => *a,
+                                        other => other,
+                                    },
+                                ),
                             )),
                             Box::new(x_),
                         ))
@@ -2036,33 +2667,42 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
                         nbe_eval(&Term::TTransport(
                             Box::new(Term::PLam(
                                 i_name.clone(),
-                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
-                                    Term::TGlue(_, _, te) => equiv_dom(&nbe_eval(&te)),
-                                    other => other,
-                                }),
+                                Box::new(
+                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                        Term::TGlue(_, _, te) => equiv_dom(&nbe_eval(&te)),
+                                        other => other,
+                                    },
+                                ),
                             )),
                             Box::new(x_),
                         ))
                     } else {
                         // Non-trivial face: if x_ is a GlueElem with matching face, decompose.
                         match &x_ {
-                            Term::TGlueElem(phi_elem, t, a) if nbe_eval(phi0) == nbe_eval(phi_elem) => {
-                                let a_ty = match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                            Term::TGlueElem(phi_elem, t, a)
+                                if nbe_eval(phi0) == nbe_eval(phi_elem) =>
+                            {
+                                let a_ty = match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)))
+                                {
                                     Term::TGlue(a, _, _) => *a,
                                     other => other,
                                 };
-                                let tube = Term::PLam(
-                                    i_name.clone(),
-                                    Box::new(shift(1, 0, &*t)),
-                                );
+                                let tube = Term::PLam(i_name.clone(), Box::new(shift(1, 0, &*t)));
                                 let hcomp = Term::THComp(
                                     Box::new(a_ty),
-                                    vec![( (**phi0).clone(), tube)],
+                                    vec![((**phi0).clone(), tube)],
                                     (*a).clone(),
                                 );
-                                Term::TGlueElem(Box::new((**phi0).clone()), t.clone(), Box::new(hcomp))
+                                Term::TGlueElem(
+                                    Box::new((**phi0).clone()),
+                                    t.clone(),
+                                    Box::new(hcomp),
+                                )
                             }
-                            _ => Term::TTransport(Box::new(Term::PLam(i_name, body.clone())), Box::new(x_)),
+                            _ => Term::TTransport(
+                                Box::new(Term::PLam(i_name, body.clone())),
+                                Box::new(x_),
+                            ),
                         }
                     }
                 }
@@ -2074,15 +2714,20 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
                         Term::TLift(v, lvl) => {
                             let a_fam = Term::PLam(
                                 i_name.clone(),
-                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
-                                    Term::TLift(a, _) => *a,
-                                    other => other,
-                                }),
+                                Box::new(
+                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                        Term::TLift(a, _) => *a,
+                                        other => other,
+                                    },
+                                ),
                             );
                             let inner_transport = Term::TTransport(Box::new(a_fam), v);
                             Term::TLift(Box::new(inner_transport), lvl)
                         }
-                        _ => Term::TTransport(Box::new(Term::PLam(i_name, body.clone())), Box::new(x_)),
+                        _ => Term::TTransport(
+                            Box::new(Term::PLam(i_name, body.clone())),
+                            Box::new(x_),
+                        ),
                     }
                 }
 
@@ -2093,15 +2738,20 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
                         Term::TLower(v) => {
                             let a_fam = Term::PLam(
                                 i_name.clone(),
-                                Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
-                                    Term::TLower(a) => *a,
-                                    other => other,
-                                }),
+                                Box::new(
+                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0))) {
+                                        Term::TLower(a) => *a,
+                                        other => other,
+                                    },
+                                ),
                             );
                             let inner_transport = Term::TTransport(Box::new(a_fam), v);
                             Term::TLower(Box::new(inner_transport))
                         }
-                        _ => Term::TTransport(Box::new(Term::PLam(i_name, body.clone())), Box::new(x_)),
+                        _ => Term::TTransport(
+                            Box::new(Term::PLam(i_name, body.clone())),
+                            Box::new(x_),
+                        ),
                     }
                 }
 
@@ -2118,7 +2768,10 @@ pub fn transport_term_fallback(p_: Term, x_: Term) -> Term {
 
 /// Try to match a constructor value and extract its ordinary + interval args.
 /// Returns (con_name, ordinary_args, interval_args) or None.
-fn match_ctor_args<'a>(v: &'a Value, expected_name: &str) -> Option<(&'a str, Vec<&'a Value>, Vec<&'a Value>)> {
+fn match_ctor_args<'a>(
+    v: &'a Value,
+    expected_name: &str,
+) -> Option<(&'a str, Vec<&'a Value>, Vec<&'a Value>)> {
     match v {
         Value::VCon(_, name, args) if name == expected_name => {
             Some((name.as_str(), args.iter().collect(), vec![]))
@@ -2126,9 +2779,11 @@ fn match_ctor_args<'a>(v: &'a Value, expected_name: &str) -> Option<(&'a str, Ve
         Value::VPCon(_, name, args, r) if name == expected_name => {
             Some((name.as_str(), args.iter().collect(), vec![r.as_ref()]))
         }
-        Value::VSqCon(_, name, args, r, s) if name == expected_name => {
-            Some((name.as_str(), args.iter().collect(), vec![r.as_ref(), s.as_ref()]))
-        }
+        Value::VSqCon(_, name, args, r, s) if name == expected_name => Some((
+            name.as_str(),
+            args.iter().collect(),
+            vec![r.as_ref(), s.as_ref()],
+        )),
         Value::VCellCon(_, name, args, ivars) if name == expected_name => {
             Some((name.as_str(), args.iter().collect(), ivars.iter().collect()))
         }
@@ -2143,7 +2798,12 @@ thread_local! {
 /// Check if all tubes in the system are constant (tube @ I0 ≡ tube @ I1)
 /// AND coherent with base (tube @ I0 ≡ base). When this holds, the Kan
 /// operations degenerate: hcomp/comp → base, fill/hfill → constant path.
-fn all_tubes_constant_and_coherent(globals: &Globals, global_offset: usize, sys: &DNFSystem, base: &Value) -> bool {
+fn all_tubes_constant_and_coherent(
+    globals: &Globals,
+    global_offset: usize,
+    sys: &DNFSystem,
+    base: &Value,
+) -> bool {
     // Guard against re-entrancy. The tube check quotes the base/tubes and
     // compares them with `definitionally_equal`, which re-normalizes via
     // `nbe_eval_ctx` → `quote`. When the quoted body is itself a PLam/VLam
@@ -2163,11 +2823,26 @@ fn all_tubes_constant_and_coherent(globals: &Globals, global_offset: usize, sys:
     result
 }
 
-fn all_tubes_constant_and_coherent_inner(globals: &Globals, global_offset: usize, sys: &DNFSystem, base: &Value) -> bool {
+fn all_tubes_constant_and_coherent_inner(
+    globals: &Globals,
+    global_offset: usize,
+    sys: &DNFSystem,
+    base: &Value,
+) -> bool {
     let base_term = quote(0, globals, global_offset, base.clone());
     for (_phi, tube) in sys {
-        let t0 = do_papp(globals, global_offset, tube.clone(), Value::VInterval(I::I0));
-        let t1 = do_papp(globals, global_offset, tube.clone(), Value::VInterval(I::I1));
+        let t0 = do_papp(
+            globals,
+            global_offset,
+            tube.clone(),
+            Value::VInterval(I::I0),
+        );
+        let t1 = do_papp(
+            globals,
+            global_offset,
+            tube.clone(),
+            Value::VInterval(I::I1),
+        );
         let t0_term = quote(0, globals, global_offset, t0);
         let t1_term = quote(0, globals, global_offset, t1);
         // Tube must be constant: t @ I0 ≡ t @ I1
@@ -2182,21 +2857,43 @@ fn all_tubes_constant_and_coherent_inner(globals: &Globals, global_offset: usize
     true
 }
 
-pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSystem, base: Value) -> Value {
+pub fn do_hcomp(
+    globals: &Globals,
+    global_offset: usize,
+    a_ty: Value,
+    sys: DNFSystem,
+    base: Value,
+) -> Value {
     // Filter out ⊥ faces
-    let sys: DNFSystem = sys.into_iter().filter(|(phi, _)| *phi != dnf_bot()).collect();
+    let sys: DNFSystem = sys
+        .into_iter()
+        .filter(|(phi, _)| *phi != dnf_bot())
+        .collect();
 
     // Empty system → base
     if sys.is_empty() {
-        record_step("hcomp-empty".into(), "hcomp A [] base".into(), value_str(globals, global_offset, &base));
+        record_step(
+            "hcomp-empty".into(),
+            "hcomp A [] base".into(),
+            value_str(globals, global_offset, &base),
+        );
         return base;
     }
 
     // Any face = ⊤ → corresponding tube applied at i1
     for (phi, tube) in &sys {
         if *phi == dnf_top() {
-            let result = do_papp(globals, global_offset, tube.clone(), Value::VInterval(I::I1));
-            record_step("hcomp-top-face".into(), "hcomp A [⊤ ↦ t, ...] base".into(), value_str(globals, global_offset, &result));
+            let result = do_papp(
+                globals,
+                global_offset,
+                tube.clone(),
+                Value::VInterval(I::I1),
+            );
+            record_step(
+                "hcomp-top-face".into(),
+                "hcomp A [⊤ ↦ t, ...] base".into(),
+                value_str(globals, global_offset, &result),
+            );
             return result;
         }
     }
@@ -2205,7 +2902,11 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
     // variable (tube @ i0 ≡ tube @ i1) and agree with base, the system
     // imposes no varying constraint and hcomp reduces to base.
     if all_tubes_constant_and_coherent(globals, global_offset, &sys, &base) {
-        record_step("hcomp-const-tube".into(), "hcomp A [const tubes] base".into(), value_str(globals, global_offset, &base));
+        record_step(
+            "hcomp-const-tube".into(),
+            "hcomp A [const tubes] base".into(),
+            value_str(globals, global_offset, &base),
+        );
         return base;
     }
 
@@ -2228,76 +2929,113 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
             // ── Pi decomposition ──
             (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
                 let arg_var = Value::VNeutral(Neutral::NVar(0));
-                let inner_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let tube_at_arg = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_apply(globals, global_offset, tube_at_i, arg_var.clone())
-                        }
-                        _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
-                    };
-                    (phi.clone(), tube_at_arg)
-                }).collect();
+                let inner_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let tube_at_arg = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_apply(globals, global_offset, tube_at_i, arg_var.clone())
+                            }
+                            _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
+                        };
+                        (phi.clone(), tube_at_arg)
+                    })
+                    .collect();
                 let base_at_arg = base_clos.apply(arg_var.clone());
                 let cod_at_arg = cod_clos.apply(arg_var);
                 let inner = do_hcomp(globals, global_offset, cod_at_arg, inner_sys, base_at_arg);
-                let result = Value::VLam(arg_name.clone(), Closure {
-                    env: Scope::empty(),
-                    globals: globals.clone(),
-                    global_offset,
-                    body: {
-                        let inner_term = quote(1, globals, global_offset, inner);
-                        Term::TAbs(arg_name.clone(), Box::new(inner_term))
+                let result = Value::VLam(
+                    arg_name.clone(),
+                    Closure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: {
+                            let inner_term = quote(1, globals, global_offset, inner);
+                            Term::TAbs(arg_name.clone(), Box::new(inner_term))
+                        },
                     },
-                });
-                record_step("hcomp-pi".into(), "hcomp (Π _ _) sys f g".into(), value_str(globals, global_offset, &result));
+                );
+                record_step(
+                    "hcomp-pi".into(),
+                    "hcomp (Π _ _) sys f g".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
             // ── Sigma decomposition ──
             (Value::VSigma(_, fst_ty, snd_clos), Value::VPair(fst_base, snd_base)) => {
-                let fst_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let fst_tube = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_fst(globals, global_offset, tube_at_i)
-                        }
-                        _ => do_fst(globals, global_offset, tube.clone()),
-                    };
-                    let fst_tube_plam = Value::VPLam("_".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, fst_tube),
-                    });
-                    (phi.clone(), fst_tube_plam)
-                }).collect();
-                let fst_result = do_hcomp(globals, global_offset, *fst_ty.clone(), fst_sys, (**fst_base).clone());
+                let fst_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let fst_tube = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_fst(globals, global_offset, tube_at_i)
+                            }
+                            _ => do_fst(globals, global_offset, tube.clone()),
+                        };
+                        let fst_tube_plam = Value::VPLam(
+                            "_".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, fst_tube),
+                            },
+                        );
+                        (phi.clone(), fst_tube_plam)
+                    })
+                    .collect();
+                let fst_result = do_hcomp(
+                    globals,
+                    global_offset,
+                    *fst_ty.clone(),
+                    fst_sys,
+                    (**fst_base).clone(),
+                );
 
-                let snd_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let snd_tube = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_snd(globals, global_offset, tube_at_i)
-                        }
-                        _ => do_snd(globals, global_offset, tube.clone()),
-                    };
-                    let snd_tube_plam = Value::VPLam("_".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, snd_tube),
-                    });
-                    (phi.clone(), snd_tube_plam)
-                }).collect();
-                let snd_result = do_hcomp(globals, global_offset,
-                    snd_clos.apply((**fst_base).clone()), snd_sys, (**snd_base).clone());
+                let snd_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let snd_tube = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_snd(globals, global_offset, tube_at_i)
+                            }
+                            _ => do_snd(globals, global_offset, tube.clone()),
+                        };
+                        let snd_tube_plam = Value::VPLam(
+                            "_".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, snd_tube),
+                            },
+                        );
+                        (phi.clone(), snd_tube_plam)
+                    })
+                    .collect();
+                let snd_result = do_hcomp(
+                    globals,
+                    global_offset,
+                    snd_clos.apply((**fst_base).clone()),
+                    snd_sys,
+                    (**snd_base).clone(),
+                );
 
                 let result = Value::VPair(Box::new(fst_result), Box::new(snd_result));
-                record_step("hcomp-sigma".into(), "hcomp (Σ _ _) sys p q".into(), value_str(globals, global_offset, &result));
+                record_step(
+                    "hcomp-sigma".into(),
+                    "hcomp (Σ _ _) sys p q".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
@@ -2305,9 +3043,17 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
             (Value::VData(d_name, _), _) => {
                 let (base_con, base_args, base_ivars) = match &base {
                     Value::VCon(_, name, args) => (name.clone(), args.clone(), vec![]),
-                    Value::VPCon(_, name, args, r) => (name.clone(), args.clone(), vec![(**r).clone()]),
-                    Value::VSqCon(_, name, args, r, s) => (name.clone(), args.clone(), vec![(**r).clone(), (**s).clone()]),
-                    Value::VCellCon(_, name, args, ivars) => (name.clone(), args.clone(), ivars.clone()),
+                    Value::VPCon(_, name, args, r) => {
+                        (name.clone(), args.clone(), vec![(**r).clone()])
+                    }
+                    Value::VSqCon(_, name, args, r, s) => (
+                        name.clone(),
+                        args.clone(),
+                        vec![(**r).clone(), (**s).clone()],
+                    ),
+                    Value::VCellCon(_, name, args, ivars) => {
+                        (name.clone(), args.clone(), ivars.clone())
+                    }
                     _ => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
                 };
 
@@ -2317,7 +3063,9 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
                     None => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
                 };
 
-                let arg_tys = match dt.find_con(&base_con).map(|s| s.arg_tys.clone())
+                let arg_tys = match dt
+                    .find_con(&base_con)
+                    .map(|s| s.arg_tys.clone())
                     .or_else(|| dt.find_pcon(&base_con).map(|s| s.arg_tys.clone()))
                     .or_else(|| dt.find_sqcon(&base_con).map(|s| s.arg_tys.clone()))
                     .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()))
@@ -2344,12 +3092,15 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
                     if let Some((_, tube_args, _)) = match_ctor_args(&tube_val, &base_con) {
                         if tube_args.len() == n {
                             for (k, tube_arg) in tube_args.iter().enumerate() {
-                                let tube_arg_plam = Value::VPLam("_".to_string(), IClosure {
-                                    env: Scope::empty(),
-                                    globals: globals.clone(),
-                                    global_offset,
-                                    body: quote(1, globals, global_offset, (*tube_arg).clone()),
-                                });
+                                let tube_arg_plam = Value::VPLam(
+                                    "_".to_string(),
+                                    IClosure {
+                                        env: Scope::empty(),
+                                        globals: globals.clone(),
+                                        global_offset,
+                                        body: quote(1, globals, global_offset, (*tube_arg).clone()),
+                                    },
+                                );
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
                             }
                         } else {
@@ -2371,15 +3122,36 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
                         ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
                     }
                     let arg_ty = eval_nbe(&Scope::empty(), globals, global_offset, &ty_shifted);
-                    let arg_result = do_hcomp(globals, global_offset, arg_ty, per_arg_tubes[k].clone(), base_args[k].clone());
+                    let arg_result = do_hcomp(
+                        globals,
+                        global_offset,
+                        arg_ty,
+                        per_arg_tubes[k].clone(),
+                        base_args[k].clone(),
+                    );
                     result_args.push(arg_result);
                 }
 
                 match &base {
-                    Value::VCon(_, _, _) => Value::VCon(d_name.clone(), base_con.clone(), result_args),
-                    Value::VPCon(_, _, _, _) => Value::VPCon(d_name.clone(), base_con.clone(), result_args, Box::new(base_ivars[0].clone())),
-                    Value::VSqCon(_, _, _, _, _) => Value::VSqCon(d_name.clone(), base_con.clone(), result_args, Box::new(base_ivars[0].clone()), Box::new(base_ivars[1].clone())),
-                    Value::VCellCon(_, _, _, _) => Value::VCellCon(d_name.clone(), base_con.clone(), result_args, base_ivars),
+                    Value::VCon(_, _, _) => {
+                        Value::VCon(d_name.clone(), base_con.clone(), result_args)
+                    }
+                    Value::VPCon(_, _, _, _) => Value::VPCon(
+                        d_name.clone(),
+                        base_con.clone(),
+                        result_args,
+                        Box::new(base_ivars[0].clone()),
+                    ),
+                    Value::VSqCon(_, _, _, _, _) => Value::VSqCon(
+                        d_name.clone(),
+                        base_con.clone(),
+                        result_args,
+                        Box::new(base_ivars[0].clone()),
+                        Box::new(base_ivars[1].clone()),
+                    ),
+                    Value::VCellCon(_, _, _, _) => {
+                        Value::VCellCon(d_name.clone(), base_con.clone(), result_args, base_ivars)
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -2390,28 +3162,54 @@ pub fn do_hcomp(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
     }
 }
 
-pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSystem, base: Value) -> Value {
+pub fn do_comp(
+    globals: &Globals,
+    global_offset: usize,
+    a_fam: Value,
+    sys: DNFSystem,
+    base: Value,
+) -> Value {
     // Filter out ⊥ faces
-    let sys: DNFSystem = sys.into_iter().filter(|(phi, _)| *phi != dnf_bot()).collect();
+    let sys: DNFSystem = sys
+        .into_iter()
+        .filter(|(phi, _)| *phi != dnf_bot())
+        .collect();
 
     // Empty system → base
     if sys.is_empty() {
-        record_step("comp-empty".into(), "comp _ [] base".into(), value_str(globals, global_offset, &base));
+        record_step(
+            "comp-empty".into(),
+            "comp _ [] base".into(),
+            value_str(globals, global_offset, &base),
+        );
         return base;
     }
 
     // Any face = ⊤ → corresponding tube applied at i1
     for (phi, tube) in &sys {
         if *phi == dnf_top() {
-            let result = do_papp(globals, global_offset, tube.clone(), Value::VInterval(I::I1));
-            record_step("comp-top-face".into(), "comp _ [⊤ ↦ t, ...] base".into(), value_str(globals, global_offset, &result));
+            let result = do_papp(
+                globals,
+                global_offset,
+                tube.clone(),
+                Value::VInterval(I::I1),
+            );
+            record_step(
+                "comp-top-face".into(),
+                "comp _ [⊤ ↦ t, ...] base".into(),
+                value_str(globals, global_offset, &result),
+            );
             return result;
         }
     }
 
     // Constant-tube shortcut
     if all_tubes_constant_and_coherent(globals, global_offset, &sys, &base) {
-        record_step("comp-const-tube".into(), "comp A [const tubes] base".into(), value_str(globals, global_offset, &base));
+        record_step(
+            "comp-const-tube".into(),
+            "comp A [const tubes] base".into(),
+            value_str(globals, global_offset, &base),
+        );
         return base;
     }
 
@@ -2420,76 +3218,113 @@ pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
             // ── Pi decomposition ──
             (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
                 let arg_var = Value::VNeutral(Neutral::NVar(0));
-                let inner_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let tube_at_arg = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_apply(globals, global_offset, tube_at_i, arg_var.clone())
-                        }
-                        _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
-                    };
-                    (phi.clone(), tube_at_arg)
-                }).collect();
+                let inner_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let tube_at_arg = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_apply(globals, global_offset, tube_at_i, arg_var.clone())
+                            }
+                            _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
+                        };
+                        (phi.clone(), tube_at_arg)
+                    })
+                    .collect();
                 let base_at_arg = base_clos.apply(arg_var.clone());
                 let cod_at_arg = cod_clos.apply(arg_var);
                 let inner = do_comp(globals, global_offset, cod_at_arg, inner_sys, base_at_arg);
-                let result = Value::VLam(arg_name.clone(), Closure {
-                    env: Scope::empty(),
-                    globals: globals.clone(),
-                    global_offset,
-                    body: {
-                        let inner_term = quote(1, globals, global_offset, inner);
-                        Term::TAbs(arg_name.clone(), Box::new(inner_term))
+                let result = Value::VLam(
+                    arg_name.clone(),
+                    Closure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: {
+                            let inner_term = quote(1, globals, global_offset, inner);
+                            Term::TAbs(arg_name.clone(), Box::new(inner_term))
+                        },
                     },
-                });
-                record_step("comp-pi".into(), "comp (Π _ _) sys f g".into(), value_str(globals, global_offset, &result));
+                );
+                record_step(
+                    "comp-pi".into(),
+                    "comp (Π _ _) sys f g".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
             // ── Sigma decomposition ──
             (Value::VSigma(_, fst_ty, snd_clos), Value::VPair(fst_base, snd_base)) => {
-                let fst_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let fst_tube = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_fst(globals, global_offset, tube_at_i)
-                        }
-                        _ => do_fst(globals, global_offset, tube.clone()),
-                    };
-                    let fst_tube_plam = Value::VPLam("_".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, fst_tube),
-                    });
-                    (phi.clone(), fst_tube_plam)
-                }).collect();
-                let fst_result = do_comp(globals, global_offset, *fst_ty.clone(), fst_sys, (**fst_base).clone());
+                let fst_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let fst_tube = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_fst(globals, global_offset, tube_at_i)
+                            }
+                            _ => do_fst(globals, global_offset, tube.clone()),
+                        };
+                        let fst_tube_plam = Value::VPLam(
+                            "_".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, fst_tube),
+                            },
+                        );
+                        (phi.clone(), fst_tube_plam)
+                    })
+                    .collect();
+                let fst_result = do_comp(
+                    globals,
+                    global_offset,
+                    *fst_ty.clone(),
+                    fst_sys,
+                    (**fst_base).clone(),
+                );
 
-                let snd_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let snd_tube = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_snd(globals, global_offset, tube_at_i)
-                        }
-                        _ => do_snd(globals, global_offset, tube.clone()),
-                    };
-                    let snd_tube_plam = Value::VPLam("_".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, snd_tube),
-                    });
-                    (phi.clone(), snd_tube_plam)
-                }).collect();
-                let snd_result = do_comp(globals, global_offset,
-                    snd_clos.apply((**fst_base).clone()), snd_sys, (**snd_base).clone());
+                let snd_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let snd_tube = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_snd(globals, global_offset, tube_at_i)
+                            }
+                            _ => do_snd(globals, global_offset, tube.clone()),
+                        };
+                        let snd_tube_plam = Value::VPLam(
+                            "_".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, snd_tube),
+                            },
+                        );
+                        (phi.clone(), snd_tube_plam)
+                    })
+                    .collect();
+                let snd_result = do_comp(
+                    globals,
+                    global_offset,
+                    snd_clos.apply((**fst_base).clone()),
+                    snd_sys,
+                    (**snd_base).clone(),
+                );
 
                 let result = Value::VPair(Box::new(fst_result), Box::new(snd_result));
-                record_step("comp-sigma".into(), "comp (Σ _ _) sys p q".into(), value_str(globals, global_offset, &result));
+                record_step(
+                    "comp-sigma".into(),
+                    "comp (Σ _ _) sys p q".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
@@ -2497,12 +3332,24 @@ pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
             (Value::VData(d_name, _), _) => {
                 let (base_con, base_args, base_ivars) = match &base {
                     Value::VCon(_, name, args) => (name.clone(), args.clone(), vec![]),
-                    Value::VPCon(_, name, args, r) => (name.clone(), args.clone(), vec![(**r).clone()]),
-                    Value::VSqCon(_, name, args, r, s) => (name.clone(), args.clone(), vec![(**r).clone(), (**s).clone()]),
-                    Value::VCellCon(_, name, args, ivars) => (name.clone(), args.clone(), ivars.clone()),
+                    Value::VPCon(_, name, args, r) => {
+                        (name.clone(), args.clone(), vec![(**r).clone()])
+                    }
+                    Value::VSqCon(_, name, args, r, s) => (
+                        name.clone(),
+                        args.clone(),
+                        vec![(**r).clone(), (**s).clone()],
+                    ),
+                    Value::VCellCon(_, name, args, ivars) => {
+                        (name.clone(), args.clone(), ivars.clone())
+                    }
                     _ => {
                         let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
-                        record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "comp-stuck".into(),
+                            "comp _ _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
@@ -2512,12 +3359,18 @@ pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                     Some(dt) => dt.clone(),
                     None => {
                         let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
-                        record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "comp-stuck".into(),
+                            "comp _ _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
 
-                let arg_tys = dt.find_con(&base_con).map(|s| s.arg_tys.clone())
+                let arg_tys = dt
+                    .find_con(&base_con)
+                    .map(|s| s.arg_tys.clone())
                     .or_else(|| dt.find_pcon(&base_con).map(|s| s.arg_tys.clone()))
                     .or_else(|| dt.find_sqcon(&base_con).map(|s| s.arg_tys.clone()))
                     .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()));
@@ -2525,7 +3378,11 @@ pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                     Some(tys) => tys,
                     None => {
                         let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
-                        record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "comp-stuck".into(),
+                            "comp _ _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
@@ -2548,22 +3405,33 @@ pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                     if let Some((_, tube_args, _)) = match_ctor_args(&tube_val, &base_con) {
                         if tube_args.len() == n {
                             for (k, tube_arg) in tube_args.iter().enumerate() {
-                                let tube_arg_plam = Value::VPLam("_".to_string(), IClosure {
-                                    env: Scope::empty(),
-                                    globals: globals.clone(),
-                                    global_offset,
-                                    body: quote(1, globals, global_offset, (*tube_arg).clone()),
-                                });
+                                let tube_arg_plam = Value::VPLam(
+                                    "_".to_string(),
+                                    IClosure {
+                                        env: Scope::empty(),
+                                        globals: globals.clone(),
+                                        global_offset,
+                                        body: quote(1, globals, global_offset, (*tube_arg).clone()),
+                                    },
+                                );
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
                             }
                         } else {
                             let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
-                            record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                            record_step(
+                                "comp-stuck".into(),
+                                "comp _ _ _ _".into(),
+                                value_str(globals, global_offset, &result),
+                            );
                             return result;
                         }
                     } else {
                         let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
-                        record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "comp-stuck".into(),
+                            "comp _ _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 }
@@ -2579,43 +3447,88 @@ pub fn do_comp(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                         ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
                     }
                     let arg_ty = eval_nbe(&Scope::empty(), globals, global_offset, &ty_shifted);
-                    let arg_result = do_comp(globals, global_offset, arg_ty, per_arg_tubes[k].clone(), base_args[k].clone());
+                    let arg_result = do_comp(
+                        globals,
+                        global_offset,
+                        arg_ty,
+                        per_arg_tubes[k].clone(),
+                        base_args[k].clone(),
+                    );
                     result_args.push(arg_result);
                 }
 
                 let result = match &base {
-                    Value::VCon(_, _, _) => Value::VCon(d_name.clone(), base_con.clone(), result_args),
-                    Value::VPCon(_, _, _, _) => Value::VPCon(d_name.clone(), base_con.clone(), result_args, Box::new(base_ivars[0].clone())),
-                    Value::VSqCon(_, _, _, _, _) => Value::VSqCon(d_name.clone(), base_con.clone(), result_args, Box::new(base_ivars[0].clone()), Box::new(base_ivars[1].clone())),
-                    Value::VCellCon(_, _, _, _) => Value::VCellCon(d_name.clone(), base_con.clone(), result_args, base_ivars),
+                    Value::VCon(_, _, _) => {
+                        Value::VCon(d_name.clone(), base_con.clone(), result_args)
+                    }
+                    Value::VPCon(_, _, _, _) => Value::VPCon(
+                        d_name.clone(),
+                        base_con.clone(),
+                        result_args,
+                        Box::new(base_ivars[0].clone()),
+                    ),
+                    Value::VSqCon(_, _, _, _, _) => Value::VSqCon(
+                        d_name.clone(),
+                        base_con.clone(),
+                        result_args,
+                        Box::new(base_ivars[0].clone()),
+                        Box::new(base_ivars[1].clone()),
+                    ),
+                    Value::VCellCon(_, _, _, _) => {
+                        Value::VCellCon(d_name.clone(), base_con.clone(), result_args, base_ivars)
+                    }
                     _ => unreachable!(),
                 };
-                record_step("comp-data".into(), format!("comp (λi. {}) ({} ...)", d_name, base_con), value_str(globals, global_offset, &result));
+                record_step(
+                    "comp-data".into(),
+                    format!("comp (λi. {}) ({} ...)", d_name, base_con),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
             _ => {
                 let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
-                record_step("comp-stuck".into(), "comp _ _ _ _".into(), value_str(globals, global_offset, &result));
+                record_step(
+                    "comp-stuck".into(),
+                    "comp _ _ _ _".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
         }
     }
 }
 
-pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSystem, base: Value) -> Value {
+pub fn do_fill(
+    globals: &Globals,
+    global_offset: usize,
+    a_fam: Value,
+    sys: DNFSystem,
+    base: Value,
+) -> Value {
     // Filter out ⊥ faces
-    let sys: DNFSystem = sys.into_iter().filter(|(phi, _)| *phi != dnf_bot()).collect();
+    let sys: DNFSystem = sys
+        .into_iter()
+        .filter(|(phi, _)| *phi != dnf_bot())
+        .collect();
 
     // Empty system → constant path
     if sys.is_empty() {
-        let result = Value::VPLam("j".to_string(), IClosure {
-            env: Scope::empty(),
-            globals: globals.clone(),
-            global_offset,
-            body: quote(1, globals, global_offset, base.clone()),
-        });
-        record_step("fill-empty".into(), "fill _ [] base".into(), value_str(globals, global_offset, &result));
+        let result = Value::VPLam(
+            "j".to_string(),
+            IClosure {
+                env: Scope::empty(),
+                globals: globals.clone(),
+                global_offset,
+                body: quote(1, globals, global_offset, base.clone()),
+            },
+        );
+        record_step(
+            "fill-empty".into(),
+            "fill _ [] base".into(),
+            value_str(globals, global_offset, &result),
+        );
         return result;
     }
 
@@ -2623,20 +3536,31 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
     for (phi, tube) in &sys {
         if *phi == dnf_top() {
             let result = tube.clone();
-            record_step("fill-top-face".into(), "fill _ [⊤ ↦ t, ...] base".into(), value_str(globals, global_offset, &result));
+            record_step(
+                "fill-top-face".into(),
+                "fill _ [⊤ ↦ t, ...] base".into(),
+                value_str(globals, global_offset, &result),
+            );
             return result;
         }
     }
 
     // Constant-tube shortcut: fill produces a constant path when tubes don't vary
     if all_tubes_constant_and_coherent(globals, global_offset, &sys, &base) {
-        let result = Value::VPLam("j".to_string(), IClosure {
-            env: Scope::empty(),
-            globals: globals.clone(),
-            global_offset,
-            body: quote(1, globals, global_offset, base.clone()),
-        });
-        record_step("fill-const-tube".into(), "fill A [const tubes] base".into(), value_str(globals, global_offset, &result));
+        let result = Value::VPLam(
+            "j".to_string(),
+            IClosure {
+                env: Scope::empty(),
+                globals: globals.clone(),
+                global_offset,
+                body: quote(1, globals, global_offset, base.clone()),
+            },
+        );
+        record_step(
+            "fill-const-tube".into(),
+            "fill A [const tubes] base".into(),
+            value_str(globals, global_offset, &result),
+        );
         return result;
     }
 
@@ -2649,87 +3573,128 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
             // fill (Π x:A. B) sys (λx. f x) = λj. λx. fill B [sys x] (f x) @ j
             (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
                 let arg_var = Value::VNeutral(Neutral::NVar(0));
-                let inner_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let tube_at_arg = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_apply(globals, global_offset, tube_at_i, arg_var.clone())
-                        }
-                        _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
-                    };
-                    (phi.clone(), tube_at_arg)
-                }).collect();
+                let inner_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let tube_at_arg = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_apply(globals, global_offset, tube_at_i, arg_var.clone())
+                            }
+                            _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
+                        };
+                        (phi.clone(), tube_at_arg)
+                    })
+                    .collect();
                 let base_at_arg = base_clos.apply(arg_var.clone());
                 let cod_at_arg = cod_clos.apply(arg_var);
                 let inner = do_fill(globals, global_offset, cod_at_arg, inner_sys, base_at_arg);
                 let inner_term = quote(1, globals, global_offset, inner);
-                let result = Value::VPLam("j".to_string(), IClosure {
-                    env: Scope::empty(),
-                    globals: globals.clone(),
-                    global_offset,
-                    body: Term::TAbs(arg_name.clone(), Box::new(
-                        Term::PApp(Box::new(inner_term), Box::new(Term::TVar(1)))
-                    )),
-                });
-                record_step("fill-pi".into(), "fill (Π _ _) sys f".into(), value_str(globals, global_offset, &result));
+                let result = Value::VPLam(
+                    "j".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: Term::TAbs(
+                            arg_name.clone(),
+                            Box::new(Term::PApp(Box::new(inner_term), Box::new(Term::TVar(1)))),
+                        ),
+                    },
+                );
+                record_step(
+                    "fill-pi".into(),
+                    "fill (Π _ _) sys f".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
             // ── Sigma decomposition ──
             // fill (Σ x:A. B) sys (a, b) = λj. (fill A [fst_sys] a @ j, fill B [snd_sys] b @ j)
             (Value::VSigma(_, fst_ty, snd_clos), Value::VPair(fst_base, snd_base)) => {
-                let fst_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let fst_tube = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_fst(globals, global_offset, tube_at_i)
-                        }
-                        _ => do_fst(globals, global_offset, tube.clone()),
-                    };
-                    let fst_tube_plam = Value::VPLam("_".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, fst_tube),
-                    });
-                    (phi.clone(), fst_tube_plam)
-                }).collect();
-                let fst_fill = do_fill(globals, global_offset, *fst_ty.clone(), fst_sys, (**fst_base).clone());
+                let fst_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let fst_tube = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_fst(globals, global_offset, tube_at_i)
+                            }
+                            _ => do_fst(globals, global_offset, tube.clone()),
+                        };
+                        let fst_tube_plam = Value::VPLam(
+                            "_".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, fst_tube),
+                            },
+                        );
+                        (phi.clone(), fst_tube_plam)
+                    })
+                    .collect();
+                let fst_fill = do_fill(
+                    globals,
+                    global_offset,
+                    *fst_ty.clone(),
+                    fst_sys,
+                    (**fst_base).clone(),
+                );
 
-                let snd_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let snd_tube = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_snd(globals, global_offset, tube_at_i)
-                        }
-                        _ => do_snd(globals, global_offset, tube.clone()),
-                    };
-                    let snd_tube_plam = Value::VPLam("_".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, snd_tube),
-                    });
-                    (phi.clone(), snd_tube_plam)
-                }).collect();
-                let snd_fill = do_fill(globals, global_offset,
-                    snd_clos.apply((**fst_base).clone()), snd_sys, (**snd_base).clone());
+                let snd_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let snd_tube = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_snd(globals, global_offset, tube_at_i)
+                            }
+                            _ => do_snd(globals, global_offset, tube.clone()),
+                        };
+                        let snd_tube_plam = Value::VPLam(
+                            "_".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, snd_tube),
+                            },
+                        );
+                        (phi.clone(), snd_tube_plam)
+                    })
+                    .collect();
+                let snd_fill = do_fill(
+                    globals,
+                    global_offset,
+                    snd_clos.apply((**fst_base).clone()),
+                    snd_sys,
+                    (**snd_base).clone(),
+                );
 
                 let fst_fill_term = quote(1, globals, global_offset, fst_fill);
                 let snd_fill_term = quote(1, globals, global_offset, snd_fill);
-                let result = Value::VPLam("j".to_string(), IClosure {
-                    env: Scope::empty(),
-                    globals: globals.clone(),
-                    global_offset,
-                    body: Term::TPair(
-                        Box::new(Term::PApp(Box::new(fst_fill_term), Box::new(Term::TVar(1)))),
-                        Box::new(Term::PApp(Box::new(snd_fill_term), Box::new(Term::TVar(1)))),
-                    ),
-                });
-                record_step("fill-sigma".into(), "fill (Σ _ _) sys p".into(), value_str(globals, global_offset, &result));
+                let result = Value::VPLam(
+                    "j".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: Term::TPair(
+                            Box::new(Term::PApp(Box::new(fst_fill_term), Box::new(Term::TVar(1)))),
+                            Box::new(Term::PApp(Box::new(snd_fill_term), Box::new(Term::TVar(1)))),
+                        ),
+                    },
+                );
+                record_step(
+                    "fill-sigma".into(),
+                    "fill (Σ _ _) sys p".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
@@ -2737,12 +3702,24 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
             (Value::VData(d_name, _), _) => {
                 let (base_con, base_args, base_ivars) = match &base {
                     Value::VCon(_, name, args) => (name.clone(), args.clone(), vec![]),
-                    Value::VPCon(_, name, args, r) => (name.clone(), args.clone(), vec![(**r).clone()]),
-                    Value::VSqCon(_, name, args, r, s) => (name.clone(), args.clone(), vec![(**r).clone(), (**s).clone()]),
-                    Value::VCellCon(_, name, args, ivars) => (name.clone(), args.clone(), ivars.clone()),
+                    Value::VPCon(_, name, args, r) => {
+                        (name.clone(), args.clone(), vec![(**r).clone()])
+                    }
+                    Value::VSqCon(_, name, args, r, s) => (
+                        name.clone(),
+                        args.clone(),
+                        vec![(**r).clone(), (**s).clone()],
+                    ),
+                    Value::VCellCon(_, name, args, ivars) => {
+                        (name.clone(), args.clone(), ivars.clone())
+                    }
                     _ => {
                         let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
-                        record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "fill-stuck".into(),
+                            "fill _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
@@ -2752,12 +3729,18 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                     Some(dt) => dt.clone(),
                     None => {
                         let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
-                        record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "fill-stuck".into(),
+                            "fill _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
 
-                let arg_tys = match dt.find_con(&base_con).map(|s| s.arg_tys.clone())
+                let arg_tys = match dt
+                    .find_con(&base_con)
+                    .map(|s| s.arg_tys.clone())
                     .or_else(|| dt.find_pcon(&base_con).map(|s| s.arg_tys.clone()))
                     .or_else(|| dt.find_sqcon(&base_con).map(|s| s.arg_tys.clone()))
                     .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()))
@@ -2765,7 +3748,11 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                     Some(tys) => tys,
                     None => {
                         let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
-                        record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "fill-stuck".into(),
+                            "fill _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
@@ -2773,13 +3760,20 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                 let n = arg_tys.len();
                 if n == 0 {
                     // No arguments: fill is a constant path
-                    let result = Value::VPLam("j".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, base.clone()),
-                    });
-                    record_step("fill-data-empty".into(), "fill D [] c".into(), value_str(globals, global_offset, &result));
+                    let result = Value::VPLam(
+                        "j".to_string(),
+                        IClosure {
+                            env: Scope::empty(),
+                            globals: globals.clone(),
+                            global_offset,
+                            body: quote(1, globals, global_offset, base.clone()),
+                        },
+                    );
+                    record_step(
+                        "fill-data-empty".into(),
+                        "fill D [] c".into(),
+                        value_str(globals, global_offset, &result),
+                    );
                     return result;
                 }
 
@@ -2796,22 +3790,33 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                     if let Some((_, tube_args, _)) = match_ctor_args(&tube_val, &base_con) {
                         if tube_args.len() == n {
                             for (k, tube_arg) in tube_args.iter().enumerate() {
-                                let tube_arg_plam = Value::VPLam("_".to_string(), IClosure {
-                                    env: Scope::empty(),
-                                    globals: globals.clone(),
-                                    global_offset,
-                                    body: quote(1, globals, global_offset, (*tube_arg).clone()),
-                                });
+                                let tube_arg_plam = Value::VPLam(
+                                    "_".to_string(),
+                                    IClosure {
+                                        env: Scope::empty(),
+                                        globals: globals.clone(),
+                                        global_offset,
+                                        body: quote(1, globals, global_offset, (*tube_arg).clone()),
+                                    },
+                                );
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
                             }
                         } else {
                             let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
-                            record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                            record_step(
+                                "fill-stuck".into(),
+                                "fill _ _ _".into(),
+                                value_str(globals, global_offset, &result),
+                            );
                             return result;
                         }
                     } else {
                         let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
-                        record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "fill-stuck".into(),
+                            "fill _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 }
@@ -2827,55 +3832,110 @@ pub fn do_fill(globals: &Globals, global_offset: usize, a_fam: Value, sys: DNFSy
                         ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
                     }
                     let arg_ty = eval_nbe(&Scope::empty(), globals, global_offset, &ty_shifted);
-                    let arg_fill = do_fill(globals, global_offset, arg_ty, per_arg_tubes[k].clone(), base_args[k].clone());
+                    let arg_fill = do_fill(
+                        globals,
+                        global_offset,
+                        arg_ty,
+                        per_arg_tubes[k].clone(),
+                        base_args[k].clone(),
+                    );
                     let arg_fill_term = quote(1, globals, global_offset, arg_fill);
-                    result_arg_terms.push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
+                    result_arg_terms
+                        .push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
                 }
 
                 let con_term = match &base {
-                    Value::VCon(_, _, _) => Term::TCon(d_name.clone(), base_con.clone(), result_arg_terms),
-                    Value::VPCon(_, _, _, _) => Term::TPCon(d_name.clone(), base_con.clone(), result_arg_terms, Box::new(quote(1, globals, global_offset, base_ivars[0].clone()))),
-                    Value::VSqCon(_, _, _, _, _) => Term::TSqCon(d_name.clone(), base_con.clone(), result_arg_terms, Box::new(quote(1, globals, global_offset, base_ivars[0].clone())), Box::new(quote(1, globals, global_offset, base_ivars[1].clone()))),
+                    Value::VCon(_, _, _) => {
+                        Term::TCon(d_name.clone(), base_con.clone(), result_arg_terms)
+                    }
+                    Value::VPCon(_, _, _, _) => Term::TPCon(
+                        d_name.clone(),
+                        base_con.clone(),
+                        result_arg_terms,
+                        Box::new(quote(1, globals, global_offset, base_ivars[0].clone())),
+                    ),
+                    Value::VSqCon(_, _, _, _, _) => Term::TSqCon(
+                        d_name.clone(),
+                        base_con.clone(),
+                        result_arg_terms,
+                        Box::new(quote(1, globals, global_offset, base_ivars[0].clone())),
+                        Box::new(quote(1, globals, global_offset, base_ivars[1].clone())),
+                    ),
                     Value::VCellCon(_, _, _, _) => {
-                        let ivar_terms: Vec<Term> = base_ivars.iter().map(|v| quote(1, globals, global_offset, v.clone())).collect();
-                        Term::TCellCon(d_name.clone(), base_con.clone(), result_arg_terms, ivar_terms)
+                        let ivar_terms: Vec<Term> = base_ivars
+                            .iter()
+                            .map(|v| quote(1, globals, global_offset, v.clone()))
+                            .collect();
+                        Term::TCellCon(
+                            d_name.clone(),
+                            base_con.clone(),
+                            result_arg_terms,
+                            ivar_terms,
+                        )
                     }
                     _ => unreachable!(),
                 };
 
-                let result = Value::VPLam("j".to_string(), IClosure {
-                    env: Scope::empty(),
-                    globals: globals.clone(),
-                    global_offset,
-                    body: con_term,
-                });
-                record_step("fill-data".into(), format!("fill (λi. {}) ({} ...)", d_name, base_con), value_str(globals, global_offset, &result));
+                let result = Value::VPLam(
+                    "j".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: con_term,
+                    },
+                );
+                record_step(
+                    "fill-data".into(),
+                    format!("fill (λi. {}) ({} ...)", d_name, base_con),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
             // ── Default: stuck fill ──
             _ => {
                 let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
-                record_step("fill-stuck".into(), "fill _ _ _".into(), value_str(globals, global_offset, &result));
+                record_step(
+                    "fill-stuck".into(),
+                    "fill _ _ _".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
         }
     }
 }
 
-pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSystem, base: Value) -> Value {
+pub fn do_hfill(
+    globals: &Globals,
+    global_offset: usize,
+    a_ty: Value,
+    sys: DNFSystem,
+    base: Value,
+) -> Value {
     // Filter out ⊥ faces
-    let sys: DNFSystem = sys.into_iter().filter(|(phi, _)| *phi != dnf_bot()).collect();
+    let sys: DNFSystem = sys
+        .into_iter()
+        .filter(|(phi, _)| *phi != dnf_bot())
+        .collect();
 
     // Empty system → constant path
     if sys.is_empty() {
-        let result = Value::VPLam("j".to_string(), IClosure {
-            env: Scope::empty(),
-            globals: globals.clone(),
-            global_offset,
-            body: quote(1, globals, global_offset, base.clone()),
-        });
-        record_step("hfill-empty".into(), "hfill _ [] base".into(), value_str(globals, global_offset, &result));
+        let result = Value::VPLam(
+            "j".to_string(),
+            IClosure {
+                env: Scope::empty(),
+                globals: globals.clone(),
+                global_offset,
+                body: quote(1, globals, global_offset, base.clone()),
+            },
+        );
+        record_step(
+            "hfill-empty".into(),
+            "hfill _ [] base".into(),
+            value_str(globals, global_offset, &result),
+        );
         return result;
     }
 
@@ -2883,20 +3943,31 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
     for (phi, tube) in &sys {
         if *phi == dnf_top() {
             let result = tube.clone();
-            record_step("hfill-top-face".into(), "hfill _ [⊤ ↦ t, ...] base".into(), value_str(globals, global_offset, &result));
+            record_step(
+                "hfill-top-face".into(),
+                "hfill _ [⊤ ↦ t, ...] base".into(),
+                value_str(globals, global_offset, &result),
+            );
             return result;
         }
     }
 
     // Constant-tube shortcut: hfill produces a constant path when tubes don't vary
     if all_tubes_constant_and_coherent(globals, global_offset, &sys, &base) {
-        let result = Value::VPLam("j".to_string(), IClosure {
-            env: Scope::empty(),
-            globals: globals.clone(),
-            global_offset,
-            body: quote(1, globals, global_offset, base.clone()),
-        });
-        record_step("hfill-const-tube".into(), "hfill A [const tubes] base".into(), value_str(globals, global_offset, &result));
+        let result = Value::VPLam(
+            "j".to_string(),
+            IClosure {
+                env: Scope::empty(),
+                globals: globals.clone(),
+                global_offset,
+                body: quote(1, globals, global_offset, base.clone()),
+            },
+        );
+        record_step(
+            "hfill-const-tube".into(),
+            "hfill A [const tubes] base".into(),
+            value_str(globals, global_offset, &result),
+        );
         return result;
     }
 
@@ -2908,87 +3979,128 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
             // hfill (Π x:A. B) sys (λx. f x) = λj. λx. hfill B [sys x] (f x) @ j
             (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
                 let arg_var = Value::VNeutral(Neutral::NVar(0));
-                let inner_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let tube_at_arg = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_apply(globals, global_offset, tube_at_i, arg_var.clone())
-                        }
-                        _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
-                    };
-                    (phi.clone(), tube_at_arg)
-                }).collect();
+                let inner_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let tube_at_arg = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_apply(globals, global_offset, tube_at_i, arg_var.clone())
+                            }
+                            _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone()),
+                        };
+                        (phi.clone(), tube_at_arg)
+                    })
+                    .collect();
                 let base_at_arg = base_clos.apply(arg_var.clone());
                 let cod_at_arg = cod_clos.apply(arg_var);
                 let inner = do_hfill(globals, global_offset, cod_at_arg, inner_sys, base_at_arg);
                 let inner_term = quote(1, globals, global_offset, inner);
-                let result = Value::VPLam("j".to_string(), IClosure {
-                    env: Scope::empty(),
-                    globals: globals.clone(),
-                    global_offset,
-                    body: Term::TAbs(arg_name.clone(), Box::new(
-                        Term::PApp(Box::new(inner_term), Box::new(Term::TVar(1)))
-                    )),
-                });
-                record_step("hfill-pi".into(), "hfill (Π _ _) sys f".into(), value_str(globals, global_offset, &result));
+                let result = Value::VPLam(
+                    "j".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: Term::TAbs(
+                            arg_name.clone(),
+                            Box::new(Term::PApp(Box::new(inner_term), Box::new(Term::TVar(1)))),
+                        ),
+                    },
+                );
+                record_step(
+                    "hfill-pi".into(),
+                    "hfill (Π _ _) sys f".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
             // ── Sigma decomposition ──
             // hfill (Σ x:A. B) sys (a, b) = λj. (hfill A [fst_sys] a @ j, hfill B [snd_sys] b @ j)
             (Value::VSigma(_, fst_ty, snd_clos), Value::VPair(fst_base, snd_base)) => {
-                let fst_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let fst_tube = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_fst(globals, global_offset, tube_at_i)
-                        }
-                        _ => do_fst(globals, global_offset, tube.clone()),
-                    };
-                    let fst_tube_plam = Value::VPLam("_".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, fst_tube),
-                    });
-                    (phi.clone(), fst_tube_plam)
-                }).collect();
-                let fst_fill = do_hfill(globals, global_offset, *fst_ty.clone(), fst_sys, (**fst_base).clone());
+                let fst_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let fst_tube = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_fst(globals, global_offset, tube_at_i)
+                            }
+                            _ => do_fst(globals, global_offset, tube.clone()),
+                        };
+                        let fst_tube_plam = Value::VPLam(
+                            "_".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, fst_tube),
+                            },
+                        );
+                        (phi.clone(), fst_tube_plam)
+                    })
+                    .collect();
+                let fst_fill = do_hfill(
+                    globals,
+                    global_offset,
+                    *fst_ty.clone(),
+                    fst_sys,
+                    (**fst_base).clone(),
+                );
 
-                let snd_sys: DNFSystem = sys.iter().map(|(phi, tube)| {
-                    let snd_tube = match tube {
-                        Value::VPLam(_, iclos) => {
-                            let formal_i = Value::VIntervalVar(0);
-                            let tube_at_i = iclos.apply_interval_value(formal_i);
-                            do_snd(globals, global_offset, tube_at_i)
-                        }
-                        _ => do_snd(globals, global_offset, tube.clone()),
-                    };
-                    let snd_tube_plam = Value::VPLam("_".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, snd_tube),
-                    });
-                    (phi.clone(), snd_tube_plam)
-                }).collect();
-                let snd_fill = do_hfill(globals, global_offset,
-                    snd_clos.apply((**fst_base).clone()), snd_sys, (**snd_base).clone());
+                let snd_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let snd_tube = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                let tube_at_i = iclos.apply_interval_value(formal_i);
+                                do_snd(globals, global_offset, tube_at_i)
+                            }
+                            _ => do_snd(globals, global_offset, tube.clone()),
+                        };
+                        let snd_tube_plam = Value::VPLam(
+                            "_".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, snd_tube),
+                            },
+                        );
+                        (phi.clone(), snd_tube_plam)
+                    })
+                    .collect();
+                let snd_fill = do_hfill(
+                    globals,
+                    global_offset,
+                    snd_clos.apply((**fst_base).clone()),
+                    snd_sys,
+                    (**snd_base).clone(),
+                );
 
                 let fst_fill_term = quote(1, globals, global_offset, fst_fill);
                 let snd_fill_term = quote(1, globals, global_offset, snd_fill);
-                let result = Value::VPLam("j".to_string(), IClosure {
-                    env: Scope::empty(),
-                    globals: globals.clone(),
-                    global_offset,
-                    body: Term::TPair(
-                        Box::new(Term::PApp(Box::new(fst_fill_term), Box::new(Term::TVar(1)))),
-                        Box::new(Term::PApp(Box::new(snd_fill_term), Box::new(Term::TVar(1)))),
-                    ),
-                });
-                record_step("hfill-sigma".into(), "hfill (Σ _ _) sys p".into(), value_str(globals, global_offset, &result));
+                let result = Value::VPLam(
+                    "j".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: Term::TPair(
+                            Box::new(Term::PApp(Box::new(fst_fill_term), Box::new(Term::TVar(1)))),
+                            Box::new(Term::PApp(Box::new(snd_fill_term), Box::new(Term::TVar(1)))),
+                        ),
+                    },
+                );
+                record_step(
+                    "hfill-sigma".into(),
+                    "hfill (Σ _ _) sys p".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
@@ -2996,12 +4108,24 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
             (Value::VData(d_name, _), _) => {
                 let (base_con, base_args, base_ivars) = match &base {
                     Value::VCon(_, name, args) => (name.clone(), args.clone(), vec![]),
-                    Value::VPCon(_, name, args, r) => (name.clone(), args.clone(), vec![(**r).clone()]),
-                    Value::VSqCon(_, name, args, r, s) => (name.clone(), args.clone(), vec![(**r).clone(), (**s).clone()]),
-                    Value::VCellCon(_, name, args, ivars) => (name.clone(), args.clone(), ivars.clone()),
+                    Value::VPCon(_, name, args, r) => {
+                        (name.clone(), args.clone(), vec![(**r).clone()])
+                    }
+                    Value::VSqCon(_, name, args, r, s) => (
+                        name.clone(),
+                        args.clone(),
+                        vec![(**r).clone(), (**s).clone()],
+                    ),
+                    Value::VCellCon(_, name, args, ivars) => {
+                        (name.clone(), args.clone(), ivars.clone())
+                    }
                     _ => {
                         let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
-                        record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "hfill-stuck".into(),
+                            "hfill _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
@@ -3011,12 +4135,18 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
                     Some(dt) => dt.clone(),
                     None => {
                         let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
-                        record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "hfill-stuck".into(),
+                            "hfill _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
 
-                let arg_tys = match dt.find_con(&base_con).map(|s| s.arg_tys.clone())
+                let arg_tys = match dt
+                    .find_con(&base_con)
+                    .map(|s| s.arg_tys.clone())
                     .or_else(|| dt.find_pcon(&base_con).map(|s| s.arg_tys.clone()))
                     .or_else(|| dt.find_sqcon(&base_con).map(|s| s.arg_tys.clone()))
                     .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()))
@@ -3024,20 +4154,31 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
                     Some(tys) => tys,
                     None => {
                         let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
-                        record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "hfill-stuck".into(),
+                            "hfill _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 };
 
                 let n = arg_tys.len();
                 if n == 0 {
-                    let result = Value::VPLam("j".to_string(), IClosure {
-                        env: Scope::empty(),
-                        globals: globals.clone(),
-                        global_offset,
-                        body: quote(1, globals, global_offset, base.clone()),
-                    });
-                    record_step("hfill-data-empty".into(), "hfill D [] c".into(), value_str(globals, global_offset, &result));
+                    let result = Value::VPLam(
+                        "j".to_string(),
+                        IClosure {
+                            env: Scope::empty(),
+                            globals: globals.clone(),
+                            global_offset,
+                            body: quote(1, globals, global_offset, base.clone()),
+                        },
+                    );
+                    record_step(
+                        "hfill-data-empty".into(),
+                        "hfill D [] c".into(),
+                        value_str(globals, global_offset, &result),
+                    );
                     return result;
                 }
 
@@ -3054,22 +4195,33 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
                     if let Some((_, tube_args, _)) = match_ctor_args(&tube_val, &base_con) {
                         if tube_args.len() == n {
                             for (k, tube_arg) in tube_args.iter().enumerate() {
-                                let tube_arg_plam = Value::VPLam("_".to_string(), IClosure {
-                                    env: Scope::empty(),
-                                    globals: globals.clone(),
-                                    global_offset,
-                                    body: quote(1, globals, global_offset, (*tube_arg).clone()),
-                                });
+                                let tube_arg_plam = Value::VPLam(
+                                    "_".to_string(),
+                                    IClosure {
+                                        env: Scope::empty(),
+                                        globals: globals.clone(),
+                                        global_offset,
+                                        body: quote(1, globals, global_offset, (*tube_arg).clone()),
+                                    },
+                                );
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
                             }
                         } else {
                             let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
-                            record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                            record_step(
+                                "hfill-stuck".into(),
+                                "hfill _ _ _".into(),
+                                value_str(globals, global_offset, &result),
+                            );
                             return result;
                         }
                     } else {
                         let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
-                        record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                        record_step(
+                            "hfill-stuck".into(),
+                            "hfill _ _ _".into(),
+                            value_str(globals, global_offset, &result),
+                        );
                         return result;
                     }
                 }
@@ -3085,36 +4237,75 @@ pub fn do_hfill(globals: &Globals, global_offset: usize, a_ty: Value, sys: DNFSy
                         ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
                     }
                     let arg_ty = eval_nbe(&Scope::empty(), globals, global_offset, &ty_shifted);
-                    let arg_fill = do_hfill(globals, global_offset, arg_ty, per_arg_tubes[k].clone(), base_args[k].clone());
+                    let arg_fill = do_hfill(
+                        globals,
+                        global_offset,
+                        arg_ty,
+                        per_arg_tubes[k].clone(),
+                        base_args[k].clone(),
+                    );
                     let arg_fill_term = quote(1, globals, global_offset, arg_fill);
-                    result_arg_terms.push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
+                    result_arg_terms
+                        .push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
                 }
 
                 let con_term = match &base {
-                    Value::VCon(_, _, _) => Term::TCon(d_name.clone(), base_con.clone(), result_arg_terms),
-                    Value::VPCon(_, _, _, _) => Term::TPCon(d_name.clone(), base_con.clone(), result_arg_terms, Box::new(quote(1, globals, global_offset, base_ivars[0].clone()))),
-                    Value::VSqCon(_, _, _, _, _) => Term::TSqCon(d_name.clone(), base_con.clone(), result_arg_terms, Box::new(quote(1, globals, global_offset, base_ivars[0].clone())), Box::new(quote(1, globals, global_offset, base_ivars[1].clone()))),
+                    Value::VCon(_, _, _) => {
+                        Term::TCon(d_name.clone(), base_con.clone(), result_arg_terms)
+                    }
+                    Value::VPCon(_, _, _, _) => Term::TPCon(
+                        d_name.clone(),
+                        base_con.clone(),
+                        result_arg_terms,
+                        Box::new(quote(1, globals, global_offset, base_ivars[0].clone())),
+                    ),
+                    Value::VSqCon(_, _, _, _, _) => Term::TSqCon(
+                        d_name.clone(),
+                        base_con.clone(),
+                        result_arg_terms,
+                        Box::new(quote(1, globals, global_offset, base_ivars[0].clone())),
+                        Box::new(quote(1, globals, global_offset, base_ivars[1].clone())),
+                    ),
                     Value::VCellCon(_, _, _, _) => {
-                        let ivar_terms: Vec<Term> = base_ivars.iter().map(|v| quote(1, globals, global_offset, v.clone())).collect();
-                        Term::TCellCon(d_name.clone(), base_con.clone(), result_arg_terms, ivar_terms)
+                        let ivar_terms: Vec<Term> = base_ivars
+                            .iter()
+                            .map(|v| quote(1, globals, global_offset, v.clone()))
+                            .collect();
+                        Term::TCellCon(
+                            d_name.clone(),
+                            base_con.clone(),
+                            result_arg_terms,
+                            ivar_terms,
+                        )
                     }
                     _ => unreachable!(),
                 };
 
-                let result = Value::VPLam("j".to_string(), IClosure {
-                    env: Scope::empty(),
-                    globals: globals.clone(),
-                    global_offset,
-                    body: con_term,
-                });
-                record_step("hfill-data".into(), format!("hfill (λi. {}) ({} ...)", d_name, base_con), value_str(globals, global_offset, &result));
+                let result = Value::VPLam(
+                    "j".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: con_term,
+                    },
+                );
+                record_step(
+                    "hfill-data".into(),
+                    format!("hfill (λi. {}) ({} ...)", d_name, base_con),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
 
             // ── Default: stuck hfill ──
             _ => {
                 let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
-                record_step("hfill-stuck".into(), "hfill _ _ _".into(), value_str(globals, global_offset, &result));
+                record_step(
+                    "hfill-stuck".into(),
+                    "hfill _ _ _".into(),
+                    value_str(globals, global_offset, &result),
+                );
                 result
             }
         }
@@ -3163,7 +4354,10 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
                 clos.apply(Value::VNeutral(Neutral::NVar(size))),
             )),
         ),
-        Value::VApp(f, a) => Term::TApp(Box::new(quote(size, globals, global_offset, *f)), Box::new(quote(size, globals, global_offset, *a))),
+        Value::VApp(f, a) => Term::TApp(
+            Box::new(quote(size, globals, global_offset, *f)),
+            Box::new(quote(size, globals, global_offset, *a)),
+        ),
         Value::VPi(x, a, b) => Term::TPi(
             x,
             Box::new(quote(size, globals, global_offset, *a)),
@@ -3184,28 +4378,44 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
                 b.apply(Value::VNeutral(Neutral::NVar(size))),
             )),
         ),
-        Value::VPair(a, b) => Term::TPair(Box::new(quote(size, globals, global_offset, *a)), Box::new(quote(size, globals, global_offset, *b))),
+        Value::VPair(a, b) => Term::TPair(
+            Box::new(quote(size, globals, global_offset, *a)),
+            Box::new(quote(size, globals, global_offset, *b)),
+        ),
         Value::VFst(p) => Term::TFst(Box::new(quote(size, globals, global_offset, *p))),
         Value::VSnd(p) => Term::TSnd(Box::new(quote(size, globals, global_offset, *p))),
-        Value::VProj(field, r) => Term::TProj(field, Box::new(quote(size, globals, global_offset, *r))),
+        Value::VProj(field, r) => {
+            Term::TProj(field, Box::new(quote(size, globals, global_offset, *r)))
+        }
         Value::VRecordUpdate(r, updates) => Term::TRecordUpdate(
             Box::new(quote(size, globals, global_offset, *r)),
-            updates.iter().map(|(f, e)| (f.clone(), quote(size, globals, global_offset, e.clone()))).collect(),
+            updates
+                .iter()
+                .map(|(f, e)| (f.clone(), quote(size, globals, global_offset, e.clone())))
+                .collect(),
         ),
         Value::VPath(a, u, v) => Term::TPath(
             Box::new(quote(size, globals, global_offset, *a)),
             Box::new(quote(size, globals, global_offset, *u)),
             Box::new(quote(size, globals, global_offset, *v)),
         ),
-        Value::VPLam(x, clos) => Term::PLam(x, Box::new(quote(size + 1, globals, global_offset, clos.apply_i_var(size)))),
-        Value::VPApp(p, r) => Term::PApp(Box::new(quote(size, globals, global_offset, *p)), Box::new(quote(size, globals, global_offset, *r))),
+        Value::VPLam(x, clos) => Term::PLam(
+            x,
+            Box::new(quote(
+                size + 1,
+                globals,
+                global_offset,
+                clos.apply_i_var(size),
+            )),
+        ),
+        Value::VPApp(p, r) => Term::PApp(
+            Box::new(quote(size, globals, global_offset, *p)),
+            Box::new(quote(size, globals, global_offset, *r)),
+        ),
         Value::VUniv(n) => Term::TUniv(n),
         Value::VProp => Term::TProp,
         Value::VSSet => Term::TSSet,
-        Value::VLift(a, lvl) => Term::TLift(
-            Box::new(quote(size, globals, global_offset, *a)),
-            lvl,
-        ),
+        Value::VLift(a, lvl) => Term::TLift(Box::new(quote(size, globals, global_offset, *a)), lvl),
         Value::VLower(a) => Term::TLower(Box::new(quote(size, globals, global_offset, *a))),
         Value::VIntervalTy => Term::TIntervalTy,
         Value::VInterval(i) => Term::TInterval(i),
@@ -3213,29 +4423,45 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
         Value::VCube(c) => Term::TCube(c),
         Value::VData(d, params) => Term::TData(
             d,
-            params.into_iter().map(|p| quote(size, globals, global_offset, p)).collect(),
+            params
+                .into_iter()
+                .map(|p| quote(size, globals, global_offset, p))
+                .collect(),
         ),
-        Value::VCon(d, c, args) => {
-            Term::TCon(d, c, args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect())
-        }
+        Value::VCon(d, c, args) => Term::TCon(
+            d,
+            c,
+            args.into_iter()
+                .map(|a| quote(size, globals, global_offset, a))
+                .collect(),
+        ),
         Value::VPCon(d, c, args, r) => Term::TPCon(
             d,
             c,
-            args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect(),
+            args.into_iter()
+                .map(|a| quote(size, globals, global_offset, a))
+                .collect(),
             Box::new(quote(size, globals, global_offset, *r)),
         ),
         Value::VSqCon(d, c, args, r, s) => Term::TSqCon(
             d,
             c,
-            args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect(),
+            args.into_iter()
+                .map(|a| quote(size, globals, global_offset, a))
+                .collect(),
             Box::new(quote(size, globals, global_offset, *r)),
             Box::new(quote(size, globals, global_offset, *s)),
         ),
         Value::VCellCon(d, c, args, ivars) => Term::TCellCon(
             d,
             c,
-            args.into_iter().map(|a| quote(size, globals, global_offset, a)).collect(),
-            ivars.into_iter().map(|v| quote(size, globals, global_offset, v)).collect(),
+            args.into_iter()
+                .map(|a| quote(size, globals, global_offset, a))
+                .collect(),
+            ivars
+                .into_iter()
+                .map(|v| quote(size, globals, global_offset, v))
+                .collect(),
         ),
         Value::VElim(motive, cases, scrut, env, go) => Term::TElim(
             Box::new(quote(size, globals, global_offset, *motive)),
@@ -3251,18 +4477,11 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
             Box::new(quote(size, globals, global_offset, *phi)),
             Box::new(quote(size, globals, global_offset, *a)),
         ),
-        Value::VSystemType(sys) => {
-            Term::TSystemType(
-                sys.into_iter()
-                    .map(|(phi, a)| {
-                        (
-                            Term::TCube(phi),
-                            quote(size, globals, global_offset, a),
-                        )
-                    })
-                    .collect(),
-            )
-        }
+        Value::VSystemType(sys) => Term::TSystemType(
+            sys.into_iter()
+                .map(|(phi, a)| (Term::TCube(phi), quote(size, globals, global_offset, a)))
+                .collect(),
+        ),
         Value::VGlueElem(phi, t, a) => Term::TGlueElem(
             Box::new(Term::TCube(phi)),
             Box::new(quote(size, globals, global_offset, *t)),
@@ -3273,7 +4492,10 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
             Box::new(quote(size, globals, global_offset, *te)),
             Box::new(quote(size, globals, global_offset, *g)),
         ),
-        Value::VEquiv(a, b) => Term::TEquiv(Box::new(quote(size, globals, global_offset, *a)), Box::new(quote(size, globals, global_offset, *b))),
+        Value::VEquiv(a, b) => Term::TEquiv(
+            Box::new(quote(size, globals, global_offset, *a)),
+            Box::new(quote(size, globals, global_offset, *b)),
+        ),
         Value::VMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
             Box::new(quote(size, globals, global_offset, *a)),
             Box::new(quote(size, globals, global_offset, *b)),
@@ -3282,17 +4504,25 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
             Box::new(quote(size, globals, global_offset, *eta)),
             Box::new(quote(size, globals, global_offset, *eps)),
         ),
-        Value::VEquivFwd(e, x) => {
-            Term::TEquivFwd(Box::new(quote(size, globals, global_offset, *e)), Box::new(quote(size, globals, global_offset, *x)))
-        }
+        Value::VEquivFwd(e, x) => Term::TEquivFwd(
+            Box::new(quote(size, globals, global_offset, *e)),
+            Box::new(quote(size, globals, global_offset, *x)),
+        ),
         Value::VUa(e) => Term::TUa(Box::new(quote(size, globals, global_offset, *e))),
-        Value::VTransport(p, x) => {
-            Term::TTransport(Box::new(quote(size, globals, global_offset, *p)), Box::new(quote(size, globals, global_offset, *x)))
-        }
+        Value::VTransport(p, x) => Term::TTransport(
+            Box::new(quote(size, globals, global_offset, *p)),
+            Box::new(quote(size, globals, global_offset, *x)),
+        ),
         Value::VHComp(a, sys, base) => {
-            let sys_term: System = sys.iter().map(|(phi, tube)| {
-                (Term::TCube(phi.clone()), quote(size, globals, global_offset, tube.clone()))
-            }).collect();
+            let sys_term: System = sys
+                .iter()
+                .map(|(phi, tube)| {
+                    (
+                        Term::TCube(phi.clone()),
+                        quote(size, globals, global_offset, tube.clone()),
+                    )
+                })
+                .collect();
             Term::THComp(
                 Box::new(quote(size, globals, global_offset, *a)),
                 sys_term,
@@ -3300,9 +4530,15 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
             )
         }
         Value::VComp(a, sys, base) => {
-            let sys_term: System = sys.iter().map(|(phi, tube)| {
-                (Term::TCube(phi.clone()), quote(size, globals, global_offset, tube.clone()))
-            }).collect();
+            let sys_term: System = sys
+                .iter()
+                .map(|(phi, tube)| {
+                    (
+                        Term::TCube(phi.clone()),
+                        quote(size, globals, global_offset, tube.clone()),
+                    )
+                })
+                .collect();
             Term::TComp(
                 Box::new(quote(size, globals, global_offset, *a)),
                 sys_term,
@@ -3310,9 +4546,15 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
             )
         }
         Value::VFill(a, sys, base) => {
-            let sys_term: System = sys.iter().map(|(phi, tube)| {
-                (Term::TCube(phi.clone()), quote(size, globals, global_offset, tube.clone()))
-            }).collect();
+            let sys_term: System = sys
+                .iter()
+                .map(|(phi, tube)| {
+                    (
+                        Term::TCube(phi.clone()),
+                        quote(size, globals, global_offset, tube.clone()),
+                    )
+                })
+                .collect();
             Term::TFill(
                 Box::new(quote(size, globals, global_offset, *a)),
                 sys_term,
@@ -3320,9 +4562,15 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
             )
         }
         Value::VHFill(a, sys, base) => {
-            let sys_term: System = sys.iter().map(|(phi, tube)| {
-                (Term::TCube(phi.clone()), quote(size, globals, global_offset, tube.clone()))
-            }).collect();
+            let sys_term: System = sys
+                .iter()
+                .map(|(phi, tube)| {
+                    (
+                        Term::TCube(phi.clone()),
+                        quote(size, globals, global_offset, tube.clone()),
+                    )
+                })
+                .collect();
             Term::THFill(
                 Box::new(quote(size, globals, global_offset, *a)),
                 sys_term,
@@ -3338,22 +4586,30 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value) -
 fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutral) -> Term {
     match n {
         Neutral::NVar(level) => level_to_var(size, level),
-        Neutral::NApp(f, a) => {
-            Term::TApp(Box::new(quote_neutral(size, globals, global_offset, *f)), Box::new(quote(size, globals, global_offset, *a)))
-        }
-        Neutral::NPApp(p, r) => {
-            Term::PApp(Box::new(quote_neutral(size, globals, global_offset, *p)), Box::new(quote(size, globals, global_offset, *r)))
-        }
+        Neutral::NApp(f, a) => Term::TApp(
+            Box::new(quote_neutral(size, globals, global_offset, *f)),
+            Box::new(quote(size, globals, global_offset, *a)),
+        ),
+        Neutral::NPApp(p, r) => Term::PApp(
+            Box::new(quote_neutral(size, globals, global_offset, *p)),
+            Box::new(quote(size, globals, global_offset, *r)),
+        ),
         Neutral::NSqApp(p, r, s) => {
             let pq = quote_neutral(size, globals, global_offset, *p);
             let rq = quote(size, globals, global_offset, *r);
             let sq = quote(size, globals, global_offset, *s);
-            Term::PApp(Box::new(Term::PApp(Box::new(pq), Box::new(rq))), Box::new(sq))
+            Term::PApp(
+                Box::new(Term::PApp(Box::new(pq), Box::new(rq))),
+                Box::new(sq),
+            )
         }
         Neutral::NCellApp(p, ivars) => {
             let mut result = quote_neutral(size, globals, global_offset, *p);
             for iv in ivars.into_iter().rev() {
-                result = Term::PApp(Box::new(result), Box::new(quote(size, globals, global_offset, iv)));
+                result = Term::PApp(
+                    Box::new(result),
+                    Box::new(quote(size, globals, global_offset, iv)),
+                );
             }
             result
         }
@@ -3364,13 +4620,20 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             quote_cases(size, globals, global_offset, &env, go, cases),
             Box::new(quote_neutral(size, globals, global_offset, *scrut)),
         ),
-        Neutral::NTransport(p, x) => {
-            Term::TTransport(Box::new(quote(size, globals, global_offset, *p)), Box::new(quote(size, globals, global_offset, *x)))
-        }
+        Neutral::NTransport(p, x) => Term::TTransport(
+            Box::new(quote(size, globals, global_offset, *p)),
+            Box::new(quote(size, globals, global_offset, *x)),
+        ),
         Neutral::NHComp(a, sys, base) => {
-            let sys_term: System = sys.iter().map(|(phi, tube)| {
-                (Term::TCube(phi.clone()), quote(size, globals, global_offset, tube.clone()))
-            }).collect();
+            let sys_term: System = sys
+                .iter()
+                .map(|(phi, tube)| {
+                    (
+                        Term::TCube(phi.clone()),
+                        quote(size, globals, global_offset, tube.clone()),
+                    )
+                })
+                .collect();
             Term::THComp(
                 Box::new(quote(size, globals, global_offset, *a)),
                 sys_term,
@@ -3378,9 +4641,15 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             )
         }
         Neutral::NComp(a, sys, base) => {
-            let sys_term: System = sys.iter().map(|(phi, tube)| {
-                (Term::TCube(phi.clone()), quote(size, globals, global_offset, tube.clone()))
-            }).collect();
+            let sys_term: System = sys
+                .iter()
+                .map(|(phi, tube)| {
+                    (
+                        Term::TCube(phi.clone()),
+                        quote(size, globals, global_offset, tube.clone()),
+                    )
+                })
+                .collect();
             Term::TComp(
                 Box::new(quote(size, globals, global_offset, *a)),
                 sys_term,
@@ -3388,9 +4657,15 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             )
         }
         Neutral::NFill(a, sys, base) => {
-            let sys_term: System = sys.iter().map(|(phi, tube)| {
-                (Term::TCube(phi.clone()), quote(size, globals, global_offset, tube.clone()))
-            }).collect();
+            let sys_term: System = sys
+                .iter()
+                .map(|(phi, tube)| {
+                    (
+                        Term::TCube(phi.clone()),
+                        quote(size, globals, global_offset, tube.clone()),
+                    )
+                })
+                .collect();
             Term::TFill(
                 Box::new(quote(size, globals, global_offset, *a)),
                 sys_term,
@@ -3398,9 +4673,15 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             )
         }
         Neutral::NHFill(a, sys, base) => {
-            let sys_term: System = sys.iter().map(|(phi, tube)| {
-                (Term::TCube(phi.clone()), quote(size, globals, global_offset, tube.clone()))
-            }).collect();
+            let sys_term: System = sys
+                .iter()
+                .map(|(phi, tube)| {
+                    (
+                        Term::TCube(phi.clone()),
+                        quote(size, globals, global_offset, tube.clone()),
+                    )
+                })
+                .collect();
             Term::THFill(
                 Box::new(quote(size, globals, global_offset, *a)),
                 sys_term,
@@ -3408,8 +4689,13 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             )
         }
         Neutral::NMeta(i) => Term::Meta(i),
-        Neutral::NForce(n) => Term::TForce(Box::new(quote_neutral(size, globals, global_offset, *n))),
-        Neutral::NProj(n, field) => Term::TProj(field, Box::new(quote_neutral(size, globals, global_offset, *n))),
+        Neutral::NForce(n) => {
+            Term::TForce(Box::new(quote_neutral(size, globals, global_offset, *n)))
+        }
+        Neutral::NProj(n, field) => Term::TProj(
+            field,
+            Box::new(quote_neutral(size, globals, global_offset, *n)),
+        ),
     }
 }
 
@@ -3425,7 +4711,14 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
 /// the re-quoted captured values, binder references round-trip unchanged, and
 /// global references are moved to below the quoting frame. Nothing is
 /// re-evaluated, so recursion terminates.
-fn quote_case_body(size: usize, globals: &Globals, global_offset: usize, env: &Scope, go: usize, t: &Term) -> Term {
+fn quote_case_body(
+    size: usize,
+    globals: &Globals,
+    global_offset: usize,
+    env: &Scope,
+    go: usize,
+    t: &Term,
+) -> Term {
     match t {
         Term::TVar(i) => {
             let i = *i as usize;
@@ -3491,7 +4784,14 @@ fn quote_case_body(size: usize, globals: &Globals, global_offset: usize, env: &S
             Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
             *lvl,
         ),
-        Term::TLower(a) => Term::TLower(Box::new(quote_case_body(size, globals, global_offset, env, go, a))),
+        Term::TLower(a) => Term::TLower(Box::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            a,
+        ))),
         Term::TIntervalTy => Term::TIntervalTy,
         Term::TPi(x, a, b) => Term::TPi(
             x.clone(),
@@ -3591,7 +4891,14 @@ fn quote_case_body(size: usize, globals: &Globals, global_offset: usize, env: &S
             Box::new(quote_case_body(size, globals, global_offset, env, go, e)),
             Box::new(quote_case_body(size, globals, global_offset, env, go, x)),
         ),
-        Term::TUa(e) => Term::TUa(Box::new(quote_case_body(size, globals, global_offset, env, go, e))),
+        Term::TUa(e) => Term::TUa(Box::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            e,
+        ))),
         Term::TTransport(p, x) => Term::TTransport(
             Box::new(quote_case_body(size, globals, global_offset, env, go, p)),
             Box::new(quote_case_body(size, globals, global_offset, env, go, x)),
@@ -3641,8 +4948,22 @@ fn quote_case_body(size: usize, globals: &Globals, global_offset: usize, env: &S
             Box::new(quote_case_body(size, globals, global_offset, env, go, a)),
             Box::new(quote_case_body(size, globals, global_offset, env, go, b)),
         ),
-        Term::TFst(p) => Term::TFst(Box::new(quote_case_body(size, globals, global_offset, env, go, p))),
-        Term::TSnd(p) => Term::TSnd(Box::new(quote_case_body(size, globals, global_offset, env, go, p))),
+        Term::TFst(p) => Term::TFst(Box::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            p,
+        ))),
+        Term::TSnd(p) => Term::TSnd(Box::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            p,
+        ))),
         Term::TData(name, params) => Term::TData(
             name.clone(),
             params
@@ -3697,22 +5018,64 @@ fn quote_case_body(size: usize, globals: &Globals, global_offset: usize, env: &S
                 new_cases.push(ElimCase {
                     con: case.con.clone(),
                     binders: case.binders.clone(),
-                    body: Box::new(quote_case_body(size + nb, globals, global_offset, &env2, go, &case.body)),
+                    body: Box::new(quote_case_body(
+                        size + nb,
+                        globals,
+                        global_offset,
+                        &env2,
+                        go,
+                        &case.body,
+                    )),
                     as_name: case.as_name.clone(),
                     record_bindings: case.record_bindings.clone(),
                 });
             }
             Term::TElim(
-                Box::new(quote_case_body(size, globals, global_offset, env, go, motive)),
+                Box::new(quote_case_body(
+                    size,
+                    globals,
+                    global_offset,
+                    env,
+                    go,
+                    motive,
+                )),
                 new_cases,
-                Box::new(quote_case_body(size, globals, global_offset, env, go, scrut)),
+                Box::new(quote_case_body(
+                    size,
+                    globals,
+                    global_offset,
+                    env,
+                    go,
+                    scrut,
+                )),
             )
         }
         Term::Meta(i) => Term::Meta(*i),
         Term::TBy(_) => panic!("TBy should be resolved before NbE"),
-        Term::TDelay(a) => Term::TDelay(Box::new(quote_case_body(size, globals, global_offset, env, go, a))),
-        Term::TNext(a) => Term::TNext(Box::new(quote_case_body(size, globals, global_offset, env, go, a))),
-        Term::TForce(a) => Term::TForce(Box::new(quote_case_body(size, globals, global_offset, env, go, a))),
+        Term::TDelay(a) => Term::TDelay(Box::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            a,
+        ))),
+        Term::TNext(a) => Term::TNext(Box::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            a,
+        ))),
+        Term::TForce(a) => Term::TForce(Box::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            a,
+        ))),
         Term::TProj(field, r) => Term::TProj(
             field.clone(),
             Box::new(quote_case_body(size, globals, global_offset, env, go, r)),
@@ -3721,13 +5084,25 @@ fn quote_case_body(size: usize, globals: &Globals, global_offset: usize, env: &S
             Box::new(quote_case_body(size, globals, global_offset, env, go, r)),
             updates
                 .iter()
-                .map(|(f, e)| (f.clone(), quote_case_body(size, globals, global_offset, env, go, e)))
+                .map(|(f, e)| {
+                    (
+                        f.clone(),
+                        quote_case_body(size, globals, global_offset, env, go, e),
+                    )
+                })
                 .collect(),
         ),
     }
 }
 
-fn quote_cases(size: usize, globals: &Globals, global_offset: usize, env: &Scope, go: usize, cases: Vec<ElimCase>) -> Vec<ElimCase> {
+fn quote_cases(
+    size: usize,
+    globals: &Globals,
+    global_offset: usize,
+    env: &Scope,
+    go: usize,
+    cases: Vec<ElimCase>,
+) -> Vec<ElimCase> {
     cases
         .into_iter()
         .map(|case| {
@@ -3740,7 +5115,14 @@ fn quote_cases(size: usize, globals: &Globals, global_offset: usize, env: &Scope
             ElimCase {
                 con: case.con,
                 binders: case.binders.clone(),
-                body: Box::new(quote_case_body(size + nb, globals, global_offset, &env2, go, &case.body)),
+                body: Box::new(quote_case_body(
+                    size + nb,
+                    globals,
+                    global_offset,
+                    &env2,
+                    go,
+                    &case.body,
+                )),
                 as_name: case.as_name,
                 record_bindings: case.record_bindings,
             }
@@ -3749,11 +5131,21 @@ fn quote_cases(size: usize, globals: &Globals, global_offset: usize, env: &Scope
 }
 
 pub fn normalize(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Term {
-    quote(env.len(), globals, global_offset, eval_nbe(env, globals, global_offset, t))
+    quote(
+        env.len(),
+        globals,
+        global_offset,
+        eval_nbe(env, globals, global_offset, t),
+    )
 }
 
 /// Evaluate a term-level system into a DNFSystem.
-pub fn eval_system(env: &Scope, globals: &Globals, global_offset: usize, sys: &System) -> DNFSystem {
+pub fn eval_system(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    sys: &System,
+) -> DNFSystem {
     sys.iter()
         .map(|(phi, t)| {
             let phi_val = eval_nbe(env, globals, global_offset, phi);
@@ -3837,7 +5229,11 @@ fn do_equiv_fwd(globals: &Globals, global_offset: usize, e: Value, x: Value) -> 
     match e {
         Value::VMkEquiv(_, _, f, _, _, _) => {
             let result = do_apply(globals, global_offset, *f, x);
-            record_step("equiv-fwd".into(), "equivFwd (mkEquiv _ _ f _ _ _) _".into(), value_str(globals, global_offset, &result));
+            record_step(
+                "equiv-fwd".into(),
+                "equivFwd (mkEquiv _ _ f _ _ _) _".into(),
+                value_str(globals, global_offset, &result),
+            );
             result
         }
         other => Value::VEquivFwd(Box::new(other), Box::new(x)),
@@ -3852,7 +5248,13 @@ fn equiv_dom_value(v: Value) -> Value {
     }
 }
 
-fn stuck_elim(motive: Value, cases: &[ElimCase], n: Neutral, env: &Scope, global_offset: usize) -> Value {
+fn stuck_elim(
+    motive: Value,
+    cases: &[ElimCase],
+    n: Neutral,
+    env: &Scope,
+    global_offset: usize,
+) -> Value {
     Value::VNeutral(Neutral::NElim(
         Box::new(motive),
         cases.to_vec(),
@@ -3913,7 +5315,6 @@ fn level_to_var(size: usize, level: usize) -> Term {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Metavariable store and helpers
 // ---------------------------------------------------------------------------
@@ -3940,7 +5341,9 @@ pub fn set_meta_name(id: i32, name: Name) {
 }
 
 pub fn get_meta_name(id: i32) -> Option<Name> {
-    if id < 0 { return None; }
+    if id < 0 {
+        return None;
+    }
     META_NAMES.with(|n| n.borrow().get(id as usize).and_then(|o| o.clone()))
 }
 
@@ -3958,7 +5361,9 @@ pub fn set_meta_expected(id: i32, ty: Term) {
 }
 
 pub fn get_meta_expected(id: i32) -> Option<Term> {
-    if id < 0 { return None; }
+    if id < 0 {
+        return None;
+    }
     META_EXPECTED.with(|e| e.borrow().get(id as usize).and_then(|o| o.clone()))
 }
 
@@ -3971,10 +5376,10 @@ pub fn solve_meta(id: i32, solution: Term) {
 }
 
 pub fn get_meta_solution(id: i32) -> Option<Term> {
-    if id < 0 { return None; }
-    METAVAR_SOLUTIONS.with(|s| {
-        s.borrow().get(id as usize).and_then(|opt| opt.clone())
-    })
+    if id < 0 {
+        return None;
+    }
+    METAVAR_SOLUTIONS.with(|s| s.borrow().get(id as usize).and_then(|opt| opt.clone()))
 }
 
 pub fn clear_metavars() {
@@ -3995,56 +5400,100 @@ pub fn clear_all_caches() {
 pub fn meta_mentions(id: i32, t: &Term) -> bool {
     match t {
         Term::Meta(j) => *j == id,
-        Term::TVar(_) | Term::TUniv(_) | Term::TProp | Term::TSSet
-        | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => false,
+        Term::TVar(_)
+        | Term::TUniv(_)
+        | Term::TProp
+        | Term::TSSet
+        | Term::TIntervalTy
+        | Term::TInterval(_)
+        | Term::TCube(_) => false,
         Term::TApp(f, a) => meta_mentions(id, f) || meta_mentions(id, a),
         Term::TAbs(_, b) | Term::PLam(_, b) => meta_mentions(id, b),
         Term::TPi(_, a, b) | Term::TSigma(_, a, b) => meta_mentions(id, a) || meta_mentions(id, b),
-        Term::TPath(a, u, v) => meta_mentions(id, a) || meta_mentions(id, u) || meta_mentions(id, v),
+        Term::TPath(a, u, v) => {
+            meta_mentions(id, a) || meta_mentions(id, u) || meta_mentions(id, v)
+        }
         Term::PApp(p, r) => meta_mentions(id, p) || meta_mentions(id, r),
-        Term::THComp(a, sys, base) | Term::TComp(a, sys, base)
-        | Term::TFill(a, sys, base) | Term::THFill(a, sys, base) => {
-            meta_mentions(id, a) || meta_mentions(id, base) || sys.iter().any(|(phi, tube)| meta_mentions(id, phi) || meta_mentions(id, tube))
+        Term::THComp(a, sys, base)
+        | Term::TComp(a, sys, base)
+        | Term::TFill(a, sys, base)
+        | Term::THFill(a, sys, base) => {
+            meta_mentions(id, a)
+                || meta_mentions(id, base)
+                || sys
+                    .iter()
+                    .any(|(phi, tube)| meta_mentions(id, phi) || meta_mentions(id, tube))
         }
         Term::TEquiv(a, b) => meta_mentions(id, a) || meta_mentions(id, b),
         Term::TMkEquiv(a, b, f, g, eta, eps) => {
-            meta_mentions(id, a) || meta_mentions(id, b) || meta_mentions(id, f)
-            || meta_mentions(id, g) || meta_mentions(id, eta) || meta_mentions(id, eps)
+            meta_mentions(id, a)
+                || meta_mentions(id, b)
+                || meta_mentions(id, f)
+                || meta_mentions(id, g)
+                || meta_mentions(id, eta)
+                || meta_mentions(id, eps)
         }
-        Term::TEquivFwd(e, x) | Term::TTransport(e, x) => meta_mentions(id, e) || meta_mentions(id, x),
+        Term::TEquivFwd(e, x) | Term::TTransport(e, x) => {
+            meta_mentions(id, e) || meta_mentions(id, x)
+        }
         Term::TUa(e) => meta_mentions(id, e),
-        Term::TGlue(a, phi, te) => meta_mentions(id, a) || meta_mentions(id, phi) || meta_mentions(id, te),
-        Term::TGlueElem(phi, t, a) => meta_mentions(id, phi) || meta_mentions(id, t) || meta_mentions(id, a),
-        Term::TUnglue(phi, te, g) => meta_mentions(id, phi) || meta_mentions(id, te) || meta_mentions(id, g),
+        Term::TGlue(a, phi, te) => {
+            meta_mentions(id, a) || meta_mentions(id, phi) || meta_mentions(id, te)
+        }
+        Term::TGlueElem(phi, t, a) => {
+            meta_mentions(id, phi) || meta_mentions(id, t) || meta_mentions(id, a)
+        }
+        Term::TUnglue(phi, te, g) => {
+            meta_mentions(id, phi) || meta_mentions(id, te) || meta_mentions(id, g)
+        }
         Term::TPartial(phi, a) => meta_mentions(id, phi) || meta_mentions(id, a),
-        Term::TSystemType(sys) => sys.iter().any(|(phi, a)| meta_mentions(id, phi) || meta_mentions(id, a)),
+        Term::TSystemType(sys) => sys
+            .iter()
+            .any(|(phi, a)| meta_mentions(id, phi) || meta_mentions(id, a)),
         Term::TPair(a, b) => meta_mentions(id, a) || meta_mentions(id, b),
-        Term::TFst(p) | Term::TSnd(p) | Term::TProj(_, p) | Term::TLift(p, _) | Term::TLower(p)
-        | Term::TDelay(p) | Term::TNext(p) | Term::TForce(p) => meta_mentions(id, p),
+        Term::TFst(p)
+        | Term::TSnd(p)
+        | Term::TProj(_, p)
+        | Term::TLift(p, _)
+        | Term::TLower(p)
+        | Term::TDelay(p)
+        | Term::TNext(p)
+        | Term::TForce(p) => meta_mentions(id, p),
         Term::TRecordUpdate(r, updates) => {
             meta_mentions(id, r) || updates.iter().any(|(_, e)| meta_mentions(id, e))
         }
         Term::TData(_, params) => params.iter().any(|p| meta_mentions(id, p)),
         Term::TCon(_, _, args) => args.iter().any(|a| meta_mentions(id, a)),
-        Term::TPCon(_, _, args, r) => args.iter().any(|a| meta_mentions(id, a)) || meta_mentions(id, r),
+        Term::TPCon(_, _, args, r) => {
+            args.iter().any(|a| meta_mentions(id, a)) || meta_mentions(id, r)
+        }
         Term::TSqCon(_, _, args, r, s) => {
-            args.iter().any(|a| meta_mentions(id, a)) || meta_mentions(id, r) || meta_mentions(id, s)
+            args.iter().any(|a| meta_mentions(id, a))
+                || meta_mentions(id, r)
+                || meta_mentions(id, s)
         }
         Term::TCellCon(_, _, args, ivars) => {
             args.iter().any(|a| meta_mentions(id, a)) || ivars.iter().any(|v| meta_mentions(id, v))
         }
         Term::TElim(motive, cases, scrut) => {
-            meta_mentions(id, motive) || meta_mentions(id, scrut)
-            || cases.iter().any(|c| meta_mentions(id, &c.body))
+            meta_mentions(id, motive)
+                || meta_mentions(id, scrut)
+                || cases.iter().any(|c| meta_mentions(id, &c.body))
         }
         Term::TBy(_) => false,
     }
 }
 
 pub fn try_solve_meta(id: i32, rhs: &Term) -> bool {
-    if id < 0 { return false; }
-    if get_meta_solution(id).is_some() { return true; }
-    if meta_mentions(id, rhs) { return false; }
+    if id < 0 {
+        return false;
+    }
+    if get_meta_solution(id).is_some() {
+        return true;
+    }
+    if meta_mentions(id, rhs) {
+        return false;
+    }
     solve_meta(id, rhs.clone());
     true
 }
@@ -4083,16 +5532,23 @@ pub fn zonk(t: &Term) -> Term {
 
 fn term_children_mut(t: &mut Term) -> Vec<&mut Term> {
     match t {
-        Term::TVar(_) | Term::TUniv(_) | Term::TProp | Term::TSSet
-        | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_)
+        Term::TVar(_)
+        | Term::TUniv(_)
+        | Term::TProp
+        | Term::TSSet
+        | Term::TIntervalTy
+        | Term::TInterval(_)
+        | Term::TCube(_)
         | Term::Meta(_) => vec![],
         Term::TApp(f, a) => vec![f.as_mut(), a.as_mut()],
         Term::TAbs(_, b) | Term::PLam(_, b) => vec![b.as_mut()],
         Term::TPi(_, a, b) | Term::TSigma(_, a, b) => vec![a.as_mut(), b.as_mut()],
         Term::TPath(a, u, v) => vec![a.as_mut(), u.as_mut(), v.as_mut()],
         Term::PApp(p, r) => vec![p.as_mut(), r.as_mut()],
-        Term::THComp(a, sys, base) | Term::TComp(a, sys, base)
-        | Term::TFill(a, sys, base) | Term::THFill(a, sys, base) => {
+        Term::THComp(a, sys, base)
+        | Term::TComp(a, sys, base)
+        | Term::TFill(a, sys, base)
+        | Term::THFill(a, sys, base) => {
             let mut children = vec![a.as_mut(), base.as_mut()];
             for (phi, tube) in sys.iter_mut() {
                 children.push(phi);
@@ -4102,7 +5558,14 @@ fn term_children_mut(t: &mut Term) -> Vec<&mut Term> {
         }
         Term::TEquiv(a, b) => vec![a.as_mut(), b.as_mut()],
         Term::TMkEquiv(a, b, f, g, eta, eps) => {
-            vec![a.as_mut(), b.as_mut(), f.as_mut(), g.as_mut(), eta.as_mut(), eps.as_mut()]
+            vec![
+                a.as_mut(),
+                b.as_mut(),
+                f.as_mut(),
+                g.as_mut(),
+                eta.as_mut(),
+                eps.as_mut(),
+            ]
         }
         Term::TEquivFwd(e, x) | Term::TTransport(e, x) => vec![e.as_mut(), x.as_mut()],
         Term::TUa(e) => vec![e.as_mut()],
@@ -4110,10 +5573,18 @@ fn term_children_mut(t: &mut Term) -> Vec<&mut Term> {
         Term::TGlueElem(phi, t, a) => vec![phi.as_mut(), t.as_mut(), a.as_mut()],
         Term::TUnglue(phi, te, g) => vec![phi.as_mut(), te.as_mut(), g.as_mut()],
         Term::TPartial(phi, a) => vec![phi.as_mut(), a.as_mut()],
-        Term::TSystemType(sys) => sys.iter_mut().flat_map(|(phi, a)| vec![phi as &mut Term, a as &mut Term]).collect(),
+        Term::TSystemType(sys) => sys
+            .iter_mut()
+            .flat_map(|(phi, a)| vec![phi as &mut Term, a as &mut Term])
+            .collect(),
         Term::TPair(a, b) => vec![a.as_mut(), b.as_mut()],
-        Term::TFst(p) | Term::TSnd(p) | Term::TLift(p, _) | Term::TLower(p)
-        | Term::TDelay(p) | Term::TNext(p) | Term::TForce(p) => vec![p.as_mut()],
+        Term::TFst(p)
+        | Term::TSnd(p)
+        | Term::TLift(p, _)
+        | Term::TLower(p)
+        | Term::TDelay(p)
+        | Term::TNext(p)
+        | Term::TForce(p) => vec![p.as_mut()],
         Term::TProj(_, p) => vec![p.as_mut()],
         Term::TRecordUpdate(r, updates) => {
             let mut children: Vec<&mut Term> = vec![r.as_mut()];
@@ -4163,16 +5634,23 @@ fn has_meta_in_term(t: &Term) -> bool {
 
 fn term_children_ref(t: &Term) -> Vec<&Term> {
     match t {
-        Term::TVar(_) | Term::TUniv(_) | Term::TProp | Term::TSSet
-        | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_)
+        Term::TVar(_)
+        | Term::TUniv(_)
+        | Term::TProp
+        | Term::TSSet
+        | Term::TIntervalTy
+        | Term::TInterval(_)
+        | Term::TCube(_)
         | Term::Meta(_) => vec![],
         Term::TApp(f, a) => vec![f.as_ref(), a.as_ref()],
         Term::TAbs(_, b) | Term::PLam(_, b) => vec![b.as_ref()],
         Term::TPi(_, a, b) | Term::TSigma(_, a, b) => vec![a.as_ref(), b.as_ref()],
         Term::TPath(a, u, v) => vec![a.as_ref(), u.as_ref(), v.as_ref()],
         Term::PApp(p, r) => vec![p.as_ref(), r.as_ref()],
-        Term::THComp(a, sys, base) | Term::TComp(a, sys, base)
-        | Term::TFill(a, sys, base) | Term::THFill(a, sys, base) => {
+        Term::THComp(a, sys, base)
+        | Term::TComp(a, sys, base)
+        | Term::TFill(a, sys, base)
+        | Term::THFill(a, sys, base) => {
             let mut children = vec![a.as_ref(), base.as_ref()];
             for (phi, tube) in sys {
                 children.push(phi);
@@ -4182,7 +5660,14 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         }
         Term::TEquiv(a, b) => vec![a.as_ref(), b.as_ref()],
         Term::TMkEquiv(a, b, f, g, eta, eps) => {
-            vec![a.as_ref(), b.as_ref(), f.as_ref(), g.as_ref(), eta.as_ref(), eps.as_ref()]
+            vec![
+                a.as_ref(),
+                b.as_ref(),
+                f.as_ref(),
+                g.as_ref(),
+                eta.as_ref(),
+                eps.as_ref(),
+            ]
         }
         Term::TEquivFwd(e, x) | Term::TTransport(e, x) => vec![e.as_ref(), x.as_ref()],
         Term::TUa(e) => vec![e.as_ref()],
@@ -4190,10 +5675,19 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         Term::TGlueElem(phi, t, a) => vec![phi.as_ref(), t.as_ref(), a.as_ref()],
         Term::TUnglue(phi, te, g) => vec![phi.as_ref(), te.as_ref(), g.as_ref()],
         Term::TPartial(phi, a) => vec![phi.as_ref(), a.as_ref()],
-        Term::TSystemType(sys) => sys.iter().flat_map(|(phi, a)| vec![phi as &Term, a as &Term]).collect(),
+        Term::TSystemType(sys) => sys
+            .iter()
+            .flat_map(|(phi, a)| vec![phi as &Term, a as &Term])
+            .collect(),
         Term::TPair(a, b) => vec![a.as_ref(), b.as_ref()],
-        Term::TFst(p) | Term::TSnd(p) | Term::TProj(_, p) | Term::TLift(p, _) | Term::TLower(p)
-        | Term::TDelay(p) | Term::TNext(p) | Term::TForce(p) => vec![p.as_ref()],
+        Term::TFst(p)
+        | Term::TSnd(p)
+        | Term::TProj(_, p)
+        | Term::TLift(p, _)
+        | Term::TLower(p)
+        | Term::TDelay(p)
+        | Term::TNext(p)
+        | Term::TForce(p) => vec![p.as_ref()],
         Term::TRecordUpdate(r, updates) => {
             let mut children: Vec<&Term> = vec![r.as_ref()];
             for (_, e) in updates.iter() {
@@ -4328,11 +5822,7 @@ mod tests {
 
     #[test]
     fn sigma_transport_on_pair_reduces() {
-        let sigma = Term::TSigma(
-            "x".to_string(),
-            b(Term::TUniv(0)),
-            b(Term::TUniv(1)),
-        );
+        let sigma = Term::TSigma("x".to_string(), b(Term::TUniv(0)), b(Term::TUniv(1)));
         let fam = Term::PLam("i".to_string(), b(sigma));
         let pair = Term::TPair(b(Term::TUniv(0)), b(Term::TUniv(1)));
         let term = Term::TTransport(b(fam), b(pair.clone()));
@@ -4449,7 +5939,11 @@ mod tests {
             b(Term::TUniv(0)),
         );
         let result = nbe_eval(&hcomp);
-        assert_eq!(result, Term::TUniv(0), "constant-tube hcomp should reduce to base");
+        assert_eq!(
+            result,
+            Term::TUniv(0),
+            "constant-tube hcomp should reduce to base"
+        );
     }
 
     #[test]
@@ -4481,18 +5975,14 @@ mod tests {
             cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
         });
         let glue_ty = Term::TGlue(
-            b(Term::TVar(0)),         // A varies with i → makes family non-constant
+            b(Term::TVar(0)), // A varies with i → makes family non-constant
             b(non_trivial_phi.clone()),
-            b(Term::TUniv(0)),        // te
+            b(Term::TUniv(0)), // te
         );
         let fam = Term::PLam("i".to_string(), b(glue_ty));
         let cap = Term::TUniv(1);
         let base = Term::TUniv(2);
-        let glue_elem = Term::TGlueElem(
-            b(non_trivial_phi.clone()),
-            b(cap),
-            b(base),
-        );
+        let glue_elem = Term::TGlueElem(b(non_trivial_phi.clone()), b(cap), b(base));
         let transport = Term::TTransport(b(fam), b(glue_elem));
         let globals: Globals = Rc::new(RefCell::new(Vec::new()));
         let result = eval_nbe(&Scope::empty(), &globals, 0, &transport);
@@ -4530,11 +6020,7 @@ mod tests {
         let non_trivial_phi = Term::TCube(DNF {
             cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
         });
-        let glue_ty = Term::TGlue(
-            b(Term::TVar(0)),
-            b(non_trivial_phi),
-            b(Term::TUniv(0)),
-        );
+        let glue_ty = Term::TGlue(b(Term::TVar(0)), b(non_trivial_phi), b(Term::TUniv(0)));
         let fam = Term::PLam("i".to_string(), b(glue_ty));
         let transport = Term::TTransport(b(fam), b(Term::TUniv(0)));
         let globals: Globals = Rc::new(RefCell::new(Vec::new()));
@@ -4555,23 +6041,18 @@ mod tests {
         let phi2 = Term::TCube(DNF {
             cubes: BTreeSet::from([BTreeSet::from([Literal::NegVar(1)])]),
         });
-        let glue_ty = Term::TGlue(
-            b(Term::TVar(0)),
-            b(phi1),
-            b(Term::TUniv(0)),
-        );
+        let glue_ty = Term::TGlue(b(Term::TVar(0)), b(phi1), b(Term::TUniv(0)));
         let fam = Term::PLam("i".to_string(), b(glue_ty));
-        let glue_elem = Term::TGlueElem(
-            b(phi2),
-            b(Term::TUniv(1)),
-            b(Term::TUniv(2)),
-        );
+        let glue_elem = Term::TGlueElem(b(phi2), b(Term::TUniv(1)), b(Term::TUniv(2)));
         let transport = Term::TTransport(b(fam), b(glue_elem));
         let globals: Globals = Rc::new(RefCell::new(Vec::new()));
         let result = eval_nbe(&Scope::empty(), &globals, 0, &transport);
         match result {
             Value::VTransport(_, _) => {}
-            other => panic!("expected stuck VTransport on face mismatch, got: {:?}", other),
+            other => panic!(
+                "expected stuck VTransport on face mismatch, got: {:?}",
+                other
+            ),
         }
     }
 }

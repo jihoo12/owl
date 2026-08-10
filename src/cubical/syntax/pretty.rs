@@ -132,13 +132,10 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             show_term(env, phi),
             show_term(env, te)
         ),
-        Term::TPartial(phi, a) => format!(
-            "[_ | {}] {}",
-            show_term(env, phi),
-            show_term(env, a)
-        ),
+        Term::TPartial(phi, a) => format!("[_ | {}] {}", show_term(env, phi), show_term(env, a)),
         Term::TSystemType(sys) => {
-            let parts: Vec<String> = sys.iter()
+            let parts: Vec<String> = sys
+                .iter()
                 .map(|(phi, a)| format!("{} => {}", show_term(env, phi), show_term(env, a)))
                 .collect();
             format!("[{}]", parts.join(", "))
@@ -199,7 +196,10 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
         }
         Term::TCellCon(_, c, args, ivars) => {
             let mut parts: Vec<String> = args.iter().map(|a| show_term(env, a)).collect();
-            let ivar_strs: Vec<String> = ivars.iter().map(|v| format!("@ {}", show_term(env, v))).collect();
+            let ivar_strs: Vec<String> = ivars
+                .iter()
+                .map(|v| format!("@ {}", show_term(env, v)))
+                .collect();
             parts.extend(ivar_strs);
             format!("({} {})", c, parts.join(" "))
         }
@@ -225,12 +225,10 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
                 show_term(env, scrut)
             )
         }
-        Term::Meta(i) => {
-            match crate::cubical::nbe::get_meta_name(*i) {
-                Some(name) => format!("?{}", name),
-                None => format!("?_{}", i),
-            }
-        }
+        Term::Meta(i) => match crate::cubical::nbe::get_meta_name(*i) {
+            Some(name) => format!("?{}", name),
+            None => format!("?_{}", i),
+        },
         Term::TBy(tactics) => {
             let tactic_strs: Vec<String> = tactics.iter().map(|t| show_tactic(env, t)).collect();
             format!("by {}", tactic_strs.join("; "))

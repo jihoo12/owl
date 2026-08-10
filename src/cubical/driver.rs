@@ -8,8 +8,8 @@ use crate::cubical::env::{Env, check_with_full_env, infer_with_full_env};
 use crate::cubical::nbe::{nbe_eval, nbe_eval_with_globals, zonk};
 use crate::cubical::parser::{Decl, ProgramParser};
 use crate::cubical::syntax::{Name, Term};
-use crate::cubical::typechecker::{Ctx, TypeError};
 use crate::cubical::typechecker::errors::ContextualError;
+use crate::cubical::typechecker::{Ctx, TypeError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunOutput {
@@ -207,10 +207,20 @@ fn process_file_source(
                 Decl::Record(dt) => {
                     process_data(&dt, env)?;
                 }
-                Decl::DataWithFunc { dt, func_name, func_ty, func_val } => {
+                Decl::DataWithFunc {
+                    dt,
+                    func_name,
+                    func_ty,
+                    func_val,
+                } => {
                     process_data_with_func(&dt, &func_name, &func_ty, &func_val, env)?;
                 }
-                Decl::Def { name, ty, val, by_wf } => {
+                Decl::Def {
+                    name,
+                    ty,
+                    val,
+                    by_wf,
+                } => {
                     *last_def = Some(process_def(&name, &ty, &val, env, by_wf)?);
                 }
             }
@@ -258,10 +268,11 @@ fn load_import(
 
 fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<(), RunError> {
     // Check positivity before registering the datatype.
-    crate::cubical::syntax::check_datatype_positivity(dt)
-        .map_err(|e| RunError::Type(Box::new(crate::cubical::typechecker::TypeError::Other(
+    crate::cubical::syntax::check_datatype_positivity(dt).map_err(|e| {
+        RunError::Type(Box::new(crate::cubical::typechecker::TypeError::Other(
             format!("{}", e),
-        ))))?;
+        )))
+    })?;
     env.declare_datatype(dt.clone());
     // Build a context with the parameter types so that arg_tys which
     // reference parameters via de Bruijn indices (e.g. TVar(0) for the
@@ -310,10 +321,11 @@ fn process_data_mutual(
 ) -> Result<(), RunError> {
     // Phase 1: Register all datatypes so they can reference each other.
     for dt in dts {
-        crate::cubical::syntax::check_datatype_positivity(dt)
-            .map_err(|e| RunError::Type(Box::new(crate::cubical::typechecker::TypeError::Other(
+        crate::cubical::syntax::check_datatype_positivity(dt).map_err(|e| {
+            RunError::Type(Box::new(crate::cubical::typechecker::TypeError::Other(
                 format!("{}", e),
-            ))))?;
+            )))
+        })?;
         env.declare_datatype(dt.clone());
     }
     // Phase 2: Typecheck constructor argument types against the full mutual environment.
@@ -373,13 +385,23 @@ fn unsolved_hole_report(t: &Term) -> Vec<(i32, Name, Option<Term>)> {
         .collect()
 }
 
-fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -> Result<RunOutput, RunError> {
+fn process_def(
+    name: &Name,
+    ty: &Term,
+    val: &Term,
+    env: &mut Env,
+    by_wf: bool,
+) -> Result<RunOutput, RunError> {
     crate::cubical::nbe::clear_nbe_cache();
     crate::debug_log!("process_def '{}':", name);
     if by_wf {
         crate::cubical::typechecker::termination::set_skip_guard(true);
     }
-    crate::debug_log!("process_def '{}' raw_ty: {}", name, crate::cubical::syntax::pretty::show_term(&[], ty));
+    crate::debug_log!(
+        "process_def '{}' raw_ty: {}",
+        name,
+        crate::cubical::syntax::pretty::show_term(&[], ty)
+    );
     // Rebase the raw annotation into the body-check context (own definition
     // at de Bruijn index 0, older definitions at j+1). We deliberately do NOT
     // close the annotation by evaluating it against the current definitions'
@@ -395,7 +417,13 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     if !matches!(ty, Term::Meta(_)) {
         match nbe_eval(&infer_with_full_env(env, ty)?) {
             Term::TUniv(_) => {}
-            other => return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse { ty: other, names: vec![], pos: None }))),
+            other => {
+                return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse {
+                    ty: other,
+                    names: vec![],
+                    pos: None,
+                })));
+            }
         }
     }
 
@@ -418,12 +446,9 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     // (de Bruijn index 0 of the goal scope) stays neutral.
     let globals = crate::cubical::env::build_definition_values(env);
     let prev_globals = crate::cubical::nbe::set_current_globals(Some(globals));
-    let resolved_val = crate::cubical::tactics::resolve_tactics(
-        &env.datatypes,
-        val,
-        &check_ty,
-        &global_ctx,
-    ).map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
+    let resolved_val =
+        crate::cubical::tactics::resolve_tactics(&env.datatypes, val, &check_ty, &global_ctx)
+            .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
     crate::cubical::nbe::set_current_globals(prev_globals);
     let resolved_val = resolved_val?;
 
@@ -447,11 +472,9 @@ fn process_def(name: &Name, ty: &Term, val: &Term, env: &mut Env, by_wf: bool) -
     metas.extend(unsolved_hole_report(&zonk(ty)));
     if !metas.is_empty() {
         let names: Vec<Name> = env.defs.iter().map(|(n, _, _)| n.clone()).collect();
-        return Err(RunError::Type(Box::new(ContextualError::with_def(
-            name,
-            TypeError::UnsolvedHoles { metas, names },
-        )
-        .inner)));
+        return Err(RunError::Type(Box::new(
+            ContextualError::with_def(name, TypeError::UnsolvedHoles { metas, names }).inner,
+        )));
     }
 
     let output = RunOutput {
@@ -478,7 +501,11 @@ mod tests {
         let nat_path = dir.join("nat.owl");
         let main_path = dir.join("main.owl");
 
-        fs::write(&nat_path, "inductive Nat where | zero : Nat | suc : Nat -> Nat\n").unwrap();
+        fs::write(
+            &nat_path,
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n",
+        )
+        .unwrap();
         fs::write(
             &main_path,
             "import \"nat.owl\"\n\ndef main : Nat -> Nat := fun n => n\n",
@@ -569,7 +596,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := add (suc (suc zero)) (suc (suc zero))",
         )
         .expect("program should evaluate");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(4));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(4)
+        );
     }
 
     #[test]
@@ -577,7 +607,11 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
         let dir = std::env::temp_dir().join(format!("cubical_check_test_{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("nat.owl");
-        fs::write(&path, "inductive Nat where | zero : Nat | suc : Nat -> Nat\n").unwrap();
+        fs::write(
+            &path,
+            "inductive Nat where | zero : Nat | suc : Nat -> Nat\n",
+        )
+        .unwrap();
 
         check(&path).expect("a datatype-only library should check");
         let _ = fs::remove_dir_all(&dir);
@@ -591,7 +625,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := id Nat zero",
         )
         .expect("tactic id should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -602,7 +639,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := id_nat (suc zero)",
         )
         .expect("tactic assumption should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(1));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(1)
+        );
     }
 
     #[test]
@@ -614,7 +654,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := apply_test (suc (suc zero))",
         )
         .expect("tactic apply should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(2));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(2)
+        );
     }
 
     #[test]
@@ -626,7 +669,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := apply_chain_test (suc zero)",
         )
         .expect("tactic chained apply should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(3));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(3)
+        );
     }
 
     #[test]
@@ -637,7 +683,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := const_zero",
         )
         .expect("tactic exact should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -648,7 +697,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := zero",
         )
         .expect("tactic reflexivity should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -659,7 +711,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := zero",
         )
         .expect("tactic symmetry + reflexivity should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -670,7 +725,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := fst pair_test",
         )
         .expect("tactic split should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -681,7 +739,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := snd pair_test2",
         )
         .expect("tactic split snd should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(2));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(2)
+        );
     }
 
     #[test]
@@ -692,7 +753,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := my_zero",
         )
         .expect("tactic constructor (zero args) should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -703,7 +767,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := my_suc",
         )
         .expect("tactic constructor (one arg) should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(1));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(1)
+        );
     }
 
     #[test]
@@ -714,7 +781,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := my_two",
         )
         .expect("tactic constructor (named) should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(2));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(2)
+        );
     }
 
     #[test]
@@ -725,7 +795,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := three",
         )
         .expect("tactic constructor chain should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(3));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(3)
+        );
     }
 
     #[test]
@@ -736,7 +809,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := zero",
         )
         .expect("tactic trivial on reflexive path should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -747,7 +823,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := trivial_nat",
         )
         .expect("tactic trivial on zero-arg constructor should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -759,7 +838,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := compute_test",
         )
         .expect("tactic compute should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -815,7 +897,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := x",
         )
         .expect("type hole should be solved by unification");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(0));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(0)
+        );
     }
 
     #[test]
@@ -865,7 +950,10 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
              def main : Nat := isZero zero",
         )
         .expect("induction-recursion should typecheck");
-        assert_eq!(crate::cubical::syntax::pretty::nat_to_int(&output.value), Some(1));
+        assert_eq!(
+            crate::cubical::syntax::pretty::nat_to_int(&output.value),
+            Some(1)
+        );
     }
 
     #[test]
@@ -1049,11 +1137,19 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
         let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
         let mut files: Vec<_> = std::fs::read_dir(&examples)
             .expect("examples/ should exist")
-            .map(|e| e.expect("read dir entry").file_name().to_string_lossy().into_owned())
+            .map(|e| {
+                e.expect("read dir entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .filter(|n| n.ends_with(".owl") && !covered.contains(&n.as_str()))
             .collect();
         files.sort();
-        assert!(!files.is_empty(), "expected at least one uncovered example file");
+        assert!(
+            !files.is_empty(),
+            "expected at least one uncovered example file"
+        );
         let handles: Vec<_> = files
             .iter()
             .cloned()
@@ -1062,13 +1158,16 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
                 std::thread::Builder::new()
                     .stack_size(64 * 1024 * 1024)
                     .spawn(move || {
-                        check(&path).unwrap_or_else(|e| panic!("examples/{name} should typecheck: {e}"))
+                        check(&path)
+                            .unwrap_or_else(|e| panic!("examples/{name} should typecheck: {e}"))
                     })
                     .expect("spawn example check thread")
             })
             .collect();
         for (name, handle) in files.iter().zip(handles) {
-            handle.join().unwrap_or_else(|e| panic!("examples/{name} thread panicked: {e:?}"));
+            handle
+                .join()
+                .unwrap_or_else(|e| panic!("examples/{name} thread panicked: {e:?}"));
         }
     }
 

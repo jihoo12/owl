@@ -4,7 +4,7 @@
 //   crate::syntax::{Name, Term, Datatype, shift, subst}
 //   crate::typechecker::{Ctx, TypeError, infer, check, infer_dt, check_dt}
 
-use crate::cubical::nbe::{eval_nbe, set_current_globals, Globals, Neutral, Scope, Value};
+use crate::cubical::nbe::{Globals, Neutral, Scope, Value, eval_nbe, set_current_globals};
 use crate::cubical::syntax::{Datatype, Name, Term, shift, subst};
 use crate::cubical::typechecker::{Ctx, TypeError, check, check_dt, infer, infer_dt};
 

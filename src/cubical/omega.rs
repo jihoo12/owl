@@ -17,8 +17,8 @@
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::nbe::nbe_eval_ctx;
-use crate::cubical::syntax::{shift, Datatype, Term};
-use crate::cubical::typechecker::{check_dt, Ctx, TypeError};
+use crate::cubical::syntax::{Datatype, Term, shift};
+use crate::cubical::typechecker::{Ctx, TypeError, check_dt};
 
 /// Entry point called by the `Tactic::Omega` arm.
 ///
@@ -42,7 +42,7 @@ pub fn prove(
                 return Err(TypeError::Other(format!(
                     "omega: goal is not a path over Nat\n  goal: {}",
                     other,
-                )))
+                )));
             }
         }
     };

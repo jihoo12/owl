@@ -5,6 +5,10 @@ pkgs.mkShell {
   buildInputs = with pkgs; [
     python3
     uv
+    cargo
+    rustc
+    rustfmt
+    clippy
   ];
 
   shellHook = ''

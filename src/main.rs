@@ -66,22 +66,35 @@ fn main() {
             if args_iter.next().is_some() {
                 Err("expected a single source file; run `owl help` for usage".to_string())
             } else {
-                run(path).map(|output| println!("{output}")).map_err(format_run_error)
+                run(path)
+                    .map(|output| println!("{output}"))
+                    .map_err(format_run_error)
             }
         }
-        Some(command) => Err(format!("unknown command `{command}`; run `owl help` for usage")),
+        Some(command) => Err(format!(
+            "unknown command `{command}`; run `owl help` for usage"
+        )),
     };
 
     if debug {
         let steps = cubical::nbe::trace::drain_trace();
         if !steps.is_empty() {
             if result.is_err() {
-                eprintln!("\n--- NbE reduction trace ({} steps, on error) ---", steps.len());
+                eprintln!(
+                    "\n--- NbE reduction trace ({} steps, on error) ---",
+                    steps.len()
+                );
             } else {
                 eprintln!("\n--- NbE reduction trace ({} steps) ---", steps.len());
             }
             for (i, step) in steps.iter().enumerate() {
-                eprintln!("  [{:>3}] {} {} -> {}", i + 1, step.rule, step.input, step.output);
+                eprintln!(
+                    "  [{:>3}] {} {} -> {}",
+                    i + 1,
+                    step.rule,
+                    step.input,
+                    step.output
+                );
             }
             eprintln!("--- end trace ---");
         }

@@ -25,8 +25,8 @@
 //! surfaces as an error rather than an unsound proof.
 
 use crate::cubical::nbe::nbe_eval_ctx;
-use crate::cubical::syntax::{shift, Datatype, Term};
-use crate::cubical::typechecker::{check_dt, Ctx, TypeError};
+use crate::cubical::syntax::{Datatype, Term, shift};
+use crate::cubical::typechecker::{Ctx, TypeError, check_dt};
 
 /// A path proof `p : Path Nat a b`, with its endpoints tracked so the
 /// proof term can be composed with `trans`/`sym`/congruence lemmas.
@@ -102,20 +102,19 @@ impl Ring {
             Mode::Concrete
         };
         let var = |name: &str| -> Result<Term, TypeError> {
-            let gi = ctx
-                .iter()
-                .position(|(n, _)| n == name)
-                .ok_or_else(|| {
-                    TypeError::Other(format!(
-                        "ring: missing lemma '{}'; import lib/ring_laws.owl",
-                        name
-                    ))
-                })?;
+            let gi = ctx.iter().position(|(n, _)| n == name).ok_or_else(|| {
+                TypeError::Other(format!(
+                    "ring: missing lemma '{}'; import lib/ring_laws.owl",
+                    name
+                ))
+            })?;
             Ok(Term::TVar(gi as i32))
         };
         let proj = |field: &str| -> Result<Term, TypeError> {
             let c = ring_term.ok_or_else(|| {
-                TypeError::Other("ring: internal error — structured mode without a ring term".into())
+                TypeError::Other(
+                    "ring: internal error — structured mode without a ring term".into(),
+                )
             })?;
             Ok(Term::TProj(field.to_string(), Box::new(c.clone())))
         };
@@ -660,10 +659,7 @@ pub(crate) fn decomp(r: &Ring, t: &Term) -> Result<(Vec<Mono>, EqP), TypeError> 
                     &EqP {
                         a: canon.clone(),
                         b: app(&app(&r.mul, &numeral(r, k)), &r.one),
-                        p: inst(
-                            &r.add_0_r,
-                            &[&app(&app(&r.mul, &numeral(r, k)), &r.one)],
-                        ),
+                        p: inst(&r.add_0_r, &[&app(&app(&r.mul, &numeral(r, k)), &r.one)]),
                     },
                 );
                 trp(r, &trp(r, &e1, &e2), &e3)
@@ -805,15 +801,24 @@ pub(crate) fn poly_merge(r: &Ring, pa: &[Mono], pb: &[Mono]) -> (Vec<Mono>, EqP)
             let m_term = mono_term(r, m);
             let c_rest = sum_term(r, rest);
             let a = app(&app(&r.add, &app(&app(&r.add, &m_term), &c_rest)), &c_pb);
-            let mid = app(
-                &app(&r.add, &m_term),
-                &app(&app(&r.add, &c_rest), &c_pb),
-            );
+            let mid = app(&app(&r.add, &m_term), &app(&app(&r.add, &c_rest), &c_pb));
             let p_assoc = inst(&r.add_assoc, &[&m_term, &c_rest, &c_pb]);
             let (p_r, pf_r) = poly_merge(r, rest, pb);
             let p_ctx = cong_add_r(r, &pf_r, &m_term);
             let (p_i, pf_i) = insert(r, m, &p_r);
-            let p = trp(r, &trp(r, &EqP { a: a.clone(), b: mid, p: p_assoc }, &p_ctx), &pf_i);
+            let p = trp(
+                r,
+                &trp(
+                    r,
+                    &EqP {
+                        a: a.clone(),
+                        b: mid,
+                        p: p_assoc,
+                    },
+                    &p_ctx,
+                ),
+                &pf_i,
+            );
             let b = canon_term(r, &p_i);
             (p_i, EqP { a, b, p: p.p })
         }
@@ -840,16 +845,20 @@ fn insert(r: &Ring, m: &Mono, sorted: &[Mono]) -> (Vec<Mono>, EqP) {
         [h, rest @ ..] => {
             let h_term = mono_term(r, h);
             let c_rest = sum_term(r, rest);
-            let a = app(
-                &app(&r.add, &m_term),
-                &app(&app(&r.add, &h_term), &c_rest),
-            );
+            let a = app(&app(&r.add, &m_term), &app(&app(&r.add, &h_term), &c_rest));
             let km = atoms_key(m);
             let kh = atoms_key(h);
             if km < kh {
                 let mut res = vec![m.clone()];
                 res.extend(sorted.iter().cloned());
-                (res, EqP { a: a.clone(), b: a.clone(), p: refl(&a) })
+                (
+                    res,
+                    EqP {
+                        a: a.clone(),
+                        b: a.clone(),
+                        p: refl(&a),
+                    },
+                )
             } else if km == kh {
                 let k = m.coeff + h.coeff;
                 let combined = Mono {
@@ -860,10 +869,7 @@ fn insert(r: &Ring, m: &Mono, sorted: &[Mono]) -> (Vec<Mono>, EqP) {
                 let p_assoc = syp(
                     r,
                     &EqP {
-                        a: app(
-                            &app(&r.add, &app(&app(&r.add, &m_term), &h_term)),
-                            &c_rest,
-                        ),
+                        a: app(&app(&r.add, &app(&app(&r.add, &m_term), &h_term)), &c_rest),
                         b: a.clone(),
                         p: inst(&r.add_assoc, &[&m_term, &h_term, &c_rest]),
                     },
@@ -886,10 +892,7 @@ fn insert(r: &Ring, m: &Mono, sorted: &[Mono]) -> (Vec<Mono>, EqP) {
                     let p1 = syp(
                         r,
                         &EqP {
-                            a: app(
-                                &app(&r.add, &app(&app(&r.add, &m_term), &h_term)),
-                                &c_rest,
-                            ),
+                            a: app(&app(&r.add, &app(&app(&r.add, &m_term), &h_term)), &c_rest),
                             b: a.clone(),
                             p: inst(&r.add_assoc, &[&m_term, &h_term, &c_rest]),
                         },
@@ -909,14 +912,8 @@ fn insert(r: &Ring, m: &Mono, sorted: &[Mono]) -> (Vec<Mono>, EqP) {
                         r,
                         &trp(r, &p1, &c1),
                         &EqP {
-                            a: app(
-                                &app(&r.add, &app(&app(&r.add, &h_term), &m_term)),
-                                &c_rest,
-                            ),
-                            b: app(
-                                &app(&r.add, &h_term),
-                                &app(&app(&r.add, &m_term), &c_rest),
-                            ),
+                            a: app(&app(&r.add, &app(&app(&r.add, &h_term), &m_term)), &c_rest),
+                            b: app(&app(&r.add, &h_term), &app(&app(&r.add, &m_term), &c_rest)),
                             p: p3,
                         },
                     )
@@ -927,14 +924,7 @@ fn insert(r: &Ring, m: &Mono, sorted: &[Mono]) -> (Vec<Mono>, EqP) {
                 let mut res = vec![h.clone()];
                 res.extend(p_r);
                 let b = app(&app(&r.add, &h_term), &sum_term(r, &res[1..]));
-                (
-                    res,
-                    EqP {
-                        a,
-                        b,
-                        p: p.p,
-                    },
-                )
+                (res, EqP { a, b, p: p.p })
             }
         }
     }
@@ -968,11 +958,7 @@ fn combine_proof(r: &Ring, m: &Mono, h: &Mono, combined: &Mono) -> EqP {
                         p: inst(&r.mul_add_r, &[&ka, &kb, &p]),
                     },
                 );
-                trp(
-                    r,
-                    &trp(r, &refl2(&a, &p_mr.a), &p_mr),
-                    &refl2(&p_mr.b, &b),
-                )
+                trp(r, &trp(r, &refl2(&a, &p_mr.a), &p_mr), &refl2(&p_mr.b, &b))
             }
         }
         // Over an abstract ring, `add (numeral k1) (numeral k2) = numeral (k1
@@ -1017,7 +1003,15 @@ fn numeral_add_eq(r: &Ring, a: i64, b: i64) -> EqP {
     let p_assoc = inst(&r.add_assoc, &[&r.one, &na1, &nb]);
     let ih = numeral_add_eq(r, a - 1, b);
     let p_ctx = cong_add_r(r, &ih, &r.one);
-    let p = trp(r, &EqP { a: lhs.clone(), b: mid, p: p_assoc }, &p_ctx);
+    let p = trp(
+        r,
+        &EqP {
+            a: lhs.clone(),
+            b: mid,
+            p: p_assoc,
+        },
+        &p_ctx,
+    );
     EqP {
         a: lhs,
         b: numeral(r, a + b),
@@ -1049,7 +1043,11 @@ fn numeral_mul_eq(r: &Ring, a: i64, b: i64) -> EqP {
     };
     let ih = numeral_mul_eq(r, a - 1, b);
     // mul_add_r: lhs = add (mul one nb) (mul na1 nb).
-    let p1 = EqP { a: lhs.clone(), b: mid.clone(), p: p_step };
+    let p1 = EqP {
+        a: lhs.clone(),
+        b: mid.clone(),
+        p: p_step,
+    };
     // mul_1_l: add (mul one nb) (mul na1 nb) = add nb (mul na1 nb).
     let p2 = cong_add_l(r, &p_m1, &mul_na1_nb);
     // induction: add nb (mul na1 nb) = add nb (numeral ((a-1)*b)).
@@ -1094,7 +1092,19 @@ pub(crate) fn expand(r: &Ring, pa: &[Mono], pb: &[Mono]) -> (Vec<Mono>, EqP) {
                 &cong_add_r(r, &pf_r, &sum_term(r, &pl)),
             );
             let p_cc = sum_concat(r, &pl, &pr);
-            let p = trp(r, &trp(r, &EqP { a: a.clone(), b: mid, p: p_mr }, &p2), &p_cc);
+            let p = trp(
+                r,
+                &trp(
+                    r,
+                    &EqP {
+                        a: a.clone(),
+                        b: mid,
+                        p: p_mr,
+                    },
+                    &p2,
+                ),
+                &p_cc,
+            );
             let mut products = pl;
             products.extend(pr);
             let b = sum_term(r, &products);
@@ -1119,10 +1129,7 @@ fn expand_single(r: &Ring, m: &Mono, pb: &[Mono]) -> (Vec<Mono>, EqP) {
         [n, rest @ ..] => {
             let n_term = mono_term(r, n);
             let c_rest = sum_term(r, rest);
-            let a = app(
-                &app(&r.mul, &m_term),
-                &app(&app(&r.add, &n_term), &c_rest),
-            );
+            let a = app(&app(&r.mul, &m_term), &app(&app(&r.add, &n_term), &c_rest));
             let p_ml = inst(&r.mul_add_l, &[&m_term, &n_term, &c_rest]);
             let (p_mn, pf_mn) = mono_mul(r, m, n);
             let (pr, pf_r) = expand_single(r, m, rest);
@@ -1136,7 +1143,15 @@ fn expand_single(r: &Ring, m: &Mono, pb: &[Mono]) -> (Vec<Mono>, EqP) {
                 &cong_add_l(r, &pf_mn, &app(&app(&r.mul, &m_term), &c_rest)),
                 &cong_add_r(r, &pf_r, &mn_term),
             );
-            let p = trp(r, &EqP { a: a.clone(), b: mid, p: p_ml }, &p2);
+            let p = trp(
+                r,
+                &EqP {
+                    a: a.clone(),
+                    b: mid,
+                    p: p_ml,
+                },
+                &p2,
+            );
             let mut products = vec![p_mn];
             products.extend(pr);
             let b = sum_term(r, &products);
@@ -1157,14 +1172,8 @@ fn sum_concat(r: &Ring, la: &[Mono], lb: &[Mono]) -> EqP {
         [t, rest @ ..] => {
             let t_term = mono_term(r, t);
             let s_rest = sum_term(r, rest);
-            let a = app(
-                &app(&r.add, &app(&app(&r.add, &t_term), &s_rest)),
-                &s_lb,
-            );
-            let mid = app(
-                &app(&r.add, &t_term),
-                &app(&app(&r.add, &s_rest), &s_lb),
-            );
+            let a = app(&app(&r.add, &app(&app(&r.add, &t_term), &s_rest)), &s_lb);
+            let mid = app(&app(&r.add, &t_term), &app(&app(&r.add, &s_rest), &s_lb));
             let p_assoc = inst(&r.add_assoc, &[&t_term, &s_rest, &s_lb]);
             let p_rc = sum_concat(r, rest, lb);
             let p2 = cong_add_r(r, &p_rc, &t_term);
@@ -1174,7 +1183,16 @@ fn sum_concat(r: &Ring, la: &[Mono], lb: &[Mono]) -> EqP {
             EqP {
                 a: a.clone(),
                 b: sum_term(r, &both),
-                p: trp(r, &EqP { a, b: mid, p: p_assoc }, &p2).p,
+                p: trp(
+                    r,
+                    &EqP {
+                        a,
+                        b: mid,
+                        p: p_assoc,
+                    },
+                    &p2,
+                )
+                .p,
             }
         }
     }
@@ -1258,13 +1276,7 @@ fn mono_mul(r: &Ring, m: &Mono, n: &Mono) -> (Mono, EqP) {
 
 /// `mul (mul ka aa) (mul kb bb) = mul (mul ka kb) (mul aa bb)` — the
 /// associativity/commutativity regrouping used by `mono_mul`.
-pub(crate) fn regroup(
-    r: &Ring,
-    ka: &Term,
-    aa: &Term,
-    kb: &Term,
-    bb: &Term,
-) -> EqP {
+pub(crate) fn regroup(r: &Ring, ka: &Term, aa: &Term, kb: &Term, bb: &Term) -> EqP {
     let a = app(
         &app(&r.mul, &app(&app(&r.mul, ka), aa)),
         &app(&app(&r.mul, kb), bb),
@@ -1304,8 +1316,14 @@ pub(crate) fn regroup(
     let p3 = syp(
         r,
         &EqP {
-            a: app(&app(&r.mul, &app(&app(&r.mul, ka), kb)), &app(&app(&r.mul, aa), bb)),
-            b: app(&app(&r.mul, ka), &app(&app(&r.mul, kb), &app(&app(&r.mul, aa), bb))),
+            a: app(
+                &app(&r.mul, &app(&app(&r.mul, ka), kb)),
+                &app(&app(&r.mul, aa), bb),
+            ),
+            b: app(
+                &app(&r.mul, ka),
+                &app(&app(&r.mul, kb), &app(&app(&r.mul, aa), bb)),
+            ),
             p: inst(&r.mul_assoc, &[ka, kb, &app(&app(&r.mul, aa), bb)]),
         },
     );
@@ -1337,7 +1355,19 @@ fn atom_merge(r: &Ring, la: &[Term], lb: &[Term]) -> (Vec<Term>, EqP) {
             let (p_r, pf_r) = atom_merge(r, rest, lb);
             let p_ctx = cong_mul_r(r, &pf_r, &t);
             let (p_i, pf_i) = atom_insert(r, &t, &p_r);
-            let p = trp(r, &trp(r, &EqP { a: a.clone(), b: mid, p: p_assoc }, &p_ctx), &pf_i);
+            let p = trp(
+                r,
+                &trp(
+                    r,
+                    &EqP {
+                        a: a.clone(),
+                        b: mid,
+                        p: p_assoc,
+                    },
+                    &p_ctx,
+                ),
+                &pf_i,
+            );
             let b = prod_term(r, &p_i);
             (p_i, EqP { a, b, p: p.p })
         }
@@ -1363,16 +1393,20 @@ fn atom_insert(r: &Ring, t: &Term, sorted: &[Term]) -> (Vec<Term>, EqP) {
         [h, rest @ ..] => {
             let h = h.clone();
             let c_rest = prod_term(r, rest);
-            let a = app(
-                &app(&r.mul, t),
-                &app(&app(&r.mul, &h), &c_rest),
-            );
+            let a = app(&app(&r.mul, t), &app(&app(&r.mul, &h), &c_rest));
             let ka = term_ord(t);
             let kh = term_ord(&h);
             if ka < kh {
                 let mut res = vec![t.clone()];
                 res.extend(sorted.iter().cloned());
-                (res, EqP { a: a.clone(), b: a.clone(), p: refl(&a) })
+                (
+                    res,
+                    EqP {
+                        a: a.clone(),
+                        b: a.clone(),
+                        p: refl(&a),
+                    },
+                )
             } else {
                 let p_swap = {
                     let p1 = syp(
@@ -1410,14 +1444,7 @@ fn atom_insert(r: &Ring, t: &Term, sorted: &[Term]) -> (Vec<Term>, EqP) {
                 let mut res = vec![h.clone()];
                 res.extend(p_r);
                 let b = app(&app(&r.mul, &h), &prod_term(r, &res[1..]));
-                (
-                    res,
-                    EqP {
-                        a,
-                        b,
-                        p: p.p,
-                    },
-                )
+                (res, EqP { a, b, p: p.p })
             }
         }
     }
@@ -1472,7 +1499,7 @@ pub fn prove(
                 return Err(TypeError::Other(format!(
                     "ring: goal is not a path (got '{}')",
                     other,
-                )))
+                )));
             }
         }
     };
@@ -1508,10 +1535,18 @@ pub fn prove(
     crate::cubical::typechecker::termination::set_skip_guard(prev_skip);
     if let Err(e) = check_res {
         let detail = match &e {
-            crate::cubical::typechecker::TypeError::TypeMismatch { expected, got, pos, .. } => format!(
+            crate::cubical::typechecker::TypeError::TypeMismatch {
+                expected, got, pos, ..
+            } => format!(
                 "  expected : {}\n  got      : {}\n  pos      : {:?}",
-                crate::cubical::syntax::show_term(&ctx.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), expected),
-                crate::cubical::syntax::show_term(&ctx.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), got),
+                crate::cubical::syntax::show_term(
+                    &ctx.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+                    expected
+                ),
+                crate::cubical::syntax::show_term(
+                    &ctx.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+                    got
+                ),
                 pos,
             ),
             _ => format!("{:?}", e),

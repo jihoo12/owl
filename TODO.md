@@ -90,6 +90,24 @@ discharge routine algebraic/arithmetic goals in one line instead of writing them
 
 - [ ] **Nested constructor patterns** — e.g. `suc (suc zero)` matching a literal 2 (requires a full pattern AST rather than the current flat-binder matching). *(🟡 — meaningful ergonomics win, moderate implementation cost.)*
 
+  **Plan (agreed 2026-08-10, user-approved):**
+
+  *Phase 1 — parser-side compilation (ordinary constructors, kernel untouched).*
+  1. Pattern AST in `src/cubical/parser/patterns.rs` (optional module): `Pat::Var(Name)` / `Pat::Con { con, args: Vec<Pat> }`; parse each arm's leading column into `Vec<(Vec<Pat>, Option<Name> /* as_name */, Term /* body */)>` in `parse_match_cases` (`grammar.rs:1274`), resolving constructor heads by name via `find_constructor` (`grammar.rs:1508`).
+  2. Compile step: group arms by constructor head → same-head groups merge (vars nest into a nested eliminator); for each constructor `con` with arity `a`, bind all args as fresh vars in one `ElimCase` (`binders = [v0..v_{a-1}]`) and where a nested constructor pattern occupies argument position `k`, replace that var's use inside the case body by a nested `TElim`:
+     `nested(k) = TElim(TAbs(v, TApp(shift(k,0,motive), TCon(con))) , cases, TVar(k + extra))`
+     — each nested elim adds exactly one binder above its body; bodies shifted by compile-tree depth; refined-column scrutinee `TVar((a-1-k)+extra+n_refined_before)`; De Bruijn-consistent. Flat (all-var) cases emit byte-identical `ElimCase`s to today (source order preserved) so `parses_match` etc. are unchanged.
+  3. Parser completeness check: infer scrutinee datatype from constructor heads via `constructor_arity`; require full constructor coverage (all cons + pcons + sqcons + cellcons at top level; ordinary cons for nested columns); dedicated `ParseError` when incomplete; skip check if heads resolve inconsistently (typechecker `MissingCase` remains the soundness backstop).
+  4. Mixed var+con columns inside the same head group → parse error; inconsistent as-names across merged groups → parse error.
+  5. Tests: parser unit tests (nested / deep-nested / multi-arg `cons x (cons y zs)` / as+nested / or+nested / merged heads / flat-identical); `examples/stress_nested_patterns.owl` + driver test `nested_patterns_example_checks` (64 MiB stack); `bad_examples/incomplete_nested_match.owl` + `bad_examples/mixed_pattern_columns.owl` + driver assertions.
+
+  *Phase 2 — HIT-case refinement (kernel change, user-chosen).*
+  1. Small `ElimCase` marker field (e.g. `refinements: Option<Vec<Option<Vec<Name>>>>`): for path/square/cell constructor cases, layout `binders = [whole-args] + [leaf-vars] + [interval-vars(dim)]` with PLam body whose PLam body is the nested `TElim` chain; NBE `do_elim` unchanged (drives off constructor-arg values, not `binders`); `shift_cases`/`quote_cases`/nbe arms plumb the field.
+  2. Typechecker: `pcon`/`sqcon`/`cellcon` arms (`typechecker/mod.rs:2043/2160/2292`) build nested motives from `motive` + constructor + substituted faces; boundary coherence via `require_equal_endpt`; verify `reduce_pcon_endpoints_dt` reduces pcon applications inside nested `TElim`s (extend if not). Start with single-interval `pcon`; then `sqcon`/`cellcon`. `eval_elim_face` beta-chain application is why this must be a kernel change (a refined body is a nested `TElim`, not a beta-chain).
+  3. Docs (`docs/reference.md`) + examples; full `cargo test`; `uvx rust-analyzer-db scan src`; check off C.1.
+
+  *Backward compat note:* no existing owl example/library pattern binder collides with a constructor name (audited), so constructor-named identifiers in pattern position becoming constructor patterns is safe; behavior change to document.
+
 ### D. Module & Import System 🟡
 
 Needed for organizing larger codebases/libraries; not blocking for single-file examples.

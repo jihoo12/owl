@@ -7,7 +7,9 @@
 
 use std::collections::HashMap;
 
-use crate::cubical::nbe::{meta_mentions, nbe_eval, nbe_eval_ctx, try_solve_meta, get_meta_solution};
+use crate::cubical::nbe::{
+    get_meta_solution, meta_mentions, nbe_eval, nbe_eval_ctx, try_solve_meta,
+};
 use crate::cubical::syntax::{Name, Term, beta, shift};
 use crate::cubical::typechecker::Ctx;
 
@@ -49,7 +51,12 @@ pub fn term_size(t: &Term) -> usize {
 
         Term::TPartial(a, u) => 1 + term_size(a) + term_size(u),
 
-        Term::TSystemType(sys) => 1 + sys.iter().map(|(phi, a)| term_size(phi) + term_size(a)).sum::<usize>(),
+        Term::TSystemType(sys) => {
+            1 + sys
+                .iter()
+                .map(|(phi, a)| term_size(phi) + term_size(a))
+                .sum::<usize>()
+        }
 
         Term::THComp(a, sys, u0) => {
             let mut s = 1 + term_size(a) + term_size(u0);
@@ -107,8 +114,7 @@ pub fn term_size(t: &Term) -> usize {
 
         Term::Meta(_) | Term::TBy(_) => 1,
         Term::TSqCon(_, _, args, r, s) => {
-            1 + args.iter().map(|a| term_size(a)).sum::<usize>()
-                + term_size(r) + term_size(s)
+            1 + args.iter().map(|a| term_size(a)).sum::<usize>() + term_size(r) + term_size(s)
         }
         Term::TProj(_, r) => 1 + term_size(r),
         Term::TRecordUpdate(r, updates) => {
@@ -217,7 +223,10 @@ fn infer_ty(ctx: &Ctx, t: &Term) -> Option<Term> {
         Term::TVar(i) => {
             let i = *i as usize;
             if i < ctx.len() {
-                Some(nbe_eval_ctx(ctx.len(), &shift((i + 1) as i32, 0, &ctx[i].1)))
+                Some(nbe_eval_ctx(
+                    ctx.len(),
+                    &shift((i + 1) as i32, 0, &ctx[i].1),
+                ))
             } else {
                 None
             }
@@ -243,7 +252,10 @@ fn infer_neutral_ty(ctx: &Ctx, t: &Term) -> Option<Term> {
         Term::TVar(i) => {
             let i = *i as usize;
             if i < ctx.len() {
-                Some(nbe_eval_ctx(ctx.len(), &shift((i + 1) as i32, 0, &ctx[i].1)))
+                Some(nbe_eval_ctx(
+                    ctx.len(),
+                    &shift((i + 1) as i32, 0, &ctx[i].1),
+                ))
             } else {
                 None
             }
@@ -359,13 +371,15 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
     // Path boundary reduction (consumes fuel)
     // ------------------------------------------------------------------
     if let Term::PApp(p, r) = t1
-        && let Some(u) = reduce_papp_by_type(ctx, p, r) {
-            return eta_eq_memo(fuel - 1, ctx, &u, t2, memo);
-        }
+        && let Some(u) = reduce_papp_by_type(ctx, p, r)
+    {
+        return eta_eq_memo(fuel - 1, ctx, &u, t2, memo);
+    }
     if let Term::PApp(p, r) = t2
-        && let Some(u) = reduce_papp_by_type(ctx, p, r) {
-            return eta_eq_memo(fuel - 1, ctx, t1, &u, memo);
-        }
+        && let Some(u) = reduce_papp_by_type(ctx, p, r)
+    {
+        return eta_eq_memo(fuel - 1, ctx, t1, &u, memo);
+    }
 
     // ------------------------------------------------------------------
     // Lambda eta (consumes fuel)
@@ -378,7 +392,13 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
             .unwrap_or(Term::TUniv(0));
         let mut ctx2 = vec![(x.clone(), dom)];
         ctx2.extend_from_slice(ctx);
-        return eta_eq_memo(fuel - 1, &ctx2, &nbe_eval_ctx(ctx2.len(), b1), &nbe_eval_ctx(ctx2.len(), b2), memo);
+        return eta_eq_memo(
+            fuel - 1,
+            &ctx2,
+            &nbe_eval_ctx(ctx2.len(), b1),
+            &nbe_eval_ctx(ctx2.len(), b2),
+            memo,
+        );
     }
 
     // Only RHS is a lambda — eta-expand neutral LHS.
@@ -391,10 +411,10 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
                 eta_eq_memo(
                     fuel - 1,
                     &ctx2,
-                    &nbe_eval_ctx(ctx2.len(), &Term::TApp(
-                        Box::new(shift(1, 0, t1)),
-                        Box::new(Term::TVar(0)),
-                    )),
+                    &nbe_eval_ctx(
+                        ctx2.len(),
+                        &Term::TApp(Box::new(shift(1, 0, t1)), Box::new(Term::TVar(0))),
+                    ),
                     &nbe_eval_ctx(ctx2.len(), b2),
                     memo,
                 )
@@ -413,10 +433,10 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
                     fuel - 1,
                     &ctx2,
                     &nbe_eval_ctx(ctx2.len(), b1),
-                    &nbe_eval_ctx(ctx2.len(), &Term::TApp(
-                        Box::new(shift(1, 0, t2)),
-                        Box::new(Term::TVar(0)),
-                    )),
+                    &nbe_eval_ctx(
+                        ctx2.len(),
+                        &Term::TApp(Box::new(shift(1, 0, t2)), Box::new(Term::TVar(0))),
+                    ),
                     memo,
                 )
             }
@@ -431,7 +451,13 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
     if let (Term::PLam(i, b1), Term::PLam(_, b2)) = (t1, t2) {
         let mut ctx2 = vec![(i.clone(), Term::TIntervalTy)];
         ctx2.extend_from_slice(ctx);
-        return eta_eq_memo(fuel - 1, &ctx2, &nbe_eval_ctx(ctx2.len(), b1), &nbe_eval_ctx(ctx2.len(), b2), memo);
+        return eta_eq_memo(
+            fuel - 1,
+            &ctx2,
+            &nbe_eval_ctx(ctx2.len(), b1),
+            &nbe_eval_ctx(ctx2.len(), b2),
+            memo,
+        );
     }
 
     // Only RHS is a path-lambda.
@@ -441,10 +467,10 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
         return eta_eq_memo(
             fuel - 1,
             &ctx2,
-            &nbe_eval_ctx(ctx2.len(), &Term::PApp(
-                Box::new(shift(1, 0, t1)),
-                Box::new(Term::TVar(0)),
-            )),
+            &nbe_eval_ctx(
+                ctx2.len(),
+                &Term::PApp(Box::new(shift(1, 0, t1)), Box::new(Term::TVar(0))),
+            ),
             &nbe_eval_ctx(ctx2.len(), b2),
             memo,
         );
@@ -458,10 +484,10 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
             fuel - 1,
             &ctx2,
             &nbe_eval_ctx(ctx2.len(), b1),
-            &nbe_eval_ctx(ctx2.len(), &Term::PApp(
-                Box::new(shift(1, 0, t2)),
-                Box::new(Term::TVar(0)),
-            )),
+            &nbe_eval_ctx(
+                ctx2.len(),
+                &Term::PApp(Box::new(shift(1, 0, t2)), Box::new(Term::TVar(0))),
+            ),
             memo,
         );
     }
@@ -509,12 +535,16 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
     }
     if let (Term::TCellCon(d1, c1, args1, ivars1), _) = (t1, t2) {
         let papp_form = build_papp_chain(d1, c1, args1, None);
-        let papp_form = ivars1.iter().fold(papp_form, |f, iv| Term::PApp(Box::new(f), Box::new(iv.clone())));
+        let papp_form = ivars1.iter().fold(papp_form, |f, iv| {
+            Term::PApp(Box::new(f), Box::new(iv.clone()))
+        });
         return eta_eq_memo(fuel, ctx, &papp_form, t2, memo);
     }
     if let (_, Term::TCellCon(d2, c2, args2, ivars2)) = (t1, t2) {
         let papp_form = build_papp_chain(d2, c2, args2, None);
-        let papp_form = ivars2.iter().fold(papp_form, |f, iv| Term::PApp(Box::new(f), Box::new(iv.clone())));
+        let papp_form = ivars2.iter().fold(papp_form, |f, iv| {
+            Term::PApp(Box::new(f), Box::new(iv.clone()))
+        });
         return eta_eq_memo(fuel, ctx, t1, &papp_form, memo);
     }
 
@@ -532,8 +562,14 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
         // wrap the non-PLam side in a constant PLam so they structurally match.
         let (ty1_eff, ty2_eff): (Box<Term>, Box<Term>) = match (ty1.as_ref(), ty2.as_ref()) {
             (Term::PLam(_, _), Term::PLam(_, _)) => ((*ty1).clone(), (*ty2).clone()),
-            (Term::PLam(_, _), _) => ((*ty1).clone(), Box::new(Term::PLam("_".to_string(), Box::new((**ty2).clone())))),
-            (_, Term::PLam(_, _)) => (Box::new(Term::PLam("_".to_string(), Box::new((**ty1).clone()))), (*ty2).clone()),
+            (Term::PLam(_, _), _) => (
+                (*ty1).clone(),
+                Box::new(Term::PLam("_".to_string(), Box::new((**ty2).clone()))),
+            ),
+            (_, Term::PLam(_, _)) => (
+                Box::new(Term::PLam("_".to_string(), Box::new((**ty1).clone()))),
+                (*ty2).clone(),
+            ),
             _ => ((*ty1).clone(), (*ty2).clone()),
         };
         return and_result(
@@ -664,16 +700,20 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
 
     // Cell-constructor congruence: same datatype, same cell-constructor,
     // check ordinary args and then each interval argument.
-    if let (Term::TCellCon(d1, c1, args1, ivars1), Term::TCellCon(d2, c2, args2, ivars2)) = (t1, t2) {
+    if let (Term::TCellCon(d1, c1, args1, ivars1), Term::TCellCon(d2, c2, args2, ivars2)) = (t1, t2)
+    {
         if d1 != d2 || c1 != c2 || args1.len() != args2.len() || ivars1.len() != ivars2.len() {
             return NotEqual;
         }
         let args_eq = args1.iter().zip(args2.iter()).fold(Equal, |acc, (a1, a2)| {
             and_result(acc, eta_eq_memo(fuel, ctx, a1, a2, memo))
         });
-        let ivars_eq = ivars1.iter().zip(ivars2.iter()).fold(Equal, |acc, (i1, i2)| {
-            and_result(acc, eta_eq_memo(fuel, ctx, i1, i2, memo))
-        });
+        let ivars_eq = ivars1
+            .iter()
+            .zip(ivars2.iter())
+            .fold(Equal, |acc, (i1, i2)| {
+                and_result(acc, eta_eq_memo(fuel, ctx, i1, i2, memo))
+            });
         return and_result(args_eq, ivars_eq);
     }
 
@@ -743,10 +783,8 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
                         NotEqual
                     } else {
                         ELIM_CASE_RECURSE.with(|d| d.set(depth + 1));
-                        let r = and_result(
-                            acc,
-                            eta_eq_memo(fuel, &case_ctx, &c1.body, &c2.body, memo),
-                        );
+                        let r =
+                            and_result(acc, eta_eq_memo(fuel, &case_ctx, &c1.body, &c2.body, memo));
                         ELIM_CASE_RECURSE.with(|d| d.set(depth));
                         r
                     }

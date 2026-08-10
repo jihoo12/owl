@@ -29,12 +29,12 @@
 
 use crate::cubical::nbe::nbe_eval_ctx;
 use crate::cubical::ring::{
-    app, as_add, as_mul, canon_term, cong_add_l, cong_add_r, cong_mul_l, cong_mul_r, decomp,
-    expand, inst, numeral_of, poly_merge, prod_term, regroup, sum_canon, syp, trp, EqP, Mono,
-    Ring,
+    EqP, Mono, Ring, app, as_add, as_mul, canon_term, cong_add_l, cong_add_r, cong_mul_l,
+    cong_mul_r, decomp, expand, inst, numeral_of, poly_merge, prod_term, regroup, sum_canon, syp,
+    trp,
 };
-use crate::cubical::syntax::{shift, Datatype, Term};
-use crate::cubical::typechecker::{check_dt, Ctx, TypeError};
+use crate::cubical::syntax::{Datatype, Term, shift};
+use crate::cubical::typechecker::{Ctx, TypeError, check_dt};
 
 /// Resolved references to the field operations and the ring machinery.  The
 /// ring laws are resolved by `Ring::resolve` on the bundled `Field` record
@@ -277,7 +277,7 @@ fn discharge(f: &Field, ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
                 return Err(TypeError::Other(format!(
                     "field: cannot prove '{}' nonzero (numeral multiple)",
                     t
-                )))
+                )));
             }
             None => {
                 let nx = discharge(f, ctx, &x)?;
@@ -305,9 +305,7 @@ fn nz_hypothesis(f: &Field, ctx: &Ctx, nf: &Term) -> Option<Term> {
         if let Term::TPi(_, dom, codom) = ty_nf {
             let dom_nf = nbe_eval_ctx(ctx.len(), &dom);
             if let Term::TPath(_, z, x) = dom_nf {
-                if nbe_eval_ctx(ctx.len(), &z) == r.zero
-                    && nbe_eval_ctx(ctx.len(), &x) == *nf
-                {
+                if nbe_eval_ctx(ctx.len(), &z) == r.zero && nbe_eval_ctx(ctx.len(), &x) == *nf {
                     let codom_nf = nbe_eval_ctx(ctx.len(), &codom);
                     if matches!(codom_nf, Term::TData(d, p) if d == "Empty" && p.is_empty()) {
                         return Some(Term::TVar(p as i32));
@@ -473,7 +471,19 @@ fn scale_frac(
         &cong_mul_l(r, &cong_mul_r(r, &e_canon_d2, &n_term), &inv_dd),
         &cong_mul_l(r, e_num, &inv_dd),
     );
-    let p = trp(r, &trp(r, &trp(r, &trp(r, &trp(r, &trp(r, &trp(r, &e1, &e2), &e3), &e4), &e5), &e6), &e7), &e8);
+    let p = trp(
+        r,
+        &trp(
+            r,
+            &trp(
+                r,
+                &trp(r, &trp(r, &trp(r, &trp(r, &e1, &e2), &e3), &e4), &e5),
+                &e6,
+            ),
+            &e7,
+        ),
+        &e8,
+    );
     Ok(EqP {
         a: mul_term(r, &n_term, &inv_d1),
         b: mul_term(r, &n2_term, &inv_dd),
@@ -639,7 +649,11 @@ fn reify_mul(
     let e3 = trp(
         r,
         &e2,
-        &cong_mul_r(r, &cong_inv_eqp(f, &mul_term(r, &d1t, &d2t), &ddt, &e_dd), &m_n1n2),
+        &cong_mul_r(
+            r,
+            &cong_inv_eqp(f, &mul_term(r, &d1t, &d2t), &ddt, &e_dd),
+            &m_n1n2,
+        ),
     );
     let e4 = trp(r, &e3, &cong_mul_l(r, &pf_num, &inv_dd));
     let num_t = canon_term(r, &num);
@@ -770,16 +784,9 @@ fn frac_eq(
     // s4 : ... = mul n0 (mul (mul inv_d0 d1) inv_d1)
     let s4 = syp(r, &cong_mul_r(r, &mul_assoc(r, &inv_d0, d1, &inv_d1), n0));
     // s5 : ... = mul n0 (mul (mul d1 inv_d0) inv_d1)
-    let s5 = cong_mul_r(
-        r,
-        &cong_mul_l(r, &mul_comm(r, &inv_d0, d1), &inv_d1),
-        n0,
-    );
+    let s5 = cong_mul_r(r, &cong_mul_l(r, &mul_comm(r, &inv_d0, d1), &inv_d1), n0);
     // s6 : ... = mul (mul n0 (mul d1 inv_d0)) inv_d1
-    let s6 = syp(
-        r,
-        &mul_assoc(r, n0, &mul_term(r, d1, &inv_d0), &inv_d1),
-    );
+    let s6 = syp(r, &mul_assoc(r, n0, &mul_term(r, d1, &inv_d0), &inv_d1));
     // s7 : ... = mul (mul (mul n0 d1) inv_d0) inv_d1
     let s7 = cong_mul_l(r, &syp(r, &mul_assoc(r, n0, d1, &inv_d0)), &inv_d1);
     // s8 : ... = mul (mul (mul n1 d0) inv_d0) inv_d1
@@ -815,7 +822,15 @@ fn frac_eq(
                     r,
                     &trp(
                         r,
-                        &trp(r, &trp(r, &trp(r, &trp(r, &trp(r, &trp(r, &s1, &s2), &s3), &s4), &s5), &s6), &s7),
+                        &trp(
+                            r,
+                            &trp(
+                                r,
+                                &trp(r, &trp(r, &trp(r, &trp(r, &s1, &s2), &s3), &s4), &s5),
+                                &s6,
+                            ),
+                            &s7,
+                        ),
                         &s8,
                     ),
                     &s9,
@@ -861,7 +876,7 @@ pub fn prove(
                 return Err(TypeError::Other(format!(
                     "field: goal is not a path (got '{}')",
                     other,
-                )))
+                )));
             }
         }
     };
@@ -888,10 +903,7 @@ pub fn prove(
     if let Err(e) = check_res {
         let detail = match &e {
             crate::cubical::typechecker::TypeError::TypeMismatch {
-                expected,
-                got,
-                pos,
-                ..
+                expected, got, pos, ..
             } => format!(
                 "  expected : {}\n  got      : {}\n  pos      : {:?}",
                 crate::cubical::syntax::show_term(

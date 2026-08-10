@@ -5,6 +5,4 @@
 
 # rust-analyzer-db database
 rust_code.db
-AGENTS.md
-opencode.jsonc
 .opencode/

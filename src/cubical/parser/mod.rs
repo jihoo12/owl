@@ -43,7 +43,12 @@ impl std::error::Error for ParseError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decl {
-    Def { name: Name, ty: Term, val: Term, by_wf: bool },
+    Def {
+        name: Name,
+        ty: Term,
+        val: Term,
+        by_wf: bool,
+    },
     Data(Datatype),
     /// Mutually-defined inductive types: `inductive A where ... with B where ...`
     DataMutual(Vec<Datatype>),
@@ -57,7 +62,9 @@ pub enum Decl {
     /// Record type: `record R where field x : A; field y : B`
     /// Desugars to a single-constructor inductive type.
     Record(Datatype),
-    Import { path: String },
+    Import {
+        path: String,
+    },
 }
 
 #[allow(dead_code)]
@@ -198,7 +205,12 @@ pub fn typecheck_program(
                     dts.push(dt.clone());
                 }
             }
-            Decl::DataWithFunc { dt, func_name, func_ty, func_val } => {
+            Decl::DataWithFunc {
+                dt,
+                func_name,
+                func_ty,
+                func_val,
+            } => {
                 crate::cubical::syntax::check_datatype_positivity(&dt)
                     .map_err(|e| format!("{}", e))?;
                 dts.push(dt.clone());

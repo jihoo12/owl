@@ -147,8 +147,14 @@ fn walk_param_polarities(
             walk_param_polarities(dts, var, di, a, depth, pset, out);
         }
         // Leaves.
-        Term::TUniv(_) | Term::TProp | Term::TSSet | Term::TIntervalTy
-        | Term::TInterval(_) | Term::TCube(_) | Term::Meta(_) | Term::TBy(_) => {}
+        Term::TUniv(_)
+        | Term::TProp
+        | Term::TSSet
+        | Term::TIntervalTy
+        | Term::TInterval(_)
+        | Term::TCube(_)
+        | Term::Meta(_)
+        | Term::TBy(_) => {}
         // Remaining forms put subterms in positions whose polarity we cannot
         // establish — walk every subterm at both polarities (invariant).
         other => walk_param_polarities_both(dts, var, di, other, depth, pset, out),
@@ -184,14 +190,15 @@ fn walk_param_polarities_both(
         Term::TApp(f, a) | Term::PApp(f, a) => {
             both(dts, var, di, &[f.as_ref(), a.as_ref()], depth, pset, out);
         }
-        Term::TEquiv(f, a) | Term::TEquivFwd(f, a) | Term::TTransport(f, a)
-        | Term::TPair(f, a) => {
+        Term::TEquiv(f, a) | Term::TEquivFwd(f, a) | Term::TTransport(f, a) | Term::TPair(f, a) => {
             both(dts, var, di, &[f.as_ref(), a.as_ref()], depth, pset, out);
         }
         Term::TFst(p) | Term::TSnd(p) | Term::TUa(p) | Term::TProj(_, p) => {
             both(dts, var, di, &[p.as_ref()], depth, pset, out);
         }
-        Term::THComp(a, sys, u0) | Term::TComp(a, sys, u0) | Term::TFill(a, sys, u0)
+        Term::THComp(a, sys, u0)
+        | Term::TComp(a, sys, u0)
+        | Term::TFill(a, sys, u0)
         | Term::THFill(a, sys, u0) => {
             both(dts, var, di, &[a.as_ref(), u0.as_ref()], depth, pset, out);
             for (phi, t) in sys {
@@ -199,7 +206,15 @@ fn walk_param_polarities_both(
             }
         }
         Term::TGlue(a, u, v) | Term::TGlueElem(a, u, v) | Term::TUnglue(a, u, v) => {
-            both(dts, var, di, &[a.as_ref(), u.as_ref(), v.as_ref()], depth, pset, out);
+            both(
+                dts,
+                var,
+                di,
+                &[a.as_ref(), u.as_ref(), v.as_ref()],
+                depth,
+                pset,
+                out,
+            );
         }
         Term::TMkEquiv(a, b, f, g, eta, eps) => {
             both(
@@ -245,7 +260,15 @@ fn walk_param_polarities_both(
             }
         }
         Term::TElim(motive, cases, scrut) => {
-            both(dts, var, di, &[motive.as_ref(), scrut.as_ref()], depth, pset, out);
+            both(
+                dts,
+                var,
+                di,
+                &[motive.as_ref(), scrut.as_ref()],
+                depth,
+                pset,
+                out,
+            );
             for case in cases {
                 both(dts, var, di, &[&case.body], depth, pset, out);
             }
@@ -302,7 +325,12 @@ pub fn compute_param_variances(dts: &[Datatype]) -> Vec<Vec<Variance>> {
                     walk_param_polarities(dts, &var, di, at, 0, POL_POS, &mut contrib);
                 }
                 let d = sqcon.arg_tys.len();
-                for face in [&sqcon.face_i0, &sqcon.face_i1, &sqcon.face_j0, &sqcon.face_j1] {
+                for face in [
+                    &sqcon.face_i0,
+                    &sqcon.face_i1,
+                    &sqcon.face_j0,
+                    &sqcon.face_j1,
+                ] {
                     walk_param_polarities(dts, &var, di, face, d, POL_POS, &mut contrib);
                 }
             }
@@ -376,10 +404,7 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
                 Err(PositivityError {
                     datatype: target.to_string(),
                     constructor: String::new(),
-                    message: format!(
-                        "datatype '{}' appears on the left side of an arrow",
-                        target
-                    ),
+                    message: format!("datatype '{}' appears on the left side of an arrow", target),
                 })
             } else {
                 for p in params {
@@ -388,8 +413,12 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
                 Ok(())
             }
         }
-        Term::TApp(f, a) | Term::PApp(f, a) | Term::TEquiv(f, a) | Term::TEquivFwd(f, a)
-        | Term::TTransport(f, a) | Term::TPair(f, a) => {
+        Term::TApp(f, a)
+        | Term::PApp(f, a)
+        | Term::TEquiv(f, a)
+        | Term::TEquivFwd(f, a)
+        | Term::TTransport(f, a)
+        | Term::TPair(f, a) => {
             check_positivity_in(target, f, negative)?;
             check_positivity_in(target, a, negative)
         }
@@ -407,7 +436,9 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             check_positivity_in(target, a, negative)?;
             check_positivity_in(target, b, negative)
         }
-        Term::TPath(a, u, v) | Term::TGlue(a, u, v) | Term::TGlueElem(a, u, v)
+        Term::TPath(a, u, v)
+        | Term::TGlue(a, u, v)
+        | Term::TGlueElem(a, u, v)
         | Term::TUnglue(a, u, v) => {
             check_positivity_in(target, a, negative)?;
             check_positivity_in(target, u, negative)?;
@@ -526,18 +557,12 @@ pub fn check_datatype_positivity(dt: &Datatype) -> Result<(), PositivityError> {
         check_con_positivity(&dt.name, &pcon.name, &pcon.arg_tys)?;
         check_positivity_in(&dt.name, &pcon.face0, false).map_err(|mut e| {
             e.constructor = pcon.name.clone();
-            e.message = format!(
-                "face0 of path constructor '{}': {}",
-                pcon.name, e.message
-            );
+            e.message = format!("face0 of path constructor '{}': {}", pcon.name, e.message);
             e
         })?;
         check_positivity_in(&dt.name, &pcon.face1, false).map_err(|mut e| {
             e.constructor = pcon.name.clone();
-            e.message = format!(
-                "face1 of path constructor '{}': {}",
-                pcon.name, e.message
-            );
+            e.message = format!("face1 of path constructor '{}': {}", pcon.name, e.message);
             e
         })?;
     }
@@ -572,8 +597,14 @@ mod tests {
             name: "Nat".into(),
             params: vec![],
             cons: vec![
-                ConSig { name: "zero".into(), arg_tys: vec![] },
-                ConSig { name: "suc".into(), arg_tys: vec![Term::TData("Nat".into(), vec![])] },
+                ConSig {
+                    name: "zero".into(),
+                    arg_tys: vec![],
+                },
+                ConSig {
+                    name: "suc".into(),
+                    arg_tys: vec![Term::TData("Nat".into(), vec![])],
+                },
             ],
             pcons: vec![],
             sqcons: vec![],
@@ -590,13 +621,13 @@ mod tests {
             name: "List".into(),
             params: vec![],
             cons: vec![
-                ConSig { name: "nil".into(), arg_tys: vec![] },
+                ConSig {
+                    name: "nil".into(),
+                    arg_tys: vec![],
+                },
                 ConSig {
                     name: "cons".into(),
-                    arg_tys: vec![
-                        Term::TUniv(0),
-                        Term::TData("List".into(), vec![]),
-                    ],
+                    arg_tys: vec![Term::TUniv(0), Term::TData("List".into(), vec![])],
                 },
             ],
             pcons: vec![],
@@ -617,7 +648,11 @@ mod tests {
                 name: "mk".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
-                    b(Term::TPi("_".into(), b(Term::TData("Nat".into(), vec![])), b(Term::TData("Nat".into(), vec![])))),
+                    b(Term::TPi(
+                        "_".into(),
+                        b(Term::TData("Nat".into(), vec![])),
+                        b(Term::TData("Nat".into(), vec![])),
+                    )),
                     b(Term::TData("Nat".into(), vec![])),
                 )],
             }],
@@ -734,7 +769,10 @@ mod tests {
         let dt = Datatype {
             name: "S1".into(),
             params: vec![],
-            cons: vec![ConSig { name: "base".into(), arg_tys: vec![] }],
+            cons: vec![ConSig {
+                name: "base".into(),
+                arg_tys: vec![],
+            }],
             pcons: vec![PConSig {
                 name: "loop".into(),
                 arg_tys: vec![],
@@ -757,7 +795,10 @@ mod tests {
         Datatype {
             name: name.into(),
             params: vec![("A".into(), Term::TUniv(0))],
-            cons: vec![ConSig { name: "mk".into(), arg_tys }],
+            cons: vec![ConSig {
+                name: "mk".into(),
+                arg_tys,
+            }],
             pcons: vec![],
             sqcons: vec![],
             cellcons: vec![],
@@ -772,18 +813,17 @@ mod tests {
 
     #[test]
     fn record_param_is_covariant() {
-        assert_eq!(var_of(&var_dt("R", vec![Term::TVar(0)])), Variance::Covariant);
+        assert_eq!(
+            var_of(&var_dt("R", vec![Term::TVar(0)])),
+            Variance::Covariant
+        );
     }
 
     #[test]
     fn param_in_arrow_domain_is_contravariant() {
         let dt = var_dt(
             "Bad",
-            vec![Term::TPi(
-                "_".into(),
-                b(Term::TVar(0)),
-                b(Term::TUniv(0)),
-            )],
+            vec![Term::TPi("_".into(), b(Term::TVar(0)), b(Term::TUniv(0)))],
         );
         assert_eq!(var_of(&dt), Variance::Contravariant);
     }

@@ -3,11 +3,11 @@
 // Depends on types from interval.rs:
 //   use crate::interval::{I, DNF};
 
-pub mod pretty;
 pub mod positivity;
+pub mod pretty;
 
-pub use pretty::show_term;
 pub use positivity::{Variance, check_datatype_positivity, compute_param_variances};
+pub use pretty::show_term;
 
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top};
 
@@ -410,8 +410,6 @@ impl Datatype {
     }
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Shift
 // ---------------------------------------------------------------------------
@@ -438,22 +436,30 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::PApp(p, r) => Term::PApp(b(shift(d, c, p)), b(shift(d, c, r))),
         Term::THComp(a, sys, u0) => Term::THComp(
             b(shift(d, c, a)),
-            sys.iter().map(|(phi, t)| (shift(d, c, phi), shift(d, c, t))).collect(),
+            sys.iter()
+                .map(|(phi, t)| (shift(d, c, phi), shift(d, c, t)))
+                .collect(),
             b(shift(d, c, u0)),
         ),
         Term::TComp(a, sys, u0) => Term::TComp(
             b(shift(d, c, a)),
-            sys.iter().map(|(phi, t)| (shift(d, c, phi), shift(d, c, t))).collect(),
+            sys.iter()
+                .map(|(phi, t)| (shift(d, c, phi), shift(d, c, t)))
+                .collect(),
             b(shift(d, c, u0)),
         ),
         Term::TFill(a, sys, u0) => Term::TFill(
             b(shift(d, c, a)),
-            sys.iter().map(|(phi, t)| (shift(d, c, phi), shift(d, c, t))).collect(),
+            sys.iter()
+                .map(|(phi, t)| (shift(d, c, phi), shift(d, c, t)))
+                .collect(),
             b(shift(d, c, u0)),
         ),
         Term::THFill(a, sys, u0) => Term::THFill(
             b(shift(d, c, a)),
-            sys.iter().map(|(phi, t)| (shift(d, c, phi), shift(d, c, t))).collect(),
+            sys.iter()
+                .map(|(phi, t)| (shift(d, c, phi), shift(d, c, t)))
+                .collect(),
             b(shift(d, c, u0)),
         ),
         Term::TEquiv(a, bx) => Term::TEquiv(b(shift(d, c, a)), b(shift(d, c, bx))),
@@ -477,16 +483,12 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TUnglue(phi, te, g) => {
             Term::TUnglue(b(shift(d, c, phi)), b(shift(d, c, te)), b(shift(d, c, g)))
         }
-        Term::TPartial(phi, a) => {
-            Term::TPartial(b(shift(d, c, phi)), b(shift(d, c, a)))
-        }
-        Term::TSystemType(sys) => {
-            Term::TSystemType(
-                sys.iter()
-                    .map(|(phi, a)| (shift(d, c, phi), shift(d, c, a)))
-                    .collect(),
-            )
-        }
+        Term::TPartial(phi, a) => Term::TPartial(b(shift(d, c, phi)), b(shift(d, c, a))),
+        Term::TSystemType(sys) => Term::TSystemType(
+            sys.iter()
+                .map(|(phi, a)| (shift(d, c, phi), shift(d, c, a)))
+                .collect(),
+        ),
         Term::TSigma(x, a, body) => {
             Term::TSigma(x.clone(), b(shift(d, c, a)), b(shift(d, c + 1, body)))
         }
@@ -536,16 +538,16 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
             b(shift(d, c, scrut)),
         ),
         Term::Meta(_) => term.clone(),
-        Term::TBy(tactics) => Term::TBy(
-            tactics
-                .iter()
-                .map(|tac| shift_tactic(d, c, tac))
-                .collect(),
-        ),
+        Term::TBy(tactics) => {
+            Term::TBy(tactics.iter().map(|tac| shift_tactic(d, c, tac)).collect())
+        }
         Term::TProj(field, r) => Term::TProj(field.clone(), b(shift(d, c, r))),
         Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
             b(shift(d, c, r)),
-            updates.iter().map(|(f, e)| (f.clone(), shift(d, c, e))).collect(),
+            updates
+                .iter()
+                .map(|(f, e)| (f.clone(), shift(d, c, e)))
+                .collect(),
         ),
         Term::TDelay(a) => Term::TDelay(b(shift(d, c, a))),
         Term::TNext(a) => Term::TNext(b(shift(d, c, a))),
@@ -566,8 +568,7 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
         | Tactic::Transitivity
         | Tactic::Compute
         | Tactic::Trivial
-        | Tactic::Omega
-        => tac.clone(),
+        | Tactic::Omega => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),
@@ -615,22 +616,30 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
         Term::PApp(p, r) => Term::PApp(b(subst(j, s, p)), b(subst(j, s, r))),
         Term::THComp(a, sys, u0) => Term::THComp(
             b(subst(j, s, a)),
-            sys.iter().map(|(phi, t)| (subst(j, s, phi), subst(j, s, t))).collect(),
+            sys.iter()
+                .map(|(phi, t)| (subst(j, s, phi), subst(j, s, t)))
+                .collect(),
             b(subst(j, s, u0)),
         ),
         Term::TComp(a, sys, u0) => Term::TComp(
             b(subst(j, s, a)),
-            sys.iter().map(|(phi, t)| (subst(j, s, phi), subst(j, s, t))).collect(),
+            sys.iter()
+                .map(|(phi, t)| (subst(j, s, phi), subst(j, s, t)))
+                .collect(),
             b(subst(j, s, u0)),
         ),
         Term::TFill(a, sys, u0) => Term::TFill(
             b(subst(j, s, a)),
-            sys.iter().map(|(phi, t)| (subst(j, s, phi), subst(j, s, t))).collect(),
+            sys.iter()
+                .map(|(phi, t)| (subst(j, s, phi), subst(j, s, t)))
+                .collect(),
             b(subst(j, s, u0)),
         ),
         Term::THFill(a, sys, u0) => Term::THFill(
             b(subst(j, s, a)),
-            sys.iter().map(|(phi, t)| (subst(j, s, phi), subst(j, s, t))).collect(),
+            sys.iter()
+                .map(|(phi, t)| (subst(j, s, phi), subst(j, s, t)))
+                .collect(),
             b(subst(j, s, u0)),
         ),
         Term::TEquiv(a, bx) => Term::TEquiv(b(subst(j, s, a)), b(subst(j, s, bx))),
@@ -654,16 +663,12 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
         Term::TUnglue(phi, te, g) => {
             Term::TUnglue(b(subst(j, s, phi)), b(subst(j, s, te)), b(subst(j, s, g)))
         }
-        Term::TPartial(phi, a) => {
-            Term::TPartial(b(subst(j, s, phi)), b(subst(j, s, a)))
-        }
-        Term::TSystemType(sys) => {
-            Term::TSystemType(
-                sys.iter()
-                    .map(|(phi, a)| (subst(j, s, phi), subst(j, s, a)))
-                    .collect(),
-            )
-        }
+        Term::TPartial(phi, a) => Term::TPartial(b(subst(j, s, phi)), b(subst(j, s, a))),
+        Term::TSystemType(sys) => Term::TSystemType(
+            sys.iter()
+                .map(|(phi, a)| (subst(j, s, phi), subst(j, s, a)))
+                .collect(),
+        ),
         Term::TSigma(x, a, body) => {
             let s1 = shift(1, 0, s);
             Term::TSigma(x.clone(), b(subst(j, s, a)), b(subst(j + 1, &s1, body)))
@@ -718,16 +723,16 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
             b(subst(j, s, scrut)),
         ),
         Term::Meta(_) => term.clone(),
-        Term::TBy(tactics) => Term::TBy(
-            tactics
-                .iter()
-                .map(|tac| subst_tactic(j, s, tac))
-                .collect(),
-        ),
+        Term::TBy(tactics) => {
+            Term::TBy(tactics.iter().map(|tac| subst_tactic(j, s, tac)).collect())
+        }
         Term::TProj(field, r) => Term::TProj(field.clone(), b(subst(j, s, r))),
         Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
             b(subst(j, s, r)),
-            updates.iter().map(|(f, e)| (f.clone(), subst(j, s, e))).collect(),
+            updates
+                .iter()
+                .map(|(f, e)| (f.clone(), subst(j, s, e)))
+                .collect(),
         ),
         Term::TDelay(a) => Term::TDelay(b(subst(j, s, a))),
         Term::TNext(a) => Term::TNext(b(subst(j, s, a))),
@@ -748,8 +753,7 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
         | Tactic::Transitivity
         | Tactic::Compute
         | Tactic::Trivial
-        | Tactic::Omega
-        => tac.clone(),
+        | Tactic::Omega => tac.clone(),
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),
@@ -842,9 +846,22 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TSnd(p) => max_var(p),
         Term::TData(_, params) => params.iter().map(max_var).fold(-1, |m, x| m.max(x)),
         Term::TCon(_, _, args) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)),
-        Term::TPCon(_, _, args, r) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(max_var(r)),
-        Term::TSqCon(_, _, args, r, s) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(max_var(r)).max(max_var(s)),
-        Term::TCellCon(_, _, args, ivars) => args.iter().map(max_var).fold(-1, |m, x| m.max(x)).max(ivars.iter().map(max_var).fold(-1, |m, x| m.max(x))),
+        Term::TPCon(_, _, args, r) => args
+            .iter()
+            .map(max_var)
+            .fold(-1, |m, x| m.max(x))
+            .max(max_var(r)),
+        Term::TSqCon(_, _, args, r, s) => args
+            .iter()
+            .map(max_var)
+            .fold(-1, |m, x| m.max(x))
+            .max(max_var(r))
+            .max(max_var(s)),
+        Term::TCellCon(_, _, args, ivars) => args
+            .iter()
+            .map(max_var)
+            .fold(-1, |m, x| m.max(x))
+            .max(ivars.iter().map(max_var).fold(-1, |m, x| m.max(x))),
         Term::TElim(motive, cases, scrut) => {
             let mut m = max_var(motive).max(max_var(scrut));
             for case in cases {
@@ -909,9 +926,9 @@ fn b<T>(v: T) -> Box<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::pretty::show_term;
     use super::positivity::check_datatype_positivity;
+    use super::pretty::show_term;
+    use super::*;
 
     fn b(t: Term) -> Box<Term> {
         Box::new(t)
@@ -957,9 +974,11 @@ mod tests {
         let t = Term::TCon(
             "Nat".into(),
             "suc".into(),
-            vec![Term::TCon("Nat".into(), "suc".into(), vec![
-                Term::TCon("Nat".into(), "zero".into(), vec![]),
-            ])],
+            vec![Term::TCon(
+                "Nat".into(),
+                "suc".into(),
+                vec![Term::TCon("Nat".into(), "zero".into(), vec![])],
+            )],
         );
         assert_eq!(show_term(&[], &t), "2");
     }
@@ -980,8 +999,14 @@ mod tests {
             name: "Nat".into(),
             params: vec![],
             cons: vec![
-                ConSig { name: "zero".into(), arg_tys: vec![] },
-                ConSig { name: "suc".into(), arg_tys: vec![Term::TData("Nat".into(), vec![])] },
+                ConSig {
+                    name: "zero".into(),
+                    arg_tys: vec![],
+                },
+                ConSig {
+                    name: "suc".into(),
+                    arg_tys: vec![Term::TData("Nat".into(), vec![])],
+                },
             ],
             pcons: vec![],
             sqcons: vec![],

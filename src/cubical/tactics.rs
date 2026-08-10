@@ -8,7 +8,6 @@ fn names_from_ctx(ctx: &Ctx) -> Vec<Name> {
     ctx.iter().map(|(n, _)| n.clone()).collect()
 }
 
-
 // ---------------------------------------------------------------------------
 // PendingGoal — deferred goal transformations
 // ---------------------------------------------------------------------------
@@ -41,11 +40,7 @@ enum PendingGoal {
     },
     /// `transitivity` on a path goal: proving the first half.
     /// After it is proved, transitions to `TransitivitySecond`.
-    TransitivityFirst {
-        x: Term,
-        z: Term,
-        a_ty: Term,
-    },
+    TransitivityFirst { x: Term, z: Term, a_ty: Term },
     /// First half proved as `p1`; now proving the second half.
     TransitivitySecond {
         p1: Term,
@@ -94,9 +89,7 @@ impl PendingGoal {
                 *z = shift(d, 0, z);
                 *a_ty = shift(d, 0, a_ty);
             }
-            PendingGoal::TransitivitySecond {
-                p1, x, y, z, a_ty,
-            } => {
+            PendingGoal::TransitivitySecond { p1, x, y, z, a_ty } => {
                 *p1 = shift(d, 0, p1);
                 *x = shift(d, 0, x);
                 *y = shift(d, 0, y);
@@ -184,8 +177,7 @@ impl<'a> TacticEngine<'a> {
                 let fst_result = match self.result.take() {
                     Some(r) => r,
                     None => {
-                        self.pending_goal =
-                            Some(PendingGoal::SplitFirst { snd_ty_template });
+                        self.pending_goal = Some(PendingGoal::SplitFirst { snd_ty_template });
                         return Ok(());
                     }
                 };
@@ -207,10 +199,7 @@ impl<'a> TacticEngine<'a> {
                             .into(),
                     )
                 })?;
-                self.result = Some(Term::TPair(
-                    Box::new(fst_result),
-                    Box::new(snd_result),
-                ));
+                self.result = Some(Term::TPair(Box::new(fst_result), Box::new(snd_result)));
             }
 
             // ── constructor (first arg proved → next arg) ─────────────
@@ -224,7 +213,10 @@ impl<'a> TacticEngine<'a> {
                     Some(r) => r,
                     None => {
                         self.pending_goal = Some(PendingGoal::ConstructorFirst {
-                            con_name, dt_name, arg_tys, results,
+                            con_name,
+                            dt_name,
+                            arg_tys,
+                            results,
                         });
                         return Ok(());
                     }
@@ -254,7 +246,10 @@ impl<'a> TacticEngine<'a> {
                     Some(r) => r,
                     None => {
                         self.pending_goal = Some(PendingGoal::ConstructorNext {
-                            con_name, dt_name, arg_tys, results,
+                            con_name,
+                            dt_name,
+                            arg_tys,
+                            results,
                         });
                         return Ok(());
                     }
@@ -280,16 +275,15 @@ impl<'a> TacticEngine<'a> {
                 let p1 = match self.result.take() {
                     Some(r) => r,
                     None => {
-                        self.pending_goal = Some(PendingGoal::TransitivityFirst {
-                            x, z, a_ty,
-                        });
+                        self.pending_goal = Some(PendingGoal::TransitivityFirst { x, z, a_ty });
                         return Ok(());
                     }
                 };
                 // p1 : Path A x y  →  y = p1 @ i1
-                let y = Term::PApp(Box::new(p1.clone()), Box::new(Term::TInterval(
-                    crate::cubical::interval::I::I1,
-                )));
+                let y = Term::PApp(
+                    Box::new(p1.clone()),
+                    Box::new(Term::TInterval(crate::cubical::interval::I::I1)),
+                );
                 let y_nf = nbe_eval(&y);
                 // Second goal: Path A y z
                 self.goal_ty =
@@ -310,9 +304,7 @@ impl<'a> TacticEngine<'a> {
                 a_ty: _,
             } => {
                 let p2 = self.result.take().ok_or_else(|| {
-                    TypeError::Other(
-                        "transitivity: second path was not proved".into(),
-                    )
+                    TypeError::Other("transitivity: second path was not proved".into())
                 })?;
                 // Compose: substitute p1 @ i1 for the intermediate variable
                 // in p2.  p2 has the intermediate at de Bruijn index 0.
@@ -341,11 +333,7 @@ impl<'a> TacticEngine<'a> {
                     let binders_info: Vec<(Name, usize)> = con_names
                         .iter()
                         .map(|cn| {
-                            let dt = self
-                                .dts
-                                .iter()
-                                .find(|d| d.name == dt_name)
-                                .unwrap();
+                            let dt = self.dts.iter().find(|d| d.name == dt_name).unwrap();
                             let arity = dt
                                 .find_con(cn)
                                 .map(|c| c.arity())
@@ -360,9 +348,8 @@ impl<'a> TacticEngine<'a> {
                         .enumerate()
                         .map(|(i, body)| {
                             let (cn, arity) = &binders_info[i];
-                            let binders: Vec<Name> = (0..*arity)
-                                .map(|k| format!("_arg{}_{}", i, k))
-                                .collect();
+                            let binders: Vec<Name> =
+                                (0..*arity).map(|k| format!("_arg{}_{}", i, k)).collect();
                             crate::cubical::syntax::ElimCase {
                                 con: cn.clone(),
                                 binders,
@@ -443,7 +430,8 @@ impl<'a> TacticEngine<'a> {
 
         match tactic {
             Tactic::Intro(names) => {
-                let mut current_ty = nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &self.goal_ty);
+                let mut current_ty =
+                    nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &self.goal_ty);
 
                 for name in names {
                     match current_ty {
@@ -459,7 +447,11 @@ impl<'a> TacticEngine<'a> {
                             let mut combined = self.tactic_ctx.clone();
                             combined.extend_from_slice(outer_ctx);
                             let names = names_from_ctx(&combined);
-                            return Err(TypeError::ExpectedPi { ty: other, names, pos: None });
+                            return Err(TypeError::ExpectedPi {
+                                ty: other,
+                                names,
+                                pos: None,
+                            });
                         }
                     }
                 }
@@ -490,7 +482,7 @@ impl<'a> TacticEngine<'a> {
                             names,
                             pos: err_pos(&combined_ctx, term),
                         })
-                    },
+                    }
                     EtaResult::Exhausted => {
                         let names = names_from_ctx(&combined_ctx);
                         Err(TypeError::EtaFuelExhausted {
@@ -499,7 +491,7 @@ impl<'a> TacticEngine<'a> {
                             names,
                             pos: err_pos(&combined_ctx, term),
                         })
-                    },
+                    }
                 }
             }
 
@@ -559,12 +551,16 @@ impl<'a> TacticEngine<'a> {
                                     names,
                                     pos: err_pos(&combined_ctx, term),
                                 })
-                            },
+                            }
                         }
                     }
                     other => {
                         let names = names_from_ctx(&combined_ctx);
-                        Err(TypeError::ExpectedPi { ty: other, names, pos: err_pos(&combined_ctx, term) })
+                        Err(TypeError::ExpectedPi {
+                            ty: other,
+                            names,
+                            pos: err_pos(&combined_ctx, term),
+                        })
                     }
                 }
             }
@@ -583,8 +579,7 @@ impl<'a> TacticEngine<'a> {
                             EtaResult::Equal => {
                                 let i_name = "_i".to_string();
                                 let body = shift(1, 0, &u);
-                                self.result =
-                                    Some(Term::PLam(i_name, Box::new(body)));
+                                self.result = Some(Term::PLam(i_name, Box::new(body)));
                                 Ok(())
                             }
                             EtaResult::NotEqual => Err(TypeError::Other(format!(
@@ -600,12 +595,16 @@ impl<'a> TacticEngine<'a> {
                                     names,
                                     pos: err_pos(&combined_ctx, &u),
                                 })
-                            },
+                            }
                         }
                     }
                     other => {
                         let names = names_from_ctx(&combined_ctx);
-                        Err(TypeError::ExpectedPath { ty: other, names, pos: None })
+                        Err(TypeError::ExpectedPath {
+                            ty: other,
+                            names,
+                            pos: None,
+                        })
                     }
                 }
             }
@@ -622,7 +621,11 @@ impl<'a> TacticEngine<'a> {
                         let mut combined = self.tactic_ctx.clone();
                         combined.extend_from_slice(outer_ctx);
                         let names = names_from_ctx(&combined);
-                        Err(TypeError::ExpectedPath { ty: other, names, pos: None })
+                        Err(TypeError::ExpectedPath {
+                            ty: other,
+                            names,
+                            pos: None,
+                        })
                     }
                 }
             }
@@ -632,8 +635,9 @@ impl<'a> TacticEngine<'a> {
                 let goal_nf = nbe_eval(&self.goal_ty);
                 match goal_nf {
                     Term::TSigma(_x, a_ty, b_ty) => {
-                        self.pending_goal =
-                            Some(PendingGoal::SplitFirst { snd_ty_template: *b_ty });
+                        self.pending_goal = Some(PendingGoal::SplitFirst {
+                            snd_ty_template: *b_ty,
+                        });
                         self.goal_ty = nbe_eval(&a_ty);
                         Ok(())
                     }
@@ -641,7 +645,11 @@ impl<'a> TacticEngine<'a> {
                         let mut combined = self.tactic_ctx.clone();
                         combined.extend_from_slice(outer_ctx);
                         let names = names_from_ctx(&combined);
-                        Err(TypeError::ExpectedSigma { ty: other, names, pos: None })
+                        Err(TypeError::ExpectedSigma {
+                            ty: other,
+                            names,
+                            pos: None,
+                        })
                     }
                 }
             }
@@ -658,8 +666,9 @@ impl<'a> TacticEngine<'a> {
                             .dts
                             .iter()
                             .find(|d| &d.name == dt_name)
-                            .ok_or_else(|| {
-                                TypeError::UnknownDatatype { name: dt_name.clone(), pos: err_pos(&combined_ctx, &self.goal_ty) }
+                            .ok_or_else(|| TypeError::UnknownDatatype {
+                                name: dt_name.clone(),
+                                pos: err_pos(&combined_ctx, &self.goal_ty),
                             })?;
 
                         // Pick the constructor
@@ -686,27 +695,20 @@ impl<'a> TacticEngine<'a> {
                             )));
                         };
 
-                        let arg_tys: Vec<Term> = arg_tys_vec
-                            .iter()
-                            .map(|ty| nbe_eval(ty))
-                            .collect();
+                        let arg_tys: Vec<Term> =
+                            arg_tys_vec.iter().map(|ty| nbe_eval(ty)).collect();
 
                         if arg_tys.is_empty() {
-                            self.result = Some(Term::TCon(
-                                dt_name.clone(),
-                                con_name,
-                                Vec::new(),
-                            ));
+                            self.result = Some(Term::TCon(dt_name.clone(), con_name, Vec::new()));
                         } else {
                             let first_ty = arg_tys[0].clone();
                             self.goal_ty = first_ty;
-                            self.pending_goal =
-                                Some(PendingGoal::ConstructorFirst {
-                                    con_name,
-                                    dt_name: dt_name.clone(),
-                                    arg_tys: arg_tys[1..].to_vec(),
-                                    results: Vec::new(),
-                                });
+                            self.pending_goal = Some(PendingGoal::ConstructorFirst {
+                                con_name,
+                                dt_name: dt_name.clone(),
+                                arg_tys: arg_tys[1..].to_vec(),
+                                results: Vec::new(),
+                            });
                         }
                         Ok(())
                     }
@@ -730,10 +732,7 @@ impl<'a> TacticEngine<'a> {
                     .iter()
                     .position(|(n, _)| n == name)
                     .ok_or_else(|| {
-                        TypeError::Other(format!(
-                            "destruct: '{}' not found in context",
-                            name
-                        ))
+                        TypeError::Other(format!("destruct: '{}' not found in context", name))
                     })?;
 
                 let var_ty = nbe_eval(&combined_ctx[var_idx].1);
@@ -750,11 +749,12 @@ impl<'a> TacticEngine<'a> {
                     }
                 };
 
-                let dt = self
-                    .dts
-                    .iter()
-                    .find(|d| d.name == dt_name)
-                    .ok_or_else(|| TypeError::UnknownDatatype { name: dt_name.clone(), pos: err_pos(&combined_ctx, &self.goal_ty) })?;
+                let dt = self.dts.iter().find(|d| d.name == dt_name).ok_or_else(|| {
+                    TypeError::UnknownDatatype {
+                        name: dt_name.clone(),
+                        pos: err_pos(&combined_ctx, &self.goal_ty),
+                    }
+                })?;
 
                 // Build one subgoal per constructor.
                 let mut goals = Vec::new();
@@ -772,11 +772,8 @@ impl<'a> TacticEngine<'a> {
                     // Add constructor args (innermost first) — reverse the
                     // telescope since arg_tys is outermost-first.
                     for (k, arg_ty) in con.arg_tys.iter().enumerate() {
-                        let shifted_ty = shift(
-                            -(var_idx as i32 + 1),
-                            0,
-                            &shift(k as i32, 0, arg_ty),
-                        );
+                        let shifted_ty =
+                            shift(-(var_idx as i32 + 1), 0, &shift(k as i32, 0, arg_ty));
                         case_ctx.insert(0, (format!("_{}", k), nbe_eval(&shifted_ty)));
                     }
                     goals.push((case_ctx, self.goal_ty.clone()));
@@ -785,11 +782,8 @@ impl<'a> TacticEngine<'a> {
                 for pcon in &dt.pcons {
                     let mut case_ctx = above_ctx.clone();
                     for (k, arg_ty) in pcon.arg_tys.iter().enumerate() {
-                        let shifted_ty = shift(
-                            -(var_idx as i32 + 1),
-                            0,
-                            &shift(k as i32, 0, arg_ty),
-                        );
+                        let shifted_ty =
+                            shift(-(var_idx as i32 + 1), 0, &shift(k as i32, 0, arg_ty));
                         case_ctx.insert(0, (format!("_{}", k), nbe_eval(&shifted_ty)));
                     }
                     goals.push((case_ctx, self.goal_ty.clone()));
@@ -956,7 +950,8 @@ impl<'a> TacticEngine<'a> {
                         // endpoint determines the intermediate point.
                         //
                         // Let me implement this.
-                        self.tactic_ctx.insert(0, ("_trans_y".to_string(), nbe_eval(&a)));
+                        self.tactic_ctx
+                            .insert(0, ("_trans_y".to_string(), nbe_eval(&a)));
                         // Shift existing tactic_ctx entries up by 1.
                         // (The new variable _trans_y is at index 0.)
                         // Actually, inserting at position 0 already makes
@@ -967,11 +962,7 @@ impl<'a> TacticEngine<'a> {
 
                         // First subgoal: Path A x _trans_y
                         let x_shifted = shift(1, 0, &x);
-                        self.goal_ty = Term::TPath(
-                            a,
-                            Box::new(x_shifted),
-                            Box::new(Term::TVar(0)),
-                        );
+                        self.goal_ty = Term::TPath(a, Box::new(x_shifted), Box::new(Term::TVar(0)));
                         self.shift_stored_for_intros(1);
 
                         self.pending_goal = Some(PendingGoal::TransitivityFirst {
@@ -985,7 +976,11 @@ impl<'a> TacticEngine<'a> {
                         let mut combined = self.tactic_ctx.clone();
                         combined.extend_from_slice(outer_ctx);
                         let names = names_from_ctx(&combined);
-                        Err(TypeError::ExpectedPath { ty: other, names, pos: None })
+                        Err(TypeError::ExpectedPath {
+                            ty: other,
+                            names,
+                            pos: None,
+                        })
                     }
                 }
             }
@@ -994,8 +989,7 @@ impl<'a> TacticEngine<'a> {
             Tactic::Compute => {
                 // Normalize the goal type in place.  This doesn't produce a
                 // proof term; it just simplifies the goal.
-                self.goal_ty =
-                    nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &self.goal_ty);
+                self.goal_ty = nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &self.goal_ty);
                 Ok(())
             }
 
@@ -1014,8 +1008,7 @@ impl<'a> TacticEngine<'a> {
                         match definitionally_equal_ctx_r(&combined_ctx, &u_nf, &v_nf) {
                             EtaResult::Equal => {
                                 let body = shift(1, 0, &u);
-                                self.result =
-                                    Some(Term::PLam("_i".to_string(), Box::new(body)));
+                                self.result = Some(Term::PLam("_i".to_string(), Box::new(body)));
                                 Ok(())
                             }
                             _ => Err(TypeError::Other(format!(
@@ -1031,15 +1024,13 @@ impl<'a> TacticEngine<'a> {
                             .dts
                             .iter()
                             .find(|d| &d.name == dt_name)
-                            .ok_or_else(|| {
-                                TypeError::UnknownDatatype { name: dt_name.clone(), pos: err_pos(&combined_ctx, &self.goal_ty) }
+                            .ok_or_else(|| TypeError::UnknownDatatype {
+                                name: dt_name.clone(),
+                                pos: err_pos(&combined_ctx, &self.goal_ty),
                             })?;
                         if let Some(con) = dt.cons.iter().find(|c| c.arity() == 0) {
-                            self.result = Some(Term::TCon(
-                                dt_name.clone(),
-                                con.name.clone(),
-                                Vec::new(),
-                            ));
+                            self.result =
+                                Some(Term::TCon(dt_name.clone(), con.name.clone(), Vec::new()));
                             Ok(())
                         } else {
                             Err(TypeError::Other(format!(
