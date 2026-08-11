@@ -1,0 +1,110 @@
+-- stress_nested_patterns.owl — Stress test for nested constructor patterns.
+--
+-- Nested patterns (`suc (suc m)`, `cons x (cons y zs)`) compile into chains
+-- of nested eliminators at parse time; the kernel never sees them.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | true : Bool
+  | false : Bool
+
+inductive List (A : Type) where
+  | nil  : List A
+  | cons : A -> List A -> List A
+
+inductive Tree where
+  | leaf : Tree
+  | node : Tree -> Tree -> Tree
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Basic nested patterns on Nat
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Match a literal 2 and recurse on the remainder.
+def isEven : Nat -> Bool := fun n =>
+  match n return Bool with
+  | zero        => true
+  | suc (suc m) => isEven m
+  | suc zero    => false
+
+-- Deep nesting: match a literal 4. Every `suc` case is spelled out so no
+-- column mixes a variable pattern with a constructor pattern.
+def isFour : Nat -> Bool := fun n =>
+  match n return Bool with
+  | zero                    => false
+  | suc zero                => false
+  | suc (suc zero)          => false
+  | suc (suc (suc zero))    => false
+  | suc (suc (suc (suc z))) => true
+
+-- Merged heads at several nesting depths. Note that a bare `suc m` arm
+-- cannot appear here: it would shadow every nested `suc` case.
+def depth : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero              => zero
+  | suc zero          => suc zero
+  | suc (suc m)       => suc (suc m)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Nested patterns on parameterized list constructors
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Sum all but the first two elements (nested pattern in the tail).
+def sumTail : List Nat -> Nat := fun l =>
+  match l return Nat with
+  | nil                => zero
+  | cons x (cons y zs) => suc (sumTail zs)
+  | cons x nil         => x
+
+-- Nested pattern in the head position: `node`'s arguments are themselves
+-- Trees, so a nested pattern in slot 0 is well-typed.
+def treeSize : Tree -> Nat := fun t =>
+  match t return Nat with
+  | leaf                 => zero
+  | node leaf b          => suc zero
+  | node (node a c) d    => suc (suc zero)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. As-patterns combined with nesting
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- The as-name binds the whole outer constructor value.
+def dropFirst : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero            => zero
+  | suc (suc m) as k => k
+  | suc zero as k   => k
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. Or-patterns combined with nesting
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def isZeroOrTwo : Nat -> Bool := fun n =>
+  match n return Bool with
+  | zero | suc (suc z) => true
+  | suc zero           => false
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Verification: the compiled eliminators must compute the right values.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def verify_isEven_0 : Bool := isEven zero
+def verify_isEven_1 : Bool := isEven (suc zero)
+def verify_isEven_2 : Bool := isEven (suc (suc zero))
+def verify_isEven_3 : Bool := isEven (suc (suc (suc zero)))
+def verify_isEven_4 : Bool := isEven (suc (suc (suc (suc zero))))
+def verify_isFour_4 : Bool := isFour (suc (suc (suc (suc zero))))
+def verify_isFour_3 : Bool := isFour (suc (suc (suc zero)))
+def verify_sumTail_1 : Nat := sumTail (cons (suc zero) nil)
+def verify_sumTail_3 : Nat := sumTail (cons (suc zero) (cons (suc zero) (cons (suc zero) nil)))
+def verify_dropFirst_3 : Nat := dropFirst (suc (suc (suc zero)))
+def verify_isZeroOrTwo_2 : Bool := isZeroOrTwo (suc (suc zero))
+def verify_isZeroOrTwo_1 : Bool := isZeroOrTwo (suc zero)
+def verify_treeSize_0 : Nat := treeSize leaf
+def verify_treeSize_1 : Nat := treeSize (node leaf leaf)
+def verify_treeSize_2 : Nat := treeSize (node (node leaf leaf) leaf)
+
+def main : Bool := verify_isEven_4

@@ -820,3 +820,189 @@ fn parses_empty_match_elimination() {
         _ => panic!("expected def declaration"),
     }
 }
+
+/// Parse a `def` with a single `fun`-lambda and return its body.
+fn parse_nested_match(def: &str) -> Term {
+    let src = format!(
+        "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n{}",
+        def
+    );
+    let decls = parse_program(&src).unwrap();
+    match decls.last().unwrap() {
+        Decl::Def { val, .. } => match val {
+            Term::TAbs(_, inner) => (**inner).clone(),
+            other => {
+                eprintln!("expected single-lambda def, got: {other:?}");
+                panic!("expected TAbs")
+            }
+        },
+        other => {
+            eprintln!("expected def, got: {other:?}");
+            panic!("expected def declaration")
+        }
+    }
+}
+
+#[test]
+fn parses_nested_constructor_patterns() {
+    // `suc (suc m)` and `suc zero` share a head and must merge into a single
+    // `suc` case whose body is a nested TElim over the argument.
+    let term = parse_nested_match(
+        "def f : Nat -> Nat := fun n =>\n  match n return Nat with\n  | zero => n\n  | suc (suc m) => m\n  | suc zero => n",
+    );
+    let Term::TElim(_, cases, _) = term else {
+        eprintln!("NOT TElim: {term:?}");
+        panic!("expected TElim")
+    };
+    assert_eq!(cases.len(), 2, "expected zero + merged suc cases");
+    assert_eq!(cases[0].con, "zero");
+    assert_eq!(cases[0].binders, Vec::<String>::new());
+    assert_eq!(cases[1].con, "suc");
+    assert_eq!(cases[1].binders, vec!["suc"]);
+    match cases[1].body.as_ref() {
+        Term::TElim(motive, sub, scrut) => {
+            assert!(matches!(motive.as_ref(), Term::TAbs(_, _)));
+            assert!(matches!(scrut.as_ref(), Term::TVar(0)));
+            assert_eq!(sub.len(), 2, "expected nested suc + zero sub-cases");
+            assert_eq!(sub[0].con, "suc");
+            assert_eq!(sub[0].binders, vec!["m"]);
+            assert_eq!(sub[1].con, "zero");
+            assert_eq!(sub[1].binders, Vec::<String>::new());
+        }
+        other => panic!("expected nested TElim, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parses_deep_nested_constructor_patterns() {
+    // Three levels of nesting compile to two nested TElims.
+    let term = parse_nested_match(
+        "def f : Nat -> Nat := fun n =>\n  match n return Nat with\n  | zero => n\n  | suc (suc (suc m)) => m\n  | suc zero => n\n  | suc (suc zero) => n",
+    );
+    let Term::TElim(_, cases, _) = term else {
+        eprintln!("NOT TElim: {term:?}");
+        panic!("expected TElim")
+    };
+    assert_eq!(cases.len(), 2);
+    let Term::TElim(_, sub, _) = cases[1].body.as_ref() else {
+        panic!("expected nested TElim")
+    };
+    assert_eq!(
+        sub.len(),
+        2,
+        "expected suc + zero sub-cases at first column"
+    );
+    let Term::TElim(_, sub2, _) = sub[0].body.as_ref() else {
+        panic!("expected doubly nested TElim")
+    };
+    assert_eq!(
+        sub2.len(),
+        2,
+        "expected suc + zero sub-cases at second column"
+    );
+    assert_eq!(sub2[0].con, "suc");
+    assert_eq!(sub2[0].binders, vec!["m"]);
+}
+
+#[test]
+fn parses_nested_list_patterns() {
+    // Multi-argument constructor with a nested pattern in the second column.
+    let src = "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\ninductive List where\n  | nil : List\n  | cons : Nat -> List -> List\ndef sumTail : List -> Nat := fun l =>\n  match l return Nat with\n  | nil => zero\n  | cons x (cons y zs) => suc zero\n  | cons x nil => x";
+    let decls = parse_program(src).unwrap();
+    let Decl::Def { val, .. } = decls.last().unwrap() else {
+        panic!("expected def")
+    };
+    let Term::TAbs(_, inner) = val else {
+        panic!("expected TAbs")
+    };
+    let Term::TElim(_, cases, _) = inner.as_ref() else {
+        panic!("expected TElim")
+    };
+    assert_eq!(cases.len(), 2, "expected nil + merged cons cases");
+    assert_eq!(cases[0].con, "nil");
+    assert_eq!(cases[1].con, "cons");
+    assert_eq!(cases[1].binders, vec!["x", "cons"]);
+    match cases[1].body.as_ref() {
+        Term::TElim(_, sub, _) => {
+            assert_eq!(sub.len(), 2, "expected cons + nil sub-cases");
+            assert_eq!(sub[0].con, "cons");
+            assert_eq!(sub[0].binders, vec!["y", "zs"]);
+            assert_eq!(sub[1].con, "nil");
+            assert_eq!(sub[1].binders, Vec::<String>::new());
+        }
+        other => panic!("expected nested TElim, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parses_nested_pattern_with_as() {
+    // An `as`-pattern on a nested arm binds the whole outer constructor value;
+    // the case carries the as-name and the phantom argument slot shifts up.
+    let term = parse_nested_match(
+        "def f : Nat -> Nat := fun n =>\n  match n return Nat with\n  | zero => n\n  | suc (suc m) as k => k\n  | suc zero as k => k",
+    );
+    let Term::TElim(_, cases, _) = term else {
+        panic!("expected TElim")
+    };
+    assert_eq!(cases[1].con, "suc");
+    assert_eq!(cases[1].as_name, Some("k".to_string()));
+    match cases[1].body.as_ref() {
+        Term::TElim(_, sub, scrut) => {
+            assert_eq!(sub.len(), 2);
+            assert!(matches!(scrut.as_ref(), Term::TVar(1)));
+        }
+        other => panic!("expected nested TElim, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parses_or_nested_patterns() {
+    // Or-patterns mixed with nesting: a flat alternative and a nested one.
+    let term = parse_nested_match(
+        "def f : Nat -> Nat := fun n =>\n  match n return Nat with\n  | zero | suc (suc m) => m\n  | suc zero => n",
+    );
+    let Term::TElim(_, cases, _) = term else {
+        panic!("expected TElim")
+    };
+    assert_eq!(cases.len(), 2);
+    assert_eq!(cases[0].con, "zero");
+    assert_eq!(cases[1].con, "suc");
+    match cases[1].body.as_ref() {
+        Term::TElim(_, sub, _) => assert_eq!(sub.len(), 2),
+        other => panic!("expected nested TElim, got: {other:?}"),
+    }
+}
+
+#[test]
+fn nested_patterns_keep_flat_arms_identical() {
+    // A flat match over Nat still emits exactly the cases the flat parser did.
+    let term = parse_nested_match(
+        "def f : Nat -> Nat := fun n =>\n  match n return Nat with\n  | zero => n\n  | suc m => m",
+    );
+    let Term::TElim(_, cases, _) = term else {
+        panic!("expected TElim")
+    };
+    assert_eq!(cases.len(), 2);
+    assert_eq!(cases[0].con, "zero");
+    assert_eq!(cases[0].binders, Vec::<String>::new());
+    assert_eq!(cases[1].con, "suc");
+    assert_eq!(cases[1].binders, vec!["m"]);
+}
+
+#[test]
+fn rejects_mixed_pattern_columns() {
+    let err = parse_program(
+        "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\ndef f : Nat -> Nat := fun n =>\n  match n return Nat with\n  | suc m => m\n  | suc (suc n) => n\n  | zero => n",
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("mixed"));
+}
+
+#[test]
+fn rejects_incomplete_nested_match() {
+    let err = parse_program(
+        "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\ndef f : Nat -> Nat := fun n =>\n  match n return Nat with\n  | zero => n",
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("incomplete pattern match"));
+}

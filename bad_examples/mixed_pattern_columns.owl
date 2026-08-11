@@ -1,0 +1,16 @@
+-- Negative test: a variable pattern and a constructor pattern in the same
+-- column cannot be compiled into the kernel's first-matching-case eliminator
+-- (the variable arm `suc m` would silently shadow the nested `suc (suc m)`
+-- case). Must fail to parse.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def bad : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero        => zero
+  | suc (suc m) => m
+  | suc m       => m
+
+def main : Nat := bad (suc zero)

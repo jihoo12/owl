@@ -3,10 +3,11 @@
 //! variables to de Bruijn indices along the way.
 
 use super::lexer::{Token, TokenKind, err};
+use super::patterns::{MatchArm, Pat};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
 use crate::cubical::syntax::{
-    CellConSig, ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift,
+    CellConSig, ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift, subst,
 };
 use crate::cubical::typechecker::errors::Pos;
 
@@ -1311,8 +1312,8 @@ impl Parser {
         self.term_env.remove(0);
 
         self.expect_ident("with")?;
-        let cases = self.parse_match_cases()?;
         let motive = Term::TAbs(binder, Box::new(return_type));
+        let cases = self.parse_match_cases(&motive, &scrutinee)?;
         Ok(Term::TElim(Box::new(motive), cases, Box::new(scrutinee)))
     }
 
@@ -1320,168 +1321,47 @@ impl Parser {
     /// A `match` with no `|` cases at all is legal — it eliminates the empty
     /// type (`match e return A with`), whose type checker only fires when the
     /// scrutinee normalizes to a value of an empty datatype.
-    fn parse_match_cases(&mut self) -> Result<Vec<ElimCase>, ParseError> {
+    ///
+    /// Each arm is read in two passes. The first ([`Self::parse_match_arm`])
+    /// scans the leading column into a tree of [`Pat`]s and stops at the
+    /// `=>`; the second parses the body with the right binders in scope and
+    /// assembles the flat [`ElimCase`]s the kernel expects. Arms whose
+    /// patterns are all plain variables keep producing byte-identical output
+    /// to the flat parser. Arms with nested constructor patterns (`suc (suc
+    /// zero)`) are collected and compiled by [`Self::compile_nested_arms`]
+    /// into chains of nested `TElim`s once every arm is known, so that arms
+    /// sharing a constructor head merge into a single complete case.
+    fn parse_match_cases(
+        &mut self,
+        motive: &Term,
+        scrutinee: &Term,
+    ) -> Result<Vec<ElimCase>, ParseError> {
         if !self.at(&TokenKind::Pipe) {
             return Ok(Vec::new());
         }
 
         let my_col = self.peek().col;
         let mut cases = Vec::new();
+        let mut nested_arms: Vec<(Pat, Box<Term>, Option<Name>)> = Vec::new();
+        let mut flat_heads: Vec<Name> = Vec::new();
         self.consume(&TokenKind::Pipe);
         loop {
-            // Collect one or more or-patterns before =>.
-            // Each pattern is `constructor binders...`, separated by | at the same column.
-            // Supports as-patterns (`con binders as name`) and record patterns (`{ f = b }`).
-            let mut pats: Vec<(Name, Vec<Name>)> = Vec::new();
-            let mut as_name: Option<Name> = None;
-            let mut record_bindings: Option<Vec<(Name, Name)>> = None;
-            loop {
-                if self.at(&TokenKind::LBrace) {
-                    // Record pattern: { field = binder, ... }
-                    // Typechecker will desugar to constructor pattern once the datatype is known.
-                    let mut bindings = Vec::new();
-                    self.consume(&TokenKind::LBrace);
-                    if !self.at(&TokenKind::RBrace) {
-                        loop {
-                            let field =
-                                self.expect_ident("expected field name in record pattern")?;
-                            self.expect(
-                                TokenKind::Equals,
-                                format!("expected '=' after field '{}' in record pattern", field),
-                            )?;
-                            let binder =
-                                self.expect_ident("expected binder name in record pattern")?;
-                            bindings.push((field, binder));
-                            if !self.consume(&TokenKind::Comma) {
-                                break;
-                            }
-                        }
-                    }
-                    self.expect(
-                        TokenKind::RBrace,
-                        "expected '}' after record pattern fields",
-                    )?;
-                    record_bindings = Some(bindings);
-                    pats.push(("".to_string(), Vec::new()));
-                } else {
-                    let con = self.expect_ident(
-                        "expected constructor name or record pattern in eliminator case",
-                    )?;
-                    let mut binders = Vec::new();
-                    while let TokenKind::Ident(name) = self.peek().kind.clone() {
-                        if name == "=>" || name == "|" || name == "as" {
-                            break;
-                        }
-                        self.pos += 1;
-                        binders.push(name);
-                    }
-                    pats.push((con, binders));
-                }
-
-                // Check for as-pattern: ... as name (after binders, before => or |)
-                if self.consume_ident("as") {
-                    let as_n = self.expect_ident("expected name after 'as' in as-pattern")?;
-                    as_name = Some(as_n);
-                    break; // as-pattern ends the pattern group
-                }
-
-                // Check for or-pattern separator
-                if self.at(&TokenKind::Pipe) && self.peek().col >= my_col {
-                    self.consume(&TokenKind::Pipe);
-                } else {
-                    break;
-                }
-            }
-
-            if self.consume(&TokenKind::FatArrow) || self.consume(&TokenKind::Arrow) {
-                let body_box: Box<Term>;
-                if let Some(ref bindings) = record_bindings {
-                    // Record pattern: push field binders to env, parse body, pop binders.
-                    let binder_names: Vec<Name> = bindings.iter().map(|(_, b)| b.clone()).collect();
-                    for b in binder_names.iter() {
-                        self.term_env.insert(0, b.clone());
-                    }
-                    if let Some(ref as_n) = as_name {
-                        self.term_env.insert(0, as_n.clone());
-                    }
-                    body_box = Box::new(self.parse_term()?);
-                    if as_name.is_some() {
-                        self.term_env.remove(0);
-                    }
-                    for _ in &binder_names {
-                        self.term_env.remove(0);
-                    }
-                    cases.push(ElimCase {
-                        con: "".to_string(),
-                        binders: binder_names,
-                        body: body_box,
-                        as_name,
-                        record_bindings: record_bindings.clone(),
-                    });
-                } else {
-                    let (last_con, binders) = pats.last().unwrap();
-                    // Determine the type of constructor:
-                    // - plain constructor: no interval binders
-                    // - path constructor: last binder is the interval variable
-                    // - square constructor: last TWO binders are interval variables
-                    // - cell constructor: last `dim` binders are interval variables
-                    let cell_dim = self.is_cell_constructor_case(last_con);
-                    let is_sqcon = self.is_square_constructor_case(last_con);
-                    let is_path_con = self
-                        .find_constructor(last_con)
-                        .is_some_and(|(_, is_path)| is_path);
-                    let (ord_binders, ivar_binders) = if let Some(dim) = cell_dim {
-                        if binders.len() >= dim {
-                            let split = binders.len() - dim;
-                            (&binders[..split], &binders[split..])
-                        } else {
-                            (&binders[..], &[] as &[String])
-                        }
-                    } else if is_sqcon && binders.len() >= 2 {
-                        let split = binders.len() - 2;
-                        (&binders[..split], &binders[split..])
-                    } else if is_path_con && !binders.is_empty() && !is_sqcon {
-                        let split = binders.len() - 1;
-                        (&binders[..split], &binders[split..])
-                    } else {
-                        (&binders[..], &[] as &[String])
-                    };
-
-                    for binder in ord_binders.iter() {
-                        self.term_env.insert(0, binder.clone());
-                    }
-                    for iv in ivar_binders {
-                        self.ivar_env.insert(0, iv.clone());
-                        self.term_env.insert(0, "".to_string());
-                    }
-                    if let Some(ref as_n) = as_name {
-                        self.term_env.insert(0, as_n.clone());
-                    }
-                    let body = self.parse_term()?;
-                    if as_name.is_some() {
-                        self.term_env.remove(0);
-                    }
-                    for _ in ivar_binders {
-                        self.term_env.remove(0);
-                        self.ivar_env.remove(0);
-                    }
-                    for _ in ord_binders {
-                        self.term_env.remove(0);
-                    }
-
-                    body_box = Box::new(body);
-                    for (con, binders) in pats {
-                        cases.push(ElimCase {
-                            con,
-                            binders,
-                            body: body_box.clone(),
-                            as_name: as_name.clone(),
-                            record_bindings: None,
-                        });
-                    }
-                }
+            // Pass A: leading column -> pattern tree(s), as/record handling.
+            let arm = self.parse_match_arm(my_col)?;
+            // Pass B: body + ElimCase assembly.
+            if arm.record_bindings.is_some() {
+                let elim = self.parse_record_case_body(arm)?;
+                cases.push(elim);
+            } else if arm.pats.iter().any(|p| p.has_nested_con()) {
+                self.parse_nested_arm(arm, &mut nested_arms, &mut cases, &mut flat_heads)?;
             } else {
-                return Err(self.error_here("expected '=>' after eliminator case binders"));
+                let flat = self.parse_flat_case_body(arm)?;
+                for e in &flat {
+                    if !e.con.is_empty() {
+                        flat_heads.push(e.con.clone());
+                    }
+                }
+                cases.extend(flat);
             }
             if self.at(&TokenKind::Pipe) && self.peek().col >= my_col {
                 self.consume(&TokenKind::Pipe);
@@ -1490,10 +1370,502 @@ impl Parser {
             }
         }
 
+        // A flat (all-variable) case and a nested-pattern case for the same
+        // constructor cannot both be compiled: the kernel's first-matching-case
+        // semantics would silently shadow the nested arms.
+        let nested = self.compile_nested_arms(nested_arms, motive)?;
+        for e in &nested {
+            if flat_heads.contains(&e.con) {
+                return Err(self.error_here(
+                    "mixed variable and constructor patterns for the same constructor",
+                ));
+            }
+        }
+        cases.extend(nested);
+        // Only matches over an open scrutinee must be exhaustive; the kernel
+        // reduces eliminators over closed constructor values, so partial
+        // matches like `match (suc zero) with | suc n => n` are legal.
+        if matches!(scrutinee, Term::TVar(_)) {
+            self.check_match_completeness(&cases)?;
+        }
         Ok(cases)
     }
 
-    /// Source position of the most recently consumed token.
+    /// Pass A of an eliminator-case arm: scan the leading column into a list
+    /// of [`Pat`]s (one per or-alternative), handle `as`-patterns and record
+    /// patterns `{ field = binder }`, and consume the `=>`.
+    fn parse_match_arm(&mut self, my_col: usize) -> Result<MatchArm, ParseError> {
+        let mut pats: Vec<Pat> = Vec::new();
+        let mut as_name: Option<Name> = None;
+        let mut record_bindings: Option<Vec<(Name, Name)>> = None;
+        loop {
+            if self.at(&TokenKind::LBrace) {
+                // Record pattern: { field = binder, ... }
+                // Typechecker will desugar to constructor pattern once the datatype is known.
+                let mut bindings = Vec::new();
+                self.consume(&TokenKind::LBrace);
+                if !self.at(&TokenKind::RBrace) {
+                    loop {
+                        let field = self.expect_ident("expected field name in record pattern")?;
+                        self.expect(
+                            TokenKind::Equals,
+                            format!("expected '=' after field '{}' in record pattern", field),
+                        )?;
+                        let binder = self.expect_ident("expected binder name in record pattern")?;
+                        bindings.push((field, binder));
+                        if !self.consume(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(
+                    TokenKind::RBrace,
+                    "expected '}' after record pattern fields",
+                )?;
+                record_bindings = Some(bindings);
+                pats.push(Pat::Con {
+                    con: String::new(),
+                    args: Vec::new(),
+                });
+            } else {
+                let con = self.expect_ident(
+                    "expected constructor name or record pattern in eliminator case",
+                )?;
+                pats.push(self.parse_pattern_after_con(con)?);
+            }
+
+            // Check for as-pattern: ... as name (after binders, before => or |)
+            if self.consume_ident("as") {
+                let as_n = self.expect_ident("expected name after 'as' in as-pattern")?;
+                as_name = Some(as_n);
+                break; // as-pattern ends the pattern group
+            }
+
+            // Check for or-pattern separator
+            if self.at(&TokenKind::Pipe) && self.peek().col >= my_col {
+                self.consume(&TokenKind::Pipe);
+            } else {
+                break;
+            }
+        }
+        if !(self.consume(&TokenKind::FatArrow) || self.consume(&TokenKind::Arrow)) {
+            return Err(self.error_here("expected '=>' after eliminator case binders"));
+        }
+        Ok(MatchArm {
+            pats,
+            as_name,
+            record_bindings,
+        })
+    }
+
+    /// Parse the argument patterns following a constructor head. Identifiers
+    /// that resolve to constructors (via the global environment) are read
+    /// recursively as nested constructor patterns — `suc zero` is `suc` applied
+    /// to the `zero` constructor — while non-constructor identifiers become
+    /// variable binders. Parenthesized constructor applications are read
+    /// recursively too. No existing example or library pattern binder collides
+    /// with a constructor name (audited), so this is a safe behaviour change.
+    fn parse_pattern_after_con(&mut self, con: Name) -> Result<Pat, ParseError> {
+        // Known ordinary constructors consume exactly their arity of
+        // arguments, so a zero-arity constructor like `nil` does not swallow
+        // its siblings. Interval-binder constructors (path/square/cell) and
+        // unknown heads (no datatype environment, e.g. parser unit tests)
+        // fall back to the flat parser's greedy behaviour: read identifiers
+        // until `=>`, `|` or `as`.
+        let arity = match self.find_constructor_arity(&con) {
+            Some((_, false, a)) => Some(a),
+            _ => None,
+        };
+        let mut args = Vec::new();
+        loop {
+            if let Some(max) = arity {
+                if args.len() >= max {
+                    break;
+                }
+            }
+            if let TokenKind::Ident(name) = self.peek().kind.clone() {
+                if name == "=>" || name == "|" || name == "as" {
+                    break;
+                }
+                self.pos += 1;
+                if self.find_constructor_arity(&name).is_some() {
+                    let inner = self.parse_pattern_after_con(name)?;
+                    args.push(inner);
+                } else {
+                    args.push(Pat::Var(name));
+                }
+            } else if self.at(&TokenKind::LParen) {
+                self.pos += 1;
+                let inner_con = self
+                    .expect_ident("expected constructor name inside nested pattern parentheses")?;
+                let inner = self.parse_pattern_after_con(inner_con)?;
+                self.expect(
+                    TokenKind::RParen,
+                    "expected ')' after nested constructor pattern",
+                )?;
+                args.push(inner);
+            } else {
+                break;
+            }
+        }
+        Ok(Pat::Con { con, args })
+    }
+
+    /// Pass B for a record-pattern arm: push the field binders (and the
+    /// `as`-binder, if any), parse the body, and build the `ElimCase` the
+    /// typechecker's record-pattern desugaring expects. Byte-identical to the
+    /// flat parser.
+    fn parse_record_case_body(&mut self, arm: MatchArm) -> Result<ElimCase, ParseError> {
+        let bindings = arm.record_bindings.unwrap();
+        let as_name = arm.as_name;
+        let binder_names: Vec<Name> = bindings.iter().map(|(_, b)| b.clone()).collect();
+        for b in binder_names.iter() {
+            self.term_env.insert(0, b.clone());
+        }
+        if let Some(ref as_n) = as_name {
+            self.term_env.insert(0, as_n.clone());
+        }
+        let body_box = Box::new(self.parse_term()?);
+        if as_name.is_some() {
+            self.term_env.remove(0);
+        }
+        for _ in &binder_names {
+            self.term_env.remove(0);
+        }
+        Ok(ElimCase {
+            con: "".to_string(),
+            binders: binder_names,
+            body: body_box,
+            as_name,
+            record_bindings: Some(bindings),
+        })
+    }
+
+    /// Pass B for a flat arm: parse the body with the original ord/ivar binder
+    /// split and assemble one `ElimCase` per or-alternative. This keeps the
+    /// output byte-identical to the pre-nested-pattern parser.
+    fn parse_flat_case_body(&mut self, arm: MatchArm) -> Result<Vec<ElimCase>, ParseError> {
+        let MatchArm {
+            pats,
+            as_name,
+            record_bindings: _,
+        } = arm;
+        let last_pat = pats.last().unwrap();
+        // Determine the type of constructor:
+        // - plain constructor: no interval binders
+        // - path constructor: last binder is the interval variable
+        // - square constructor: last TWO binders are interval variables
+        // - cell constructor: last `dim` binders are interval variables
+        let last_con = last_pat.con().unwrap_or("");
+        let cell_dim = self.is_cell_constructor_case(last_con);
+        let is_sqcon = self.is_square_constructor_case(last_con);
+        let is_path_con = self
+            .find_constructor(last_con)
+            .is_some_and(|(_, is_path)| is_path);
+        let mut binders = Vec::new();
+        last_pat.binders(&mut binders);
+        let (ord_binders, ivar_binders) = if let Some(dim) = cell_dim {
+            if binders.len() >= dim {
+                let split = binders.len() - dim;
+                (&binders[..split], &binders[split..])
+            } else {
+                (&binders[..], &[] as &[String])
+            }
+        } else if is_sqcon && binders.len() >= 2 {
+            let split = binders.len() - 2;
+            (&binders[..split], &binders[split..])
+        } else if is_path_con && !binders.is_empty() && !is_sqcon {
+            let split = binders.len() - 1;
+            (&binders[..split], &binders[split..])
+        } else {
+            (&binders[..], &[] as &[String])
+        };
+
+        for binder in ord_binders.iter() {
+            self.term_env.insert(0, binder.clone());
+        }
+        for iv in ivar_binders {
+            self.ivar_env.insert(0, iv.clone());
+            self.term_env.insert(0, "".to_string());
+        }
+        if let Some(ref as_n) = as_name {
+            self.term_env.insert(0, as_n.clone());
+        }
+        let body = self.parse_term()?;
+        if as_name.is_some() {
+            self.term_env.remove(0);
+        }
+        for _ in ivar_binders {
+            self.term_env.remove(0);
+            self.ivar_env.remove(0);
+        }
+        for _ in ord_binders {
+            self.term_env.remove(0);
+        }
+
+        let body_box = Box::new(body);
+        let mut cases = Vec::new();
+        for pat in pats {
+            let mut binders = Vec::new();
+            pat.binders(&mut binders);
+            cases.push(ElimCase {
+                con: pat.con().unwrap_or("").to_string(),
+                binders,
+                body: body_box.clone(),
+                as_name: as_name.clone(),
+                record_bindings: None,
+            });
+        }
+        Ok(cases)
+    }
+
+    /// Pass B for an arm containing a nested constructor pattern: parse the
+    /// body with the last pattern's binders (in the compiled chain's order) in
+    /// scope, then hand the nested patterns to the final merge. Plain-variable
+    /// alternatives of a mixed or-pattern arm are emitted immediately.
+    fn parse_nested_arm(
+        &mut self,
+        arm: MatchArm,
+        nested_arms: &mut Vec<(Pat, Box<Term>, Option<Name>)>,
+        cases: &mut Vec<ElimCase>,
+        flat_heads: &mut Vec<Name>,
+    ) -> Result<(), ParseError> {
+        let last_pat = arm.pats.last().unwrap();
+        let mut env = Vec::new();
+        last_pat.pattern_env_with_as(&mut env, arm.as_name.as_ref());
+        for n in env.iter() {
+            self.term_env.insert(0, n.clone());
+        }
+        let body = self.parse_term()?;
+        for _ in &env {
+            self.term_env.remove(0);
+        }
+        let body_box = Box::new(body);
+        for pat in arm.pats {
+            if pat.has_nested_con() {
+                nested_arms.push((pat, body_box.clone(), arm.as_name.clone()));
+            } else {
+                let mut binders = Vec::new();
+                pat.binders(&mut binders);
+                if let Some(head) = pat.con() {
+                    flat_heads.push(head.to_string());
+                }
+                cases.push(ElimCase {
+                    con: pat.con().unwrap_or("").to_string(),
+                    binders,
+                    body: body_box.clone(),
+                    as_name: arm.as_name.clone(),
+                    record_bindings: None,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Merge all nested-pattern arms of a match, grouped by constructor head,
+    /// into one `ElimCase` per head whose body is a chain of nested `TElim`s.
+    /// The body of a nested `ElimCase` is computed by [`Self::compile_columns`];
+    /// the case binders come from the first arm's arguments (a phantom name
+    /// for a nested constructor slot). Arms merged into one head must agree on
+    /// their `as`-binding; the shared name becomes the case's `as_name`.
+    fn compile_nested_arms(
+        &mut self,
+        arms: Vec<(Pat, Box<Term>, Option<Name>)>,
+        motive: &Term,
+    ) -> Result<Vec<ElimCase>, ParseError> {
+        // Group by head, preserving first-appearance order.
+        let mut groups: Vec<(Name, Vec<(Pat, Box<Term>, Option<Name>)>)> = Vec::new();
+        for (pat, body, as_name) in arms {
+            let head = pat.con().unwrap_or("").to_string();
+            match groups.iter_mut().find(|(h, _)| *h == head) {
+                Some((_, g)) => g.push((pat, body, as_name)),
+                None => groups.push((head, vec![(pat, body, as_name)])),
+            }
+        }
+        let mut cases = Vec::new();
+        for (head, group) in groups {
+            // All arms sharing a head must bind the same name with `as`.
+            let as_name = group[0].2.clone();
+            if group.iter().any(|(_, _, an)| *an != as_name) {
+                return Err(self
+                    .error_here("inconsistent as-bindings between arms that merge into one case"));
+            }
+            let extra_shift = if as_name.is_some() { 1usize } else { 0usize };
+            let first = &group[0].0;
+            let args = first.args();
+            let arity = args.len();
+            let mut binders = Vec::new();
+            for a in args {
+                match a {
+                    Pat::Var(n) => binders.push(n.clone()),
+                    Pat::Con { con, .. } => binders.push(con.clone()),
+                }
+            }
+            let head_dt = self.nested_head_datatype(&head)?;
+            // The expected type of this case, exactly as the typechecker
+            // computes it: motive applied to the constructor with the case
+            // binders as variables (shifted up when an as-binder sits at 0).
+            let con_args: Vec<Term> = (0..arity)
+                .map(|k| Term::TVar((arity - 1 - k + extra_shift) as i32))
+                .collect();
+            let case_expected = Term::TApp(
+                Box::new(shift((arity + extra_shift) as i32, 0, motive)),
+                Box::new(Term::TCon(head_dt, head.clone(), con_args)),
+            );
+            // One column per argument, with the argument's index in the case
+            // context (innermost-first binder list, plus the as-binder's slot).
+            let mut cols: Vec<(Vec<Pat>, usize)> = Vec::new();
+            for k in 0..arity {
+                let pats: Vec<Pat> = group.iter().map(|(p, _, _)| p.args()[k].clone()).collect();
+                cols.push((pats, arity - 1 - k + extra_shift));
+            }
+            let bodies: Vec<Box<Term>> = group.iter().map(|(_, b, _)| b.clone()).collect();
+            let body = self.compile_columns(cols, &bodies, &case_expected)?;
+            cases.push(ElimCase {
+                con: head,
+                binders,
+                body,
+                as_name,
+                record_bindings: None,
+            });
+        }
+        Ok(cases)
+    }
+
+    /// Resolve a nested pattern's constructor to its datatype, rejecting
+    /// path/square/cell constructors (which carry interval binders the nested
+    /// machinery does not understand).
+    fn nested_head_datatype(&self, con: &str) -> Result<Name, ParseError> {
+        match self.find_constructor(con) {
+            Some((_, true)) => Err(ParseError {
+                message: format!(
+                    "nested pattern constructor '{}' has interval binders; \
+                     nested patterns are only supported for ordinary constructors",
+                    con
+                ),
+                line: 0,
+                col: 0,
+            }),
+            Some((dt, false)) => Ok(dt),
+            None => Err(ParseError {
+                message: format!("unknown constructor '{}' in nested pattern", con),
+                line: 0,
+                col: 0,
+            }),
+        }
+    }
+
+    /// Compile the body of a constructor case whose arms' patterns share a
+    /// head. `cols` lists every argument column (patterns across the arms
+    /// together with the argument's index in the current case context);
+    /// `bodies` holds one leaf body per arm.
+    ///
+    /// The leftmost nested column is eliminated first, producing a `TElim`
+    /// whose motive plugs the eliminated variable into the case's expected
+    /// type; arms that share a sub-constructor merge recursively. When every
+    /// remaining column is a plain variable the first arm's body wins (the
+    /// kernel's "first matching case" semantics).
+    fn compile_columns(
+        &mut self,
+        cols: Vec<(Vec<Pat>, usize)>,
+        bodies: &[Box<Term>],
+        expected_ty: &Term,
+    ) -> Result<Box<Term>, ParseError> {
+        // A column mixing a variable pattern with a constructor pattern cannot
+        // be compiled into the kernel's first-matching-case eliminator (the
+        // variable arm would silently shadow the constructor arms).
+        for (pats, _) in &cols {
+            let has_var = pats.iter().any(|p| p.con().is_none());
+            let has_con = pats.iter().any(|p| p.con().is_some());
+            if has_var && has_con {
+                return Err(
+                    self.error_here("mixed variable and constructor patterns in the same column")
+                );
+            }
+        }
+        let nested_k = cols
+            .iter()
+            .position(|(pats, _)| pats.iter().any(|p| p.con().is_some()));
+        let Some(k) = nested_k else {
+            return Ok(bodies[0].clone());
+        };
+        let (pats, slot) = &cols[k];
+
+        // Motive of the eliminator: λz. expected[slot := z], with the current
+        // case context lifted under the fresh λ binder.
+        let motive = Term::TAbs(
+            "z".to_string(),
+            Box::new(subst(
+                (*slot + 1) as i32,
+                &Term::TVar(0),
+                &shift(1, 0, expected_ty),
+            )),
+        );
+
+        // Group the arms at this column by sub-constructor.
+        let mut groups: Vec<(Name, Vec<usize>)> = Vec::new();
+        for (i, p) in pats.iter().enumerate() {
+            let head = p.con().unwrap_or("").to_string();
+            match groups.iter_mut().find(|(h, _)| *h == head) {
+                Some((_, g)) => g.push(i),
+                None => groups.push((head, vec![i])),
+            }
+        }
+
+        let mut cases = Vec::new();
+        for (head, idxs) in groups {
+            let sub_first = &pats[idxs[0]];
+            let sub_args = sub_first.args();
+            let sub_arity = sub_args.len();
+            let mut sub_binders = Vec::new();
+            for a in sub_args {
+                match a {
+                    Pat::Var(n) => sub_binders.push(n.clone()),
+                    Pat::Con { con, .. } => sub_binders.push(con.clone()),
+                }
+            }
+            let head_dt = self.nested_head_datatype(&head)?;
+            // The sub-case's columns: its own arguments first, then the parent
+            // head's remaining columns (their context indices shifted up by the
+            // sub-case's binder count).
+            let mut sub_cols: Vec<(Vec<Pat>, usize)> = Vec::new();
+            for a in 0..sub_arity {
+                let sub_pats: Vec<Pat> = idxs.iter().map(|&i| pats[i].args()[a].clone()).collect();
+                sub_cols.push((sub_pats, sub_arity - 1 - a));
+            }
+            for (j, (rest_pats, rest_slot)) in cols.iter().enumerate() {
+                if j == k {
+                    continue;
+                }
+                let sub_pats: Vec<Pat> = idxs.iter().map(|&i| rest_pats[i].clone()).collect();
+                sub_cols.push((sub_pats, rest_slot + sub_arity));
+            }
+            // The expected type of this sub-case, as the typechecker computes
+            // it from the eliminator motive.
+            let con_args: Vec<Term> = (0..sub_arity)
+                .map(|a| Term::TVar((sub_arity - 1 - a) as i32))
+                .collect();
+            let sub_expected = Term::TApp(
+                Box::new(shift(sub_arity as i32, 0, &motive)),
+                Box::new(Term::TCon(head_dt, head.clone(), con_args)),
+            );
+            let sub_bodies: Vec<Box<Term>> = idxs.iter().map(|&i| bodies[i].clone()).collect();
+            let sub_body = self.compile_columns(sub_cols, &sub_bodies, &sub_expected)?;
+            cases.push(ElimCase {
+                con: head,
+                binders: sub_binders,
+                body: sub_body,
+                as_name: None,
+                record_bindings: None,
+            });
+        }
+
+        Ok(Box::new(Term::TElim(
+            Box::new(motive),
+            cases,
+            Box::new(Term::TVar(*slot as i32)),
+        )))
+    }
     fn token_pos(&self) -> (usize, usize) {
         let tok = &self.tokens[self.pos - 1];
         (tok.line, tok.col)
@@ -1554,21 +1926,93 @@ impl Parser {
     }
 
     fn find_constructor(&self, name: &str) -> Option<(Name, bool)> {
+        self.find_constructor_arity(name)
+            .map(|(dt, interval, _)| (dt, interval))
+    }
+
+    /// Like [`Self::find_constructor`], but also reports the constructor's
+    /// ordinary-argument count so pattern parsing can consume exactly that many
+    /// arguments. Path/square/cell constructors report `interval = true`.
+    fn find_constructor_arity(&self, name: &str) -> Option<(Name, bool, usize)> {
         for dt in self.datatypes.iter().rev() {
-            if dt.cons.iter().any(|c| c.name == name) {
-                return Some((dt.name.clone(), false));
+            if let Some(c) = dt.cons.iter().find(|c| c.name == name) {
+                return Some((dt.name.clone(), false, c.arity()));
             }
-            if dt.pcons.iter().any(|c| c.name == name) {
-                return Some((dt.name.clone(), true));
+            if let Some(c) = dt.pcons.iter().find(|c| c.name == name) {
+                return Some((dt.name.clone(), true, c.arity()));
             }
-            if dt.sqcons.iter().any(|c| c.name == name) {
-                return Some((dt.name.clone(), true)); // true = has interval binders
+            if let Some(c) = dt.sqcons.iter().find(|c| c.name == name) {
+                return Some((dt.name.clone(), true, c.arity()));
             }
-            if dt.cellcons.iter().any(|c| c.name == name) {
-                return Some((dt.name.clone(), true)); // true = has interval binders
+            if let Some(c) = dt.cellcons.iter().find(|c| c.name == name) {
+                return Some((dt.name.clone(), true, c.arity()));
             }
         }
         None
+    }
+
+    /// Early completeness check for a `match`: every constructor of the
+    /// scrutinee datatype must have a case. The scrutinee datatype is inferred
+    /// from the constructor heads; the check is skipped whenever that
+    /// inference is unreliable (unknown or conflicting heads, record patterns,
+    /// or an empty case list — the empty-type match). The typechecker's
+    /// `MissingCase` remains the soundness backstop, so this is purely a
+    /// friendlier, earlier error.
+    fn check_match_completeness(&self, cases: &[ElimCase]) -> Result<(), ParseError> {
+        if cases.is_empty()
+            || cases.iter().any(|c| c.record_bindings.is_some())
+            || cases.iter().any(|c| c.con.is_empty())
+        {
+            return Ok(());
+        }
+        // Infer the scrutinee datatype from the case heads.
+        let mut inferred: Option<Name> = None;
+        for case in cases {
+            match self.find_constructor(&case.con) {
+                Some((dt, _)) => {
+                    if let Some(prev) = &inferred {
+                        if *prev != dt {
+                            // Conflicting heads: let the typechecker decide.
+                            return Ok(());
+                        }
+                    } else {
+                        inferred = Some(dt);
+                    }
+                }
+                None => return Ok(()), // Unknown head: typechecker's problem.
+            }
+        }
+        let Some(dt_name) = inferred else {
+            return Ok(());
+        };
+        let dt = self
+            .datatypes
+            .iter()
+            .rev()
+            .find(|dt| dt.name == dt_name)
+            .ok_or_else(|| ParseError {
+                message: format!("unknown datatype '{}' in pattern match", dt_name),
+                line: 0,
+                col: 0,
+            })?;
+        let names: Vec<Name> = dt
+            .cons
+            .iter()
+            .map(|c| c.name.clone())
+            .chain(dt.pcons.iter().map(|c| c.name.clone()))
+            .chain(dt.sqcons.iter().map(|c| c.name.clone()))
+            .chain(dt.cellcons.iter().map(|c| c.name.clone()))
+            .collect();
+        for con in names {
+            if !cases.iter().any(|c| c.con == con) {
+                return Err(ParseError {
+                    message: format!("incomplete pattern match: missing case for '{}'", con),
+                    line: 0,
+                    col: 0,
+                });
+            }
+        }
+        Ok(())
     }
 
     fn is_square_constructor_case(&self, con_name: &str) -> bool {

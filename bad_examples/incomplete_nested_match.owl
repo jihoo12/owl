@@ -1,0 +1,12 @@
+-- Negative test: an open match must cover every constructor of the scrutinee
+-- datatype. `suc` has no case here. Must fail to parse.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def bad : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero => zero
+
+def main : Nat := bad (suc zero)

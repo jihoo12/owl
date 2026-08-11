@@ -987,6 +987,61 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn nested_patterns_example_checks() {
+        // Guard against regressions in the parser-side compilation of nested
+        // constructor patterns (`suc (suc m)`, `cons x (cons y zs)`, `as` and
+        // or-patterns combined with nesting). Deep nested-eliminator chains
+        // need a bigger stack than the default 2 MiB test-thread stack.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("stress_nested_patterns.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn nested patterns check thread");
+        handle
+            .join()
+            .expect("nested patterns check thread panicked")
+            .expect("examples/stress_nested_patterns.owl should typecheck");
+    }
+
+    #[test]
+    fn nested_patterns_reject_mixed_columns() {
+        // A variable pattern and a constructor pattern in the same column
+        // cannot be compiled into the kernel's first-matching-case eliminator
+        // (the variable arm would silently shadow the constructor arms).
+        let source = "inductive Nat where\n\
+             | zero : Nat\n\
+             | suc : Nat -> Nat\n\
+             def bad : Nat -> Nat := fun n =>\n\
+               match n return Nat with\n\
+               | zero        => zero\n\
+               | suc (suc m) => m\n\
+               | suc m       => m\n\
+             def main : Nat := bad (suc zero)";
+        let err = run_str(source).expect_err("mixed columns must be rejected");
+        assert!(
+            err.to_string()
+                .contains("mixed variable and constructor patterns")
+        );
+    }
+
+    #[test]
+    fn nested_patterns_reject_incomplete_match() {
+        // Phase 1.3 completeness check: an open match must cover every
+        // constructor of the scrutinee datatype.
+        let source = "inductive Nat where\n\
+             | zero : Nat\n\
+             | suc : Nat -> Nat\n\
+             def bad : Nat -> Nat := fun n =>\n\
+               match n return Nat with\n\
+               | zero => zero\n\
+             def main : Nat := bad (suc zero)";
+        let err = run_str(source).expect_err("incomplete matches must be rejected");
+        assert!(err.to_string().contains("incomplete pattern match"));
+    }
+
+    #[test]
     fn omega_demo_example_checks() {
         // Guard against regressions in `by omega`: definitional reflexivity
         // (unfolding `add` on constructor-headed arguments) and direct

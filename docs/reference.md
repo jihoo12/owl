@@ -988,6 +988,9 @@ match n return Nat with
   | suc m' => suc (suc m')
 ```
 
+A binder that names a constructor matches a literal constructor application —
+see [Nested Constructor Patterns](#nested-constructor-patterns) below.
+
 #### Wildcard Pattern
 
 A single underscore `_` as a binder discards the argument:
@@ -1018,6 +1021,17 @@ As-patterns can be combined with or-patterns:
 ```
 match n return Nat with
   | zero as x | suc m as x => x
+```
+
+As-patterns also combine with nested constructor patterns: the as-name binds
+the whole (outermost) constructor value, and every arm that merges into the
+same case must use the same as-name:
+
+```
+match n return Nat with
+  | zero            => zero
+  | suc (suc m) as k => k          -- k is the whole `suc (suc m)` value
+  | suc zero as k   => k
 ```
 
 #### Record Patterns
@@ -1053,6 +1067,92 @@ match n return Nat with
 
 The patterns must match at the same column (indentation). The body is shared;
 the binders from the last pattern are used.
+
+#### Nested Constructor Patterns
+
+A case binder that names a constructor is itself a pattern: it matches a
+literal constructor application, recursively. This lets you match values of
+a given *shape* — e.g. a Nat that is literally `2`, or a list whose tail is
+non-empty — without a helper function:
+
+```
+match n return Nat with
+  | zero             => zero
+  | suc (suc zero)   => suc zero   -- only matches n = 2
+  | suc (suc (suc m))=> m          -- only matches n >= 3
+  | suc zero         => zero       -- only matches n = 1
+```
+
+Nested patterns are written with the same application syntax as terms, so
+`cons x (cons y zs)` matches a list with at least two elements:
+
+```
+match l return List Nat with
+  | nil                => nil
+  | cons x (cons y zs) => cons x (cons y zs)
+  | cons x nil         => cons x nil
+```
+
+A **bare constructor name with no arguments** is a literal:
+`suc zero` matches exactly `suc (zero)`. Concretely, `suc zero` is `suc`
+applied to the constructor pattern `zero`.
+
+##### Constructor Names in Pattern Position
+
+An identifier in pattern position is read as a **constructor pattern** when
+it resolves to a constructor in scope, and as a **variable binder**
+otherwise. This is a behavior change: previously every identifier after a
+constructor head was a binder. Because no owl example or library binds a
+pattern variable that collides with a constructor name, existing files are
+unaffected; `suc zero` now really matches the literal `zero` instead of
+binding a variable named `zero`.
+
+Parenthesized constructor applications are read recursively:
+`cons (cons a b) xs` matches a list whose head is itself a list (the head
+element type must be a list type, `List (List A)`).
+
+##### Semantics
+
+Nested patterns are compiled by the **parser** into chains of nested
+eliminators; the kernel only ever sees flat `ElimCase`s. Arms that share a
+constructor head are merged into one case whose body is a nested eliminator
+over the refined argument column. Flat (all-variable) arms produce exactly
+the same eliminator cases as before, so existing definitions are unchanged.
+
+##### Restrictions
+
+- **Mixed columns are rejected.** A column may not mix a variable pattern
+  with a constructor pattern, because the variable arm would silently shadow
+  every constructor arm under the kernel's first-matching-case semantics:
+
+  ```
+  -- Rejected: `suc m` would shadow `suc (suc m)`
+  match n return Nat with
+    | zero        => zero
+    | suc (suc m) => m
+    | suc m       => m
+  ```
+
+- **Merged arms must agree on `as`.** Arms that merge into one case (same
+  constructor head) must all bind the same name with `as`, or the parse is
+  rejected.
+
+- **Open matches must be exhaustive.** When the scrutinee is an open variable,
+  every constructor of the scrutinee datatype must have a case, or the parse
+  fails with `incomplete pattern match: missing case for <con>`. Matches on a
+  closed constructor value may be partial (the kernel reduces them).
+
+- **Interval-binder constructors** (path/square/cell constructors of HITs)
+  cannot appear as nested patterns; their interval binders are always plain
+  variables.
+
+The typechecker remains the soundness backstop: nested eliminator chains are
+checked like any other eliminator, and a nested pattern whose slot's type is
+a different datatype is rejected there.
+
+See `examples/stress_nested_patterns.owl` for a stress test exercising nested
+`Nat`, list and `Tree` patterns, `as`-patterns combined with nesting, and
+or-patterns combined with nesting.
 
 ### Record Update
 

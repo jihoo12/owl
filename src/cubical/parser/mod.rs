@@ -12,6 +12,7 @@
 
 mod grammar;
 mod lexer;
+mod patterns;
 #[cfg(test)]
 mod tests;
 
