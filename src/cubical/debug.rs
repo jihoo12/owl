@@ -80,6 +80,11 @@ impl DebugScope {
         }
         DebugScope
     }
+
+    /// Construct without formatting (used when debug logging is inactive).
+    pub fn inactive() -> Self {
+        DebugScope
+    }
 }
 
 impl Drop for DebugScope {
@@ -103,6 +108,10 @@ impl Drop for DebugScope {
 #[macro_export]
 macro_rules! debug_scope {
     ($($arg:tt)*) => {
-        let _debug_scope = $crate::cubical::debug::DebugScope::new(&format!($($arg)*));
+        let _debug_scope = if $crate::cubical::debug::is_active() {
+            $crate::cubical::debug::DebugScope::new(&format!($($arg)*))
+        } else {
+            $crate::cubical::debug::DebugScope::inactive()
+        };
     };
 }
