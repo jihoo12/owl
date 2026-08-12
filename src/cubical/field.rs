@@ -34,7 +34,7 @@ use crate::cubical::ring::{
     trp,
 };
 use crate::cubical::syntax::{Datatype, Term, shift};
-use crate::cubical::typechecker::{Ctx, TypeError, check_dt};
+use crate::cubical::typechecker::{Ctx, TypeError, check_dt, infer_dt};
 
 /// Resolved references to the field operations and the ring machinery.  The
 /// ring laws are resolved by `Ring::resolve` on the bundled `Field` record
@@ -52,27 +52,50 @@ struct Field {
     nz_mul: Term,
 }
 
+/// The `inv` operation of a `Field A add mul inv zero one` record: it is a
+/// record *parameter*, extracted from the record type's parameter list.
+fn field_inv_from_type(dts: &[Datatype], ctx: &Ctx, field_term: &Term) -> Result<Term, TypeError> {
+    let inst_ty = infer_dt(dts, ctx, field_term)?;
+    match nbe_eval_ctx(ctx.len(), &inst_ty) {
+        Term::TData(dname, params) if dname == "Field" && params.len() == 6 => {
+            Ok(params[3].clone())
+        }
+        other => Err(TypeError::Other(format!(
+            "field: '{}' is not a Field record (its type is '{}')",
+            field_term, other,
+        ))),
+    }
+}
+
+/// Search the context for a `Field A add mul inv zero one` record whose
+/// carrier matches `carrier`, returning the `TVar` reference to it.
+fn find_field_instance(ctx: &Ctx, carrier: &Term) -> Option<Term> {
+    let car_nf = nbe_eval_ctx(ctx.len(), carrier);
+    for (i, (_name, ty)) in ctx.iter().enumerate() {
+        // Stored binder types are binder-relative; re-anchor as `lookup_ctx`
+        // does before comparing the carrier.
+        let ty_shifted = shift(i as i32 + 1, 0, ty);
+        if let Term::TData(dname, params) = nbe_eval_ctx(ctx.len(), &ty_shifted) {
+            if dname == "Field"
+                && params.len() == 6
+                && nbe_eval_ctx(ctx.len(), &params[0]) == car_nf
+            {
+                return Some(Term::TVar(i as i32));
+            }
+        }
+    }
+    None
+}
+
 impl Field {
-    fn resolve(ctx: &Ctx, field_term: Option<&Term>) -> Result<Field, TypeError> {
-        let field_term = field_term.ok_or_else(|| {
-            TypeError::Other(
-                "field: expected `by field with F` for a bundled `Field` record".into(),
-            )
-        })?;
-        let ring = Ring::resolve(ctx, Some(field_term))?;
-        let var = |name: &str| -> Result<Term, TypeError> {
-            let gi = ctx
-                .iter()
-                .position(|(n, _)| n == name)
-                .ok_or_else(|| TypeError::Other(format!("field: missing operation '{}'", name)))?;
-            Ok(Term::TVar(gi as i32))
-        };
+    fn resolve(dts: &[Datatype], ctx: &Ctx, field_term: &Term) -> Result<Field, TypeError> {
+        let ring = Ring::resolve(dts, ctx, Some(field_term))?;
         let proj = |field: &str| -> Result<Term, TypeError> {
             Ok(Term::TProj(field.to_string(), Box::new(field_term.clone())))
         };
         Ok(Field {
             ring,
-            inv: var("inv")?,
+            inv: field_inv_from_type(dts, ctx, field_term)?,
             inv_mul: proj("inv_mul")?,
             inv_one: proj("inv_one")?,
             inv_mul_dist: proj("inv_mul_dist")?,
@@ -856,7 +879,9 @@ fn frac_eq(
 ///
 /// - `ctx` is the full context the goal lives in (tactic binders innermost).
 /// - `goal_ty` is the normalized goal type.
-/// - `field_term` is the `F` in `field with F`.
+/// - `field_term` is the `F` in `field with F`; `None` triggers instance
+///   search: the context is scanned for a `Field` record whose carrier matches
+///   the goal, used as if the user had written `field with F`.
 pub fn prove(
     dts: &[Datatype],
     ctx: &Ctx,
@@ -865,13 +890,13 @@ pub fn prove(
     _num_intro: usize,
     field_term: Option<&Term>,
 ) -> Result<Term, TypeError> {
-    let f = Field::resolve(ctx, field_term)?;
-    let r = &f.ring;
-
-    let (u, v) = {
+    let (u, v, carrier) = {
         let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty);
         match goal_nf {
-            Term::TPath(_, u, v) => (*u, *v),
+            Term::TPath(a, u, v) => {
+                let a_nf = nbe_eval_ctx(ctx.len(), &a);
+                (*u, *v, a_nf)
+            }
             other => {
                 return Err(TypeError::Other(format!(
                     "field: goal is not a path (got '{}')",
@@ -880,6 +905,25 @@ pub fn prove(
             }
         }
     };
+
+    let field_term = match field_term {
+        some @ Some(_) => some.cloned(),
+        None => match find_field_instance(ctx, &carrier) {
+            Some(inst) => Some(inst),
+            None => {
+                return Err(TypeError::Other(format!(
+                    "field: no Field instance for '{}' in context; use `field with F`",
+                    carrier,
+                )));
+            }
+        },
+    };
+    let field_term = field_term.as_ref().ok_or_else(|| {
+        TypeError::Other("field: internal error — no field term after instance search".into())
+    })?;
+
+    let f = Field::resolve(dts, ctx, field_term)?;
+    let r = &f.ring;
 
     let rf0 = reify(&f, ctx, &u)?;
     let rf1 = reify(&f, ctx, &v)?;

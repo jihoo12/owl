@@ -1299,6 +1299,24 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn instance_search_example_checks() {
+        // Guards instance search: `by ring` / `by field` without an explicit
+        // `with C` / `with F` resolve the bundled record from the context by
+        // carrier, and the operations are extracted from the instance's type.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("instance_search.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn instance search check thread");
+        handle
+            .join()
+            .expect("instance search check thread panicked")
+            .expect("examples/instance_search.owl should typecheck");
+    }
+
+    #[test]
     fn stress_mul_algebra_example_checks() {
         // Full multiplicative algebra: assoc/comm/distributive laws over Nat
         // as cubical paths, ending with the double-double lemma. Guards the

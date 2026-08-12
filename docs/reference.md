@@ -1918,7 +1918,10 @@ Prove polynomial identities. Two modes:
   built by applying the ring laws.
 - **Structured** — over an abstract commutative ring, via `by ring with C`
   where `C` is a `CommRing` record bundling the operations and laws. See
-  [`ring with C`](#ring-with-c-abstract-commring) below.
+  [`ring with C`](#ring-with-c-abstract-commring) below. The `with C` may be
+  omitted: when the goal is not over `Nat`, `ring` searches the context for a
+  `CommRing`/`Field` instance whose carrier matches the goal (instance search,
+  below).
 
 The concrete mode resolves the following names from the context (they are
 provided by `lib/ring_laws.owl`, which is imported by the demos):
@@ -2029,6 +2032,30 @@ skipped, as in `ring`).
 Scope: no `neg`/`sub`; `inv` of a sum or numeral multiple (e.g.
 `inv (add a b)`) is an explicit error; the `by` block must sit at the root of
 the `def`. See `examples/field_demo.owl` and `lib/field_laws.owl`.
+
+#### Instance search (omitting `with C` / `with F`)
+
+`ring` and `field` accept the instance implicitly. When the goal's carrier is
+not `Nat`, `ring` scans the context for a bundled record whose carrier matches
+the goal — `CommRing A add mul zero one` or `Field A add mul inv zero one` —
+and uses it exactly as if the user had written `ring with C`. Likewise
+`field` scans for a `Field` instance. The operations are then extracted from
+the instance's *type* (the record parameters), so the goal's operation heads
+are recognized without relying on the parameter names.
+
+```
+def dist_abstract : forall (A : Type), forall (add : A -> A -> A),
+    forall (mul : A -> A -> A), forall (zero : A), forall (one : A),
+    forall (C : CommRing A add mul zero one),
+    forall (x : A), forall (y : A), forall (z : A),
+    Path A (mul (add x y) z) (add (mul x z) (mul y z)) :=
+  by intro A add mul zero one C x y z; ring    -- no `with C` needed
+```
+
+An explicit `ring with C` / `field with F` always wins; instance search only
+fires when the explicit form is absent and the concrete `Nat` solver does not
+apply. If no instance matches the carrier, the tactic reports an error and
+asks for `ring with C`. See `examples/instance_search.owl`.
 
 ### Example: Multi-Step Tactic Proof
 

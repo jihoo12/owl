@@ -26,7 +26,67 @@
 
 use crate::cubical::nbe::nbe_eval_ctx;
 use crate::cubical::syntax::{Datatype, Term, shift};
-use crate::cubical::typechecker::{Ctx, TypeError, check_dt};
+use crate::cubical::typechecker::{Ctx, TypeError, check_dt, infer_dt};
+
+/// Extract the ring operations `(add, mul, zero, one)` from a term whose type
+/// is a bundled algebra record applied to its parameters — `CommRing A add mul
+/// zero one` or `Field A add mul inv zero one`.  The operations are record
+/// *parameters*, so they are not `TProj`-able; they live as the record type's
+/// `TData` parameter list.  Resolving the operations from the instance's type
+/// (instead of by ctx name) makes `ring with C` robust to how the parameters
+/// are bound, and is what instance search relies on.
+pub(crate) fn ring_ops_from_type(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    inst_term: &Term,
+) -> Result<(Term, Term, Term, Term), TypeError> {
+    let inst_ty = infer_dt(dts, ctx, inst_term)?;
+    match nbe_eval_ctx(ctx.len(), &inst_ty) {
+        // CommRing A add mul zero one
+        Term::TData(dname, params) if dname == "CommRing" && params.len() == 5 => Ok((
+            params[1].clone(),
+            params[2].clone(),
+            params[3].clone(),
+            params[4].clone(),
+        )),
+        // Field A add mul inv zero one
+        Term::TData(dname, params) if dname == "Field" && params.len() == 6 => Ok((
+            params[1].clone(),
+            params[2].clone(),
+            params[4].clone(),
+            params[5].clone(),
+        )),
+        other => Err(TypeError::Other(format!(
+            "ring: '{}' is not a CommRing/Field record (its type is '{}')",
+            inst_term, other,
+        ))),
+    }
+}
+
+/// Search the context for a bundled algebra record instance whose carrier
+/// matches `carrier`: a context variable `C` whose type is
+/// `CommRing A ...` or `Field A ...` with `A` definitionally equal to
+/// `carrier`.  Returns the `TVar` reference to the instance.
+fn find_ring_instance(ctx: &Ctx, carrier: &Term) -> Option<Term> {
+    let car_nf = nbe_eval_ctx(ctx.len(), carrier);
+    for (i, (_name, ty)) in ctx.iter().enumerate() {
+        // Stored binder types are recorded relative to the binder's own frame
+        // (binder at index 0); re-anchor with the same shift `lookup_ctx`
+        // applies before comparing against the carrier.
+        let ty_shifted = shift(i as i32 + 1, 0, ty);
+        if let Term::TData(dname, params) = nbe_eval_ctx(ctx.len(), &ty_shifted) {
+            let arity = match dname.as_str() {
+                "CommRing" => 5,
+                "Field" => 6,
+                _ => continue,
+            };
+            if params.len() == arity && nbe_eval_ctx(ctx.len(), &params[0]) == car_nf {
+                return Some(Term::TVar(i as i32));
+            }
+        }
+    }
+    None
+}
 
 /// A path proof `p : Path Nat a b`, with its endpoints tracked so the
 /// proof term can be composed with `trans`/`sym`/congruence lemmas.
@@ -95,7 +155,11 @@ pub(crate) struct Ring {
 }
 
 impl Ring {
-    pub(crate) fn resolve(ctx: &Ctx, ring_term: Option<&Term>) -> Result<Ring, TypeError> {
+    pub(crate) fn resolve(
+        dts: &[Datatype],
+        ctx: &Ctx,
+        ring_term: Option<&Term>,
+    ) -> Result<Ring, TypeError> {
         let mode = if ring_term.is_some() {
             Mode::Structured
         } else {
@@ -119,10 +183,29 @@ impl Ring {
             Ok(Term::TProj(field.to_string(), Box::new(c.clone())))
         };
         // The ring operations. In `Concrete` mode these are the globals
-        // `add`/`mul`/`zero`/`one`; in `Structured` mode they are the
-        // `CommRing` record's parameters, bound in the context under the same
-        // names, which is what the goal's operation heads refer to.
-        let op = |name: &str| -> Result<Term, TypeError> { var(name) };
+        // `add`/`mul`/`zero`/`one`; in `Structured` mode they are extracted
+        // from the bundled record's type (`CommRing A add mul zero one` /
+        // `Field A add mul inv zero one`), so they work regardless of how the
+        // parameter names are bound in the context.
+        let op = |name: &str| -> Result<Term, TypeError> {
+            match mode {
+                Mode::Concrete => var(name),
+                Mode::Structured => {
+                    let c = ring_term.unwrap();
+                    let (add, mul, zero, one) = ring_ops_from_type(dts, ctx, c)?;
+                    match name {
+                        "add" => Ok(add),
+                        "mul" => Ok(mul),
+                        "zero" => Ok(zero),
+                        "one" => Ok(one),
+                        _ => Err(TypeError::Other(format!(
+                            "ring: unknown operation '{}'",
+                            name
+                        ))),
+                    }
+                }
+            }
+        };
         // The structural glue and law lemmas. In `Concrete` mode these are the
         // `_owl_*`/`add_*`/`mul_*` globals; in `Structured` mode they are
         // field projections of the bundled `CommRing` record.
@@ -1469,7 +1552,10 @@ fn ring_carrier(r: &Ring) -> &'static str {
 /// - `num_tactic` is the number of binders `ctx` has beyond the outer context.
 /// - `num_intro` is the number of names introduced by `intro`.
 /// - `ring_term` is the `C` in `ring with C`; `None` selects the concrete
-///   natural-number solver, `Some` the abstract `CommRing` solver.
+///   natural-number solver when the goal is over `Nat`, and otherwise triggers
+///   *instance search*: the context is scanned for a bundled `CommRing`/`Field`
+///   record whose carrier matches the goal, which is then used as if the user
+///   had written `ring with C`.
 pub fn prove(
     dts: &[Datatype],
     ctx: &Ctx,
@@ -1478,22 +1564,12 @@ pub fn prove(
     _num_intro: usize,
     ring_term: Option<&Term>,
 ) -> Result<Term, TypeError> {
-    let ring = Ring::resolve(ctx, ring_term)?;
-
-    let (u, v) = {
+    let (u, v, carrier) = {
         let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty);
         match goal_nf {
             Term::TPath(a, u, v) => {
-                if ring.mode == Mode::Concrete {
-                    let a_nf = nbe_eval_ctx(ctx.len(), &a);
-                    if !matches!(a_nf, Term::TData(ref d, ref p) if d == "Nat" && p.is_empty()) {
-                        return Err(TypeError::Other(format!(
-                            "ring: goal is not a path over Nat (got '{}')",
-                            a_nf,
-                        )));
-                    }
-                }
-                (*u, *v)
+                let a_nf = nbe_eval_ctx(ctx.len(), &a);
+                (*u, *v, a_nf)
             }
             other => {
                 return Err(TypeError::Other(format!(
@@ -1503,6 +1579,30 @@ pub fn prove(
             }
         }
     };
+
+    // Select the ring: an explicit `ring with C` wins; otherwise the goal
+    // carrier decides between the concrete Nat solver and instance search.
+    let ring_term = match ring_term {
+        some @ Some(_) => some.cloned(),
+        None => {
+            if matches!(carrier, Term::TData(ref d, ref p) if d == "Nat" && p.is_empty()) {
+                None
+            } else {
+                match find_ring_instance(ctx, &carrier) {
+                    Some(inst) => Some(inst),
+                    None => {
+                        return Err(TypeError::Other(format!(
+                            "ring: goal is over '{}' but no CommRing/Field instance \
+                             for it is in context; use `ring with C`",
+                            carrier,
+                        )));
+                    }
+                }
+            }
+        }
+    };
+
+    let ring = Ring::resolve(dts, ctx, ring_term.as_ref())?;
 
     let (pu, pfu) = decomp(&ring, &u)?;
     let (pv, pfv) = decomp(&ring, &v)?;
