@@ -458,6 +458,7 @@ fn apply_literal_inner(lit: &Literal, t: &Term) -> Term {
                         body: Box::new(go(&c.body, n, val)),
                         as_name: c.as_name.clone(),
                         record_bindings: c.record_bindings.clone(),
+                        refinements: c.refinements.clone(),
                     })
                     .collect(),
                 Box::new(go(scrut, n, val)),
@@ -525,6 +526,7 @@ fn shift_cases(cases: &[ElimCase], d: i32) -> Vec<ElimCase> {
             body: Box::new(shift(d, case.binders.len() as i32, &case.body)),
             as_name: case.as_name.clone(),
             record_bindings: case.record_bindings.clone(),
+            refinements: case.refinements.clone(),
         })
         .collect()
 }
@@ -1999,6 +2001,7 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                                 body: case.body.clone(),
                                 as_name: case.as_name.clone(),
                                 record_bindings: None,
+                                refinements: None,
                             });
                         } else {
                             buf.push(case.clone());
@@ -2215,38 +2218,93 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     Box::new(shift(1, 0, &face0_case)),
                     Box::new(shift(1, 0, &face1_case)),
                 );
-                SKIP_PLAM_ENDPT.with(|c| c.set(true));
-                check_dt(dts, &case_ctx, &case.body, &expected_body_ty)?;
-                SKIP_PLAM_ENDPT.with(|c| c.set(false));
+                if case.refinements.is_some() {
+                    // Refined nested-pattern HIT case. The parser compiled the
+                    // arm bodies into a nested `TElim` whose scrutinee is the
+                    // case's ordinary-argument binder: the case interval binder
+                    // sits at index 0 of `case_ctx`, so the elim's de Bruijn
+                    // indices line up with the runtime evaluation environment.
+                    // The parser cannot build the eliminator's motive itself —
+                    // its codomain is the *path type* at the refined
+                    // constructor, whose face endpoints come from the case
+                    // bodies of the face constructors — so rebuild the motive
+                    // from the expected body type computed above (which the
+                    // flat path already derives from `eval_elim_face`). The
+                    // typechecker then checks the rebuilt elim with the
+                    // standard `PLam` rule and SKIP_PLAM_ENDPT off, so every
+                    // leaf verifies that its own path endpoints agree with the
+                    // faces at that leaf — exactly the boundary coherence the
+                    // flat path checks by hand below.
+                    let (elim_cases, slot) = match case.body.as_ref() {
+                        Term::TElim(_, elim_cases, scrut) => match scrut.as_ref() {
+                            Term::TVar(slot) => (elim_cases.clone(), *slot),
+                            _ => {
+                                return Err(TypeError::Other(format!(
+                                    "refined HIT case '{}': nested eliminator has a non-variable scrutinee",
+                                    case.con
+                                )));
+                            }
+                        },
+                        _ => {
+                            return Err(TypeError::Other(format!(
+                                "refined HIT case '{}': expected a nested eliminator body, \
+                                 got a non-eliminator term",
+                                case.con
+                            )));
+                        }
+                    };
+                    let correct_motive = Term::TAbs(
+                        "z".to_string(),
+                        Box::new(subst(
+                            slot + 1,
+                            &Term::TVar(0),
+                            &shift(1, 0, &expected_body_ty),
+                        )),
+                    );
+                    let rebuilt = Term::TElim(
+                        Box::new(correct_motive),
+                        elim_cases,
+                        Box::new(Term::TVar(slot)),
+                    );
+                    check_dt(dts, &case_ctx, &rebuilt, &expected_body_ty)?;
+                } else {
+                    SKIP_PLAM_ENDPT.with(|c| c.set(true));
+                    check_dt(dts, &case_ctx, &case.body, &expected_body_ty)?;
+                    SKIP_PLAM_ENDPT.with(|c| c.set(false));
 
-                let body_at0 = match case.body.as_ref() {
-                    Term::PLam(_, inner) => {
-                        let reduced = reduce_pcon_endpoints_dt(
-                            dts,
-                            &apply_literal(&Literal::NegVar(0), inner),
-                        );
-                        nbe_eval(&shift(-1, 0, &reduced))
-                    }
-                    _ => {
-                        let papp = Term::PApp(case.body.clone(), Box::new(Term::TInterval(I::I0)));
-                        let reduced = reduce_pcon_endpoints_dt(dts, &papp);
-                        nbe_eval(&reduced)
-                    }
-                };
-                let body_at1 = match case.body.as_ref() {
-                    Term::PLam(_, inner) => {
-                        let reduced =
-                            reduce_pcon_endpoints_dt(dts, &apply_literal(&Literal::Pos(0), inner));
-                        nbe_eval(&shift(-1, 0, &reduced))
-                    }
-                    _ => {
-                        let papp = Term::PApp(case.body.clone(), Box::new(Term::TInterval(I::I1)));
-                        let reduced = reduce_pcon_endpoints_dt(dts, &papp);
-                        nbe_eval(&reduced)
-                    }
-                };
-                require_equal_endpt(&case_ctx, &shift(1, 0, &face0_case), &body_at0)?;
-                require_equal_endpt(&case_ctx, &shift(1, 0, &face1_case), &body_at1)?;
+                    let body_at0 = match case.body.as_ref() {
+                        Term::PLam(_, inner) => {
+                            let reduced = reduce_pcon_endpoints_dt(
+                                dts,
+                                &apply_literal(&Literal::NegVar(0), inner),
+                            );
+                            nbe_eval(&shift(-1, 0, &reduced))
+                        }
+                        _ => {
+                            let papp =
+                                Term::PApp(case.body.clone(), Box::new(Term::TInterval(I::I0)));
+                            let reduced = reduce_pcon_endpoints_dt(dts, &papp);
+                            nbe_eval(&reduced)
+                        }
+                    };
+                    let body_at1 = match case.body.as_ref() {
+                        Term::PLam(_, inner) => {
+                            let reduced = reduce_pcon_endpoints_dt(
+                                dts,
+                                &apply_literal(&Literal::Pos(0), inner),
+                            );
+                            nbe_eval(&shift(-1, 0, &reduced))
+                        }
+                        _ => {
+                            let papp =
+                                Term::PApp(case.body.clone(), Box::new(Term::TInterval(I::I1)));
+                            let reduced = reduce_pcon_endpoints_dt(dts, &papp);
+                            nbe_eval(&reduced)
+                        }
+                    };
+                    require_equal_endpt(&case_ctx, &shift(1, 0, &face0_case), &body_at0)?;
+                    require_equal_endpt(&case_ctx, &shift(1, 0, &face1_case), &body_at1)?;
+                }
             }
 
             // Check all square constructor cases.

@@ -1006,6 +1006,85 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn refined_hit_cases_example_checks() {
+        // Guard against regressions in refined (nested) constructor patterns
+        // on path-constructor HIT cases (`mer (suc m) i => ...`): the
+        // typechecker's per-leaf boundary coherence, the nested-eliminator
+        // compilation, and the NBE env layout (the case's interval binder is a
+        // phantom slot below the ordinary args). Deep nested-eliminator normal
+        // forms need a bigger stack than the default 2 MiB test-thread stack.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("refined_hit_cases.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn refined hit cases check thread");
+        handle
+            .join()
+            .expect("refined hit cases check thread panicked")
+            .expect("examples/refined_hit_cases.owl should typecheck");
+    }
+
+    #[test]
+    fn refined_pcon_arms_reject_incoherent_endpoints() {
+        // A refined pcon arm whose body is not endpoint-coherent must be
+        // rejected: the leaf body `<j> zero` violates the boundary at the
+        // constructor's faces (the refined binder `suc m` carries the
+        // constraint), so it cannot typecheck.
+        let source = "inductive Nat where\n\
+             | zero : Nat\n\
+             | suc : Nat -> Nat\n\
+             inductive SuspX where\n\
+             | ntr : Nat -> SuspX\n\
+             | sso : Nat -> SuspX\n\
+             | mer : Nat -> SuspX [ ntr mer_0 , sso mer_0 ]\n\
+             def bad : SuspX -> Nat :=\n\
+               fun s =>\n\
+               match s return Nat with\n\
+               | ntr n => n\n\
+               | sso n => n\n\
+               | mer zero i => <j> zero\n\
+               | mer (suc m) i => <j> zero\n\
+             def main : Nat := bad (mer (suc zero) @ i1)";
+        let err = run_str(source).expect_err("incoherent refined arm must be rejected");
+        assert!(err.to_string().contains("Type mismatch"));
+    }
+
+    #[test]
+    fn hit_constructor_endpoints_reduce_to_faces() {
+        // Square/cell/path constructors applied at concrete endpoints are
+        // definitionally their faces: `square @ i0 @ i1 = base` (face_j0 at
+        // the outer interval, applied to the second), and `cube3 @ i0 @ i1 @
+        // i0 = base` (the outermost face pair, then the remaining interval
+        // args applied outermost-first). This must hold in the NBE normal
+        // form, not just in the typechecker's endpoint checks.
+        let header = "inductive Cube where\n\
+             | base : Cube\n\
+             | line1 : Cube [ base , base ]\n\
+             | line2 : Cube [ base , base ]\n\
+             | square : Cube [[ base , base , line2 , line2 ]]\n\
+             | cube3 : Cube [[[ base , base , line2 , line2 , square , square ]]]\n";
+        let base = Term::TCon("Cube".to_string(), "base".to_string(), vec![]);
+        for combo in [
+            "square @ i0 @ i0",
+            "square @ i0 @ i1",
+            "square @ i1 @ i0",
+            "square @ i1 @ i1",
+            "cube3 @ i0 @ i0 @ i0",
+            "cube3 @ i1 @ i1 @ i1",
+            "cube3 @ i0 @ i1 @ i0",
+            "cube3 @ i0 @ i1 @ i1",
+            "cube3 @ i1 @ i0 @ i1",
+        ] {
+            let source = format!("{}def main : Cube := {}", header, combo);
+            let output =
+                run_str(&source).unwrap_or_else(|e| panic!("{} should evaluate: {e}", combo));
+            assert_eq!(output.value, base, "{} should reduce to base", combo);
+        }
+    }
+
+    #[test]
     fn nested_patterns_reject_mixed_columns() {
         // A variable pattern and a constructor pattern in the same column
         // cannot be compiled into the kernel's first-matching-case eliminator

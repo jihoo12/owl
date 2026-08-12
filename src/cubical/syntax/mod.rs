@@ -169,6 +169,26 @@ pub struct ElimCase {
     /// When set, `con` and `binders` may be empty/synthetic; the typechecker
     /// desugars this to a constructor pattern once the datatype is known.
     pub record_bindings: Option<Vec<(Name, Name)>>,
+    /// Nested-pattern refinement of a path/square/cell constructor case.
+    ///
+    /// When a HIT case head carries nested constructor patterns (e.g.
+    /// `merid (suc m) i => …`), the parser compiles the arm bodies into a
+    /// nested `TElim` chain whose scrutinee is the case's ordinary-argument
+    /// binder. The typechecker must then (a) check the body against a
+    /// *refined* expected type that does not push the case's interval binders
+    /// into the checking context (so the nested elim's de Bruijn indices match
+    /// the runtime evaluation environment), and (b) verify boundary coherence
+    /// by descending the nested elim and checking every leaf at each endpoint.
+    ///
+    /// The value is `Some(v)` for every refined HIT case; `v` has one entry per
+    /// ordinary argument of the case head and, for each argument carrying a
+    /// nested pattern, `Some(leaf_binder_names)` listing the leaf binders that
+    /// the nested elim introduces (innermost-last). Flat cases and ordinary
+    /// constructor cases leave this `None`. The parser emits the case body as
+    /// `PLam`-wrapped; the typechecker uses this marker to choose the refined
+    /// checking path, so a user-written `PLam` over an eliminator is never
+    /// mistaken for a compiler-generated refinement.
+    pub refinements: Option<Vec<Option<Vec<Name>>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -533,6 +553,7 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
                     body: b(shift(d, c + case.binders.len() as i32, &case.body)),
                     as_name: case.as_name.clone(),
                     record_bindings: case.record_bindings.clone(),
+                    refinements: case.refinements.clone(),
                 })
                 .collect(),
             b(shift(d, c, scrut)),
@@ -717,6 +738,7 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                         body: b(subst(j + n, &s1, &case.body)),
                         as_name: case.as_name.clone(),
                         record_bindings: case.record_bindings.clone(),
+                        refinements: case.refinements.clone(),
                     }
                 })
                 .collect(),

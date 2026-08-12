@@ -356,6 +356,7 @@ impl<'a> TacticEngine<'a> {
                                 body: Box::new(body),
                                 as_name: None,
                                 record_bindings: None,
+                                refinements: None,
                             }
                         })
                         .collect();

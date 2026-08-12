@@ -1538,6 +1538,7 @@ impl Parser {
             body: body_box,
             as_name,
             record_bindings: Some(bindings),
+            refinements: None,
         })
     }
 
@@ -1614,6 +1615,7 @@ impl Parser {
                 body: body_box.clone(),
                 as_name: as_name.clone(),
                 record_bindings: None,
+                refinements: None,
             });
         }
         Ok(cases)
@@ -1656,6 +1658,7 @@ impl Parser {
                     body: body_box.clone(),
                     as_name: arm.as_name.clone(),
                     record_bindings: None,
+                    refinements: None,
                 });
             }
         }
@@ -1701,13 +1704,38 @@ impl Parser {
                     Pat::Con { con, .. } => binders.push(con.clone()),
                 }
             }
-            let head_dt = self.nested_head_datatype(&head)?;
+            // A path constructor head (single interval, e.g. `merid`) may
+            // carry nested constructor patterns on its ordinary arguments;
+            // square/cell heads are not refined yet (their multi-interval
+            // leaf checking is future work).
+            let head_is_pcon = self.is_single_interval_path_con(&head);
+            let head_dt = self.nested_head_datatype(&head, head_is_pcon)?;
             // The expected type of this case, exactly as the typechecker
             // computes it: motive applied to the constructor with the case
             // binders as variables (shifted up when an as-binder sits at 0).
             let con_args: Vec<Term> = (0..arity)
                 .map(|k| Term::TVar((arity - 1 - k + extra_shift) as i32))
                 .collect();
+            // Refinement marker for HIT heads: one entry per ordinary
+            // argument (everything before the trailing interval binder),
+            // `Some(leaf_binders)` for a nested constructor slot.
+            let refinements = if head_is_pcon {
+                Some(
+                    args.iter()
+                        .take(args.len().saturating_sub(1))
+                        .map(|a| match a {
+                            Pat::Var(_) => None,
+                            Pat::Con { .. } => {
+                                let mut leaves = Vec::new();
+                                a.binders(&mut leaves);
+                                Some(leaves)
+                            }
+                        })
+                        .collect(),
+                )
+            } else {
+                None
+            };
             let case_expected = Term::TApp(
                 Box::new(shift((arity + extra_shift) as i32, 0, motive)),
                 Box::new(Term::TCon(head_dt, head.clone(), con_args)),
@@ -1727,25 +1755,45 @@ impl Parser {
                 body,
                 as_name,
                 record_bindings: None,
+                refinements,
             });
         }
         Ok(cases)
     }
 
+    /// Whether `con` names a single-interval path constructor (`pcon`), as
+    /// opposed to a square (`sqcon`, two intervals) or cell (`cellcon`, n
+    /// intervals) constructor.
+    fn is_single_interval_path_con(&self, con: &str) -> bool {
+        self.find_constructor(con)
+            .is_some_and(|(_, is_path)| is_path)
+            && !self.is_square_constructor_case(con)
+            && self.is_cell_constructor_case(con).is_none()
+    }
+
     /// Resolve a nested pattern's constructor to its datatype, rejecting
-    /// path/square/cell constructors (which carry interval binders the nested
-    /// machinery does not understand).
-    fn nested_head_datatype(&self, con: &str) -> Result<Name, ParseError> {
+    /// square/cell constructors and, for ordinary sub-patterns, path
+    /// constructors (which carry interval binders the nested machinery does
+    /// not understand). The head constructor of a HIT case arm may be a
+    /// single-interval path constructor when `allow_pcon` is set.
+    fn nested_head_datatype(&self, con: &str, allow_pcon: bool) -> Result<Name, ParseError> {
         match self.find_constructor(con) {
-            Some((_, true)) => Err(ParseError {
-                message: format!(
-                    "nested pattern constructor '{}' has interval binders; \
-                     nested patterns are only supported for ordinary constructors",
-                    con
-                ),
-                line: 0,
-                col: 0,
-            }),
+            Some((dt, true)) => {
+                if allow_pcon && self.is_single_interval_path_con(con) {
+                    Ok(dt)
+                } else {
+                    Err(ParseError {
+                        message: format!(
+                            "nested pattern constructor '{}' has interval binders; \
+                             nested patterns are only supported for ordinary constructors \
+                             (or a single-interval path constructor in the head of a HIT case)",
+                            con
+                        ),
+                        line: 0,
+                        col: 0,
+                    })
+                }
+            }
             Some((dt, false)) => Ok(dt),
             None => Err(ParseError {
                 message: format!("unknown constructor '{}' in nested pattern", con),
@@ -1824,7 +1872,7 @@ impl Parser {
                     Pat::Con { con, .. } => sub_binders.push(con.clone()),
                 }
             }
-            let head_dt = self.nested_head_datatype(&head)?;
+            let head_dt = self.nested_head_datatype(&head, false)?;
             // The sub-case's columns: its own arguments first, then the parent
             // head's remaining columns (their context indices shifted up by the
             // sub-case's binder count).
@@ -1857,6 +1905,7 @@ impl Parser {
                 body: sub_body,
                 as_name: None,
                 record_bindings: None,
+                refinements: None,
             });
         }
 

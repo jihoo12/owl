@@ -1,0 +1,71 @@
+-- refined_hit_cases.owl — Refined constructor patterns on higher-inductive
+-- cases.
+--
+-- A path constructor arm may refine its ordinary argument slots with nested
+-- constructor patterns (`mer (suc m) i => ...`). Refined arms are compiled
+-- into nested eliminators at parse time and typechecked with per-leaf
+-- boundary coherence; flat pcon arms stay byte-identical to before.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive SuspX where
+  | ntr : Nat -> SuspX
+  | sso : Nat -> SuspX
+  | mer : Nat -> SuspX [ ntr mer_0 , sso mer_0 ]
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Flat pcon arm referencing its ordinary argument
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- `<j> n` uses the flat binder `n` at both the i0 and i1 endpoint, so the
+-- endpoint coherence holds and the case body must resolve `n` correctly at
+-- eval time (the interval binder lives below it in the environment).
+def flatRefl : Nat :=
+  match (mer (suc zero) @ i1) return Nat with
+  | ntr n => n
+  | sso n => n
+  | mer n i => <j> n
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Refined pcon arms
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def refined : Nat :=
+  match (mer (suc zero) @ i1) return Nat with
+  | ntr n => n
+  | sso n => n
+  | mer zero i => <j> zero
+  | mer (suc m) i => <j> suc m
+
+def refined0 : Nat :=
+  match (mer zero @ i1) return Nat with
+  | ntr n => n
+  | sso n => n
+  | mer zero i => <j> zero
+  | mer (suc m) i => <j> suc m
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Recursive refined arm (the body re-enters the eliminator)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def step : SuspX -> SuspX :=
+  fun s =>
+  match s return SuspX with
+  | ntr n => ntr (suc n)
+  | sso n => sso (suc n)
+  | mer zero i => <j> mer (suc zero) @ j
+  | mer (suc m) i => <j> mer (suc (suc m)) @ j
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Verification: the compiled eliminators must compute the right values.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+def verify_flatRefl : Nat := flatRefl
+def verify_refined : Nat := refined
+def verify_refined0 : Nat := refined0
+def verify_step_1 : SuspX := step (mer (suc zero) @ i1)
+def verify_step_0 : SuspX := step (mer zero @ i1)
+
+def main : Nat := verify_refined

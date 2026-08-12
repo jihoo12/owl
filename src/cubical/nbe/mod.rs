@@ -461,6 +461,7 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                         body: Box::new(go(&c.body, target, val)),
                         as_name: c.as_name.clone(),
                         record_bindings: c.record_bindings.clone(),
+                        refinements: c.refinements.clone(),
                     })
                     .collect(),
                 Box::new(go(scrut, target, val)),
@@ -803,34 +804,188 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
                 .map(|a| eval_nbe(env, globals, global_offset, a))
                 .collect(),
         ),
-        Term::TPCon(data, con, args, r) => Value::VPCon(
-            data.clone(),
-            con.clone(),
-            args.iter()
-                .map(|a| eval_nbe(env, globals, global_offset, a))
-                .collect(),
-            Box::new(eval_nbe(env, globals, global_offset, r)),
-        ),
-        Term::TSqCon(data, con, args, r, s) => Value::VSqCon(
-            data.clone(),
-            con.clone(),
-            args.iter()
-                .map(|a| eval_nbe(env, globals, global_offset, a))
-                .collect(),
-            Box::new(eval_nbe(env, globals, global_offset, r)),
-            Box::new(eval_nbe(env, globals, global_offset, s)),
-        ),
-        Term::TCellCon(data, con, args, ivars) => Value::VCellCon(
-            data.clone(),
-            con.clone(),
-            args.iter()
-                .map(|a| eval_nbe(env, globals, global_offset, a))
-                .collect(),
-            ivars
+        Term::TPCon(data, con, args, r) => {
+            let r_v = eval_nbe(env, globals, global_offset, r);
+            // A path constructor applied at a concrete endpoint is
+            // definitionally its face (c args @ i0 = face0, c args @ i1 =
+            // face1), so reduce instead of leaving a stuck VPCon normal form.
+            // The face is substituted with the *original* args and evaluated
+            // in the *same* env (mirroring the typechecker's
+            // reduce_pcon_endpoints_dt), so open args keep their levels —
+            // only faces that reference the datatype's parameters (levels
+            // >= arity in the face scope, which have no counterpart in the
+            // eval env) are left neutral.
+            let mut reduced: Option<Term> = None;
+            if let Some(endpoint) = value_to_endpoint(&r_v)
+                && let Some(dt) = current_dts().iter().find(|dt| &dt.name == data)
+                && let Some(sig) = dt.pcons.iter().find(|c| &c.name == con)
+            {
+                let arity = args.len();
+                let face = if endpoint == I::I0 {
+                    &sig.face0
+                } else {
+                    &sig.face1
+                };
+                if max_var(face) < arity as i32 {
+                    let mut face_inst = face.clone();
+                    for k in (0..arity).rev() {
+                        face_inst = subst(k as i32, &args[arity - 1 - k], &face_inst);
+                    }
+                    reduced = Some(face_inst);
+                }
+            }
+            if let Some(face_inst) = reduced {
+                let face_val = eval_nbe(env, globals, global_offset, &face_inst);
+                record_step(
+                    "pcon-endpoint".into(),
+                    format!(
+                        "{} @ {}",
+                        con,
+                        if value_to_endpoint(&r_v) == Some(I::I0) {
+                            "0"
+                        } else {
+                            "1"
+                        }
+                    ),
+                    value_str(globals, global_offset, &face_val),
+                );
+                face_val
+            } else {
+                let args_v: Vec<Value> = args
+                    .iter()
+                    .map(|a| eval_nbe(env, globals, global_offset, a))
+                    .collect();
+                Value::VPCon(data.clone(), con.clone(), args_v, Box::new(r_v))
+            }
+        }
+        Term::TSqCon(data, con, args, r, s) => {
+            let r_v = eval_nbe(env, globals, global_offset, r);
+            let s_v = eval_nbe(env, globals, global_offset, s);
+            // Square-constructor boundary reduction, mirroring the
+            // typechecker's reduce_pcon_endpoints_dt:
+            //   sq @ 0 @ s = face_j0 @ s   (outer path at r=0 is face_j0)
+            //   sq @ 1 @ s = face_j1 @ s
+            //   sq @ r @ 0 = face_i0       (inner path at s=0 is a point)
+            //   sq @ r @ 1 = face_i1
+            // Faces are substituted with the original args and the resulting
+            // term is evaluated in the same env, so open args keep their
+            // levels; faces referencing the datatype's parameters (levels
+            // >= arity in the face scope) are left neutral.
+            let mut reduced: Option<Term> = None;
+            if let Some(dt) = current_dts().iter().find(|dt| &dt.name == data)
+                && let Some(sig) = dt.sqcons.iter().find(|c| &c.name == con)
+            {
+                let arity = args.len();
+                if [&sig.face_i0, &sig.face_i1, &sig.face_j0, &sig.face_j1]
+                    .iter()
+                    .all(|f| max_var(f) < arity as i32)
+                {
+                    let subst_args = |face: &Term| {
+                        let mut t = face.clone();
+                        for k in (0..arity).rev() {
+                            t = subst(k as i32, &args[arity - 1 - k], &t);
+                        }
+                        t
+                    };
+                    if let Some(endpoint) = value_to_endpoint(&r_v) {
+                        let face = if endpoint == I::I0 {
+                            &sig.face_j0
+                        } else {
+                            &sig.face_j1
+                        };
+                        let face_inst = subst_args(face);
+                        reduced = Some(Term::PApp(Box::new(face_inst), s.clone()));
+                    } else if let Some(endpoint) = value_to_endpoint(&s_v) {
+                        let face = if endpoint == I::I0 {
+                            &sig.face_i0
+                        } else {
+                            &sig.face_i1
+                        };
+                        reduced = Some(subst_args(face));
+                    }
+                }
+            }
+            if let Some(reduced) = reduced {
+                let face_val = eval_nbe(env, globals, global_offset, &reduced);
+                record_step(
+                    "sqcon-endpoint".into(),
+                    format!("{} @ ...", con),
+                    value_str(globals, global_offset, &face_val),
+                );
+                face_val
+            } else {
+                Value::VSqCon(
+                    data.clone(),
+                    con.clone(),
+                    args.iter()
+                        .map(|a| eval_nbe(env, globals, global_offset, a))
+                        .collect(),
+                    Box::new(r_v),
+                    Box::new(s_v),
+                )
+            }
+        }
+        Term::TCellCon(data, con, args, ivars) => {
+            let ivars_v: Vec<Value> = ivars
                 .iter()
                 .map(|v| eval_nbe(env, globals, global_offset, v))
-                .collect(),
-        ),
+                .collect();
+            // Cell-constructor boundary reduction, mirroring the typechecker's
+            // reduce_pcon_endpoints_dt. When the *outermost* interval arg is a
+            // concrete endpoint, the outermost face pair is the value at that
+            // endpoint:
+            //   cell @ 0 @ r2 .. = faces[2n-2] @ r2 ..   (an (n-1)-cell)
+            //   cell @ 1 @ r2 .. = faces[2n-1] @ r2 ..
+            // and the remaining interval args are applied outermost-first
+            // (r2, r3, ...). Faces are substituted with the original args and
+            // the resulting PApp chain is evaluated in the same env, so open
+            // args keep their levels; faces referencing the datatype's
+            // parameters (levels >= arity in the face scope) are left neutral.
+            let mut reduced: Option<Term> = None;
+            if !ivars.is_empty()
+                && let Some(dt) = current_dts().iter().find(|dt| &dt.name == data)
+                && let Some(sig) = dt.cellcons.iter().find(|c| &c.name == con)
+                && ivars.len() == sig.dimension()
+            {
+                let arity = args.len();
+                let dim = sig.dimension();
+                if sig.faces.iter().all(|f| max_var(f) < arity as i32)
+                    && let Some(endpoint) = value_to_endpoint(&ivars_v[0])
+                {
+                    let face = if endpoint == I::I0 {
+                        &sig.faces[2 * dim - 2]
+                    } else {
+                        &sig.faces[2 * dim - 1]
+                    };
+                    let mut t = face.clone();
+                    for k in (0..arity).rev() {
+                        t = subst(k as i32, &args[arity - 1 - k], &t);
+                    }
+                    for iv in &ivars[1..] {
+                        t = Term::PApp(Box::new(t), Box::new(iv.clone()));
+                    }
+                    reduced = Some(t);
+                }
+            }
+            if let Some(reduced) = reduced {
+                let face_val = eval_nbe(env, globals, global_offset, &reduced);
+                record_step(
+                    "cellcon-endpoint".into(),
+                    format!("{} @ ...", con),
+                    value_str(globals, global_offset, &face_val),
+                );
+                face_val
+            } else {
+                Value::VCellCon(
+                    data.clone(),
+                    con.clone(),
+                    args.iter()
+                        .map(|a| eval_nbe(env, globals, global_offset, a))
+                        .collect(),
+                    ivars_v,
+                )
+            }
+        }
         Term::TElim(motive, cases, scrut) => do_elim(
             eval_nbe(env, globals, global_offset, motive),
             cases,
@@ -887,6 +1042,80 @@ pub fn do_apply(globals: &Globals, global_offset: usize, f: Value, a: Value) -> 
         Value::VNeutral(n) => Value::VNeutral(Neutral::NApp(Box::new(n), Box::new(a))),
         other => Value::VApp(Box::new(other), Box::new(a)),
     }
+}
+
+/// Reduce a higher-constructor value `c args` applied at a concrete interval
+/// endpoint to its face:
+///   - path constructor:     `c args @ i0 = face0`,     `c args @ i1 = face1`
+///   - square constructor:   the applied interval is the *outer* (r) one, so
+///     `sq args @ i0 = face_j0` and `sq args @ i1 = face_j1` (paths in the
+///     second interval), matching the do_elim/datatype typing
+///     `PathP (<r> PathP (<s> A) face_i0 face_i1) face_j0 face_j1`
+///   - n-dimensional cell:   the applied interval is the outermost one, so
+///     `cell args @ i0 = faces[2n-2]` and `cell args @ i1 = faces[2n-1]`
+///     ((n-1)-cells), the outermost face pair.
+/// Returns `None` when the constructor is not a known higher constructor of
+/// the datatype, `endpoint` is not a concrete endpoint, or the reduction
+/// would be unsound here: the face is only re-evaluated in an empty scope,
+/// which is faithful only when the ordinary args are closed (an open argument
+/// keeps its absolute `NVar` level through the quote/eval round-trip, but
+/// comparison contexts derive levels from their own surrounding term, so an
+/// early reduction would misalign free-variable levels), and only when the
+/// face does not reference the datatype's parameters (those are substituted
+/// per-use by the typechecker, not at evaluation time).
+fn reduce_con_at_endpoint(
+    globals: &Globals,
+    global_offset: usize,
+    data: &Name,
+    con: &Name,
+    args: &[Value],
+    endpoint: &I,
+) -> Option<Value> {
+    let dts = current_dts();
+    let dt = dts.iter().find(|dt| &dt.name == data)?;
+    let arity = args.len();
+    let face: &Term = if let Some(sig) = dt.pcons.iter().find(|c| &c.name == con) {
+        match endpoint {
+            I::I0 => &sig.face0,
+            I::I1 => &sig.face1,
+            _ => return None,
+        }
+    } else if let Some(sig) = dt.sqcons.iter().find(|c| &c.name == con) {
+        match endpoint {
+            I::I0 => &sig.face_j0,
+            I::I1 => &sig.face_j1,
+            _ => return None,
+        }
+    } else if let Some(sig) = dt.cellcons.iter().find(|c| &c.name == con) {
+        let dim = sig.dimension();
+        match endpoint {
+            I::I0 => &sig.faces[2 * dim - 2],
+            I::I1 => &sig.faces[2 * dim - 1],
+            _ => return None,
+        }
+    } else {
+        return None;
+    };
+    if max_var(face) >= arity as i32 {
+        return None;
+    }
+    let arg_terms: Vec<Term> = args
+        .iter()
+        .map(|a| quote(0, globals, global_offset, a.clone()))
+        .collect();
+    if arg_terms.iter().any(|t| max_var(t) >= 0) {
+        return None;
+    }
+    let mut face_inst = face.clone();
+    for k in (0..arity).rev() {
+        face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
+    }
+    Some(eval_nbe(
+        &Scope::empty(),
+        &Rc::new(RefCell::new(Vec::new())),
+        0,
+        &face_inst,
+    ))
 }
 
 pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> Value {
@@ -1114,11 +1343,37 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
                         I::I1 => &sig.faces[2 * dim - 1],
                         _ => unreachable!(),
                     };
+                    // Guarded like reduce_con_at_endpoint: reduce only when the
+                    // face does not reference the datatype's parameters and the
+                    // args are closed (the face is re-evaluated in an empty
+                    // scope, which is only faithful for closed args).
+                    if max_var(face) >= arity as i32 {
+                        return Value::VPApp(
+                            Box::new(Value::VCellCon(
+                                data.clone(),
+                                con.clone(),
+                                args.clone(),
+                                ivars.clone(),
+                            )),
+                            Box::new(r),
+                        );
+                    }
                     let mut face_inst = face.clone();
                     let arg_terms: Vec<Term> = args
                         .iter()
                         .map(|a| quote(0, globals, global_offset, a.clone()))
                         .collect();
+                    if arg_terms.iter().any(|t| max_var(t) >= 0) {
+                        return Value::VPApp(
+                            Box::new(Value::VCellCon(
+                                data.clone(),
+                                con.clone(),
+                                args.clone(),
+                                ivars.clone(),
+                            )),
+                            Box::new(r),
+                        );
+                    }
                     for k in (0..arity).rev() {
                         face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
                     }
@@ -1133,8 +1388,9 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
                         ),
                         value_str(globals, global_offset, &face_val),
                     );
-                    // Apply the face value to the remaining (n-1) interval args.
-                    for iv in ivars.iter().rev().skip(1) {
+                    // Apply the face value to the remaining (n-1) interval args,
+                    // outermost-first (matching the typechecker and do_elim).
+                    for iv in ivars.iter().skip(1) {
                         face_val = do_papp(globals, global_offset, face_val, iv.clone());
                     }
                     return face_val;
@@ -1162,34 +1418,62 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
                 result
             }
         }
-        // Zero-arg path constructor: VCon(d, c, []) applied to interval endpoint.
-        // A zero-arg path constructor like `line2` has type PathP, so PApp(line2, r)
-        // should reduce via the PConSig faces.
-        Value::VCon(ref data, ref con, ref args) if args.is_empty() => {
-            if let Some(endpoint) = value_to_endpoint(&r) {
-                let dts = current_dts();
-                if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
-                    && let Some(sig) = dt.pcons.iter().find(|c| &c.name == con)
-                {
-                    let face = match endpoint {
-                        I::I0 => &sig.face0,
-                        I::I1 => &sig.face1,
-                        _ => unreachable!(),
-                    };
-                    let face_val =
-                        eval_nbe(&Scope::empty(), &Rc::new(RefCell::new(Vec::new())), 0, face);
-                    record_step(
-                        "pcon-zero-arg-boundary".into(),
-                        format!("{} @ {}", con, if endpoint == I::I0 { "0" } else { "1" }),
-                        value_str(globals, global_offset, &face_val),
-                    );
-                    return face_val;
-                }
+        // Path constructor value applied at a concrete endpoint: `(c args @ r) @ s`.
+        // The value's own interval `r` has already been consumed to produce a
+        // point; an over-application reduces best-effort at the new endpoint's
+        // face, mirroring the sqcon/cellcon boundary branches. Non-endpoint
+        // applications stay neutral.
+        Value::VPCon(ref data, ref con, ref args, ref _r) => {
+            if let Some(endpoint) = value_to_endpoint(&r)
+                && let Some(face_val) =
+                    reduce_con_at_endpoint(globals, global_offset, data, con, args, &endpoint)
+            {
+                record_step(
+                    "pcon-boundary".into(),
+                    format!(
+                        "{} @ _ @ {}",
+                        con,
+                        if endpoint == I::I0 { "0" } else { "1" }
+                    ),
+                    value_str(globals, global_offset, &face_val),
+                );
+                face_val
+            } else {
+                Value::VPApp(
+                    Box::new(Value::VPCon(
+                        data.clone(),
+                        con.clone(),
+                        args.clone(),
+                        _r.clone(),
+                    )),
+                    Box::new(r),
+                )
             }
-            Value::VPApp(
-                Box::new(Value::VCon(data.clone(), con.clone(), args.clone())),
-                Box::new(r),
-            )
+        }
+        // Higher-constructor `VCon(d, c, args)` (the constructor applied to its
+        // ordinary args but not yet to its interval(s)) applied at an interval
+        // endpoint: reduce to the constructor's face at that endpoint. Covers
+        // zero-arg path constructors like `line2 @ i0`, non-empty-arity ones
+        // like `mer 0 @ i1`, and bare square/cell constructor references in
+        // face terms (`square @ i0` is `face_j0`, a path; `cube3 @ i0` is
+        // `faces[2n-2]`, an (n-1)-cell), all applied via a plain PApp.
+        Value::VCon(ref data, ref con, ref args) => {
+            if let Some(endpoint) = value_to_endpoint(&r)
+                && let Some(face_val) =
+                    reduce_con_at_endpoint(globals, global_offset, data, con, args, &endpoint)
+            {
+                record_step(
+                    "con-boundary".into(),
+                    format!("{} @ {}", con, if endpoint == I::I0 { "0" } else { "1" }),
+                    value_str(globals, global_offset, &face_val),
+                );
+                face_val
+            } else {
+                Value::VPApp(
+                    Box::new(Value::VCon(data.clone(), con.clone(), args.clone())),
+                    Box::new(r),
+                )
+            }
         }
         // VGlueElem endpoint reduction:
         //   VGlueElem(phi, t, a) @ 0 = a       (the base A-element)
@@ -1344,7 +1628,16 @@ pub fn do_elim(
         Value::VPCon(ref data, ref con, ref args, ref r) => {
             match cases.iter().find(|case| case.con == *con) {
                 Some(case) => {
-                    let env2 = env.chain(args.iter().rev().cloned().collect());
+                    // The case body is laid out with the case's interval binder
+                    // at the base of the environment (a phantom slot below the
+                    // ordinary arguments), matching `quote_cases` and the
+                    // typechecker's case context. Push the interval value
+                    // there; the body's own path binders are applied on top by
+                    // `do_papp` below.
+                    let mut env2_values: Vec<Value> = Vec::with_capacity(args.len() + 1);
+                    env2_values.push((**r).clone());
+                    env2_values.extend(args.iter().rev().cloned());
+                    let env2 = env.chain(env2_values);
                     let body = eval_nbe(&env2, globals, global_offset, &case.body);
                     let result = do_papp(globals, global_offset, body, (**r).clone());
                     record_step(
@@ -1373,7 +1666,15 @@ pub fn do_elim(
         Value::VSqCon(ref data, ref con, ref args, ref r, ref s) => {
             match cases.iter().find(|case| case.con == *con) {
                 Some(case) => {
-                    let env2 = env.chain(args.iter().rev().cloned().collect());
+                    // Interval binders sit below the ordinary args in the case
+                    // body's environment layout (see the VPCon comment above);
+                    // the sqcon's intervals fill the two phantom slots, innermost
+                    // (the case's second interval binder) first.
+                    let mut env2_values: Vec<Value> = Vec::with_capacity(args.len() + 2);
+                    env2_values.push((**s).clone());
+                    env2_values.push((**r).clone());
+                    env2_values.extend(args.iter().rev().cloned());
+                    let env2 = env.chain(env2_values);
                     let body = eval_nbe(&env2, globals, global_offset, &case.body);
                     // Body is PLam-shaped with 2 interval binders: apply to both r and s.
                     let body_at_r = do_papp(globals, global_offset, body, (**r).clone());
@@ -1405,7 +1706,15 @@ pub fn do_elim(
         Value::VCellCon(ref data, ref con, ref args, ref ivars) => {
             match cases.iter().find(|case| case.con == *con) {
                 Some(case) => {
-                    let env2 = env.chain(args.iter().rev().cloned().collect());
+                    // Same convention as VPCon/VSqCon: the case body's
+                    // environment has one phantom slot per interval binder at
+                    // the base, below the ordinary args. The cell's interval
+                    // values fill them innermost-first (the case context
+                    // extends interval binders outermost-first).
+                    let mut env2_values: Vec<Value> = Vec::with_capacity(args.len() + ivars.len());
+                    env2_values.extend(ivars.iter().rev().cloned());
+                    env2_values.extend(args.iter().rev().cloned());
+                    let env2 = env.chain(env2_values);
                     let body = eval_nbe(&env2, globals, global_offset, &case.body);
                     // Apply body to all interval args (innermost first).
                     let mut result = body;
@@ -5028,6 +5337,7 @@ fn quote_case_body(
                     )),
                     as_name: case.as_name.clone(),
                     record_bindings: case.record_bindings.clone(),
+                    refinements: case.refinements.clone(),
                 });
             }
             Term::TElim(
@@ -5125,6 +5435,7 @@ fn quote_cases(
                 )),
                 as_name: case.as_name,
                 record_bindings: case.record_bindings,
+                refinements: case.refinements.clone(),
             }
         })
         .collect()

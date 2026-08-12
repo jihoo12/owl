@@ -647,6 +647,23 @@ inductive Susp (A : U0) where
 `merid` is a path constructor connecting `north` to `south` for each
 element `a : A`.
 
+##### Endpoint Application
+
+Applying a higher constructor at a **concrete endpoint** reduces (definitionally)
+to the corresponding face, evaluated at the constructor's ordinary arguments.
+The same boundary reduction applies to square and cell constructors — see
+[Path Application on Square Constructors](#path-application-on-square-constructors)
+and the cell-constructor section below:
+
+```
+mer zero @ i0  =  ntr zero      -- face0 instantiated at the argument
+mer zero @ i1  =  sso zero      -- face1 instantiated at the argument
+```
+
+Applications at open interval variables (e.g. `mer n @ i` inside a case body)
+reduce when the endpoint is concrete; a path constructor applied at an *open*
+interval variable stays neutral (unreduced).
+
 #### Square Constructors (2D HIT Cells)
 
 Square constructors extend path constructors with **two-dimensional cells**.
@@ -694,11 +711,15 @@ square @ r @ s     -- apply square at interval points r and s
 At concrete endpoints:
 
 ```
-square @ i0 @ i0  =  base     -- face_i0 at s=0
-square @ i0 @ i1  =  base     -- face_i0 at s=1
-square @ i1 @ i0  =  base     -- face_i1 at s=0
-square @ i1 @ i1  =  base     -- face_i1 at s=1
+square @ i0 @ i0  =  base     -- face_j0 (the r=0 boundary path) at s=0
+square @ i0 @ i1  =  base     -- face_j0 at s=1
+square @ i1 @ i0  =  base     -- face_j1 (the r=1 boundary path) at s=0
+square @ i1 @ i1  =  base     -- face_j1 at s=1
 ```
+
+Equivalently, the reduction can be read on the inner interval: applying at
+`i0`/`i1` for the *second* interval yields the point faces
+`face_i0`/`face_i1` directly (independent of the first interval).
 
 ##### Elimination of Square Constructors
 
@@ -1144,7 +1165,9 @@ the same eliminator cases as before, so existing definitions are unchanged.
 
 - **Interval-binder constructors** (path/square/cell constructors of HITs)
   cannot appear as nested patterns; their interval binders are always plain
-  variables.
+  variables. The **ordinary arguments** of a single-interval path constructor
+  *can* be refined with nested patterns — see
+  [Refined HIT-Case Patterns](#refined-hit-case-patterns) below.
 
 The typechecker remains the soundness backstop: nested eliminator chains are
 checked like any other eliminator, and a nested pattern whose slot's type is
@@ -1153,6 +1176,40 @@ a different datatype is rejected there.
 See `examples/stress_nested_patterns.owl` for a stress test exercising nested
 `Nat`, list and `Tree` patterns, `as`-patterns combined with nesting, and
 or-patterns combined with nesting.
+
+#### Refined HIT-Case Patterns
+
+A path-constructor case of a higher-inductive type can refine its **ordinary
+arguments** with nested constructor patterns, just like an ordinary
+constructor case. The interval binder stays a plain variable:
+
+```
+inductive SuspX where
+  | ntr : Nat -> SuspX
+  | sso : Nat -> SuspX
+  | mer : Nat -> SuspX [ ntr mer_0 , sso mer_0 ]
+
+def refined : Nat :=
+  match (mer (suc zero) @ i1) return Nat with
+  | ntr n            => n
+  | sso n            => n
+  | mer zero i       => <j> zero       -- matches only when the Nat is 0
+  | mer (suc m) i    => <j> suc m      -- matches only when the Nat is > 0
+```
+
+Each refined arm's body is a path term (`<j> …`) whose endpoint coherence is
+checked **per leaf**: the body's boundaries must agree with the constructor's
+faces instantiated at that leaf's refined argument (`suc m` in the example).
+An incoherent leaf is rejected (e.g. `<j> zero` on a `mer (suc m)` arm is a
+`Type mismatch`). Arms are compiled by the parser into the same nested-elim
+chains as ordinary nested patterns; flat (all-variable) path-constructor arms
+are unchanged.
+
+Refinement applies to **single-interval** path constructors. Square and cell
+constructor heads keep plain-variable binders.
+
+See `examples/refined_hit_cases.owl` for a stress test covering a flat arm
+that references its own binder, refined arms, and a recursive refined arm.
 
 ### Record Update
 
