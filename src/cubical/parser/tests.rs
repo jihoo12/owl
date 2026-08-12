@@ -25,6 +25,33 @@ fn parses_dependent_pi() {
 }
 
 #[test]
+fn parses_forall_after_arrow() {
+    // `A -> forall (x : B), C -> D` parses as `A -> (forall (x : B), (C -> D))`
+    let term = parse_term("U0 -> forall (x : U1), U1 -> U0").unwrap();
+    match term {
+        Term::TPi(dom_b, dom, cod) => {
+            assert_eq!(dom_b, "_");
+            assert_eq!(*dom, Term::TUniv(0));
+            match *cod {
+                Term::TPi(x, bx, body) => {
+                    assert_eq!(x, "x");
+                    assert_eq!(*bx, Term::TUniv(1));
+                    match *body {
+                        Term::TPi(_, bd, b) => {
+                            assert_eq!(*bd, Term::TUniv(1));
+                            assert_eq!(*b, Term::TUniv(0));
+                        }
+                        _ => panic!("expected inner Pi, got {:?}", body),
+                    }
+                }
+                _ => panic!("expected dependent Pi codomain, got {:?}", cod),
+            }
+        }
+        _ => panic!("expected Pi, got {:?}", term),
+    }
+}
+
+#[test]
 fn parses_path_lambda() {
     assert_eq!(
         parse_term("<i> i0").unwrap(),
@@ -48,9 +75,45 @@ fn parses_import_declaration() {
     let decls = parse_program("import \"foo.owl\"").unwrap();
     assert_eq!(decls.len(), 1);
     match &decls[0] {
-        Decl::Import { path } => assert_eq!(path, "foo.owl"),
+        Decl::Import { path, alias } => {
+            assert_eq!(path, "foo.owl");
+            assert_eq!(alias, &None);
+        }
         _ => panic!("expected import declaration"),
     }
+}
+
+#[test]
+fn parses_aliased_import_declaration() {
+    let decls = parse_program("import \"foo.owl\" as Foo").unwrap();
+    assert_eq!(decls.len(), 1);
+    match &decls[0] {
+        Decl::Import { path, alias } => {
+            assert_eq!(path, "foo.owl");
+            assert_eq!(alias, &Some("Foo".to_string()));
+        }
+        _ => panic!("expected import declaration"),
+    }
+}
+
+#[test]
+fn parses_module_declaration() {
+    let decls = parse_program(
+        "module M where\n\
+         def a : U0 := U0\n\
+         end",
+    )
+    .unwrap();
+    assert_eq!(decls.len(), 3);
+    match &decls[0] {
+        Decl::Module { name } => assert_eq!(name, "M"),
+        _ => panic!("expected module declaration"),
+    }
+    match &decls[1] {
+        Decl::Def { name, .. } => assert_eq!(name, "M.a"),
+        _ => panic!("expected def inside module"),
+    }
+    assert_eq!(decls[2], Decl::ModuleEnd);
 }
 
 #[test]

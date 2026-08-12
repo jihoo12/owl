@@ -119,6 +119,7 @@ fn run_source(root_path: &Path, source: &str) -> Result<RunOutput, RunError> {
         &mut loaded,
         &mut HashSet::new(),
         &mut last_def,
+        None,
     )?;
 
     // Prefer `main` over the last definition when both exist.
@@ -159,6 +160,7 @@ fn check_source(root_path: &Path, source: &str) -> Result<(), RunError> {
         &mut loaded,
         &mut HashSet::new(),
         &mut last_def,
+        None,
     )
 }
 
@@ -179,11 +181,12 @@ fn process_file_source(
     source: &str,
     import_base: &Path,
     env: &mut Env,
-    loaded: &mut HashSet<PathBuf>,
-    loading: &mut HashSet<PathBuf>,
+    loaded: &mut HashSet<(PathBuf, String)>,
+    loading: &mut HashSet<(PathBuf, String)>,
     last_def: &mut Option<RunOutput>,
+    forced_prefix: Option<&str>,
 ) -> Result<(), RunError> {
-    let mut parser = ProgramParser::new(source)?;
+    let mut parser = ProgramParser::new_with_prefix(source, forced_prefix)?;
     crate::cubical::nbe::clear_nbe_cache();
     // Accumulate name positions across the whole program so globals from
     // earlier declarations (which may only surface as inferred types) resolve
@@ -194,9 +197,12 @@ fn process_file_source(
         crate::cubical::typechecker::errors::set_decl_name_positions(decl_positions.clone());
         let result: Result<(), RunError> = (|| {
             match decl {
-                Decl::Import { path } => {
-                    load_import(&path, env, loaded, loading, import_base, last_def)?;
+                Decl::Import { path, alias } => {
+                    load_import(&path, &alias, env, loaded, loading, import_base, last_def)?;
                     parser.sync_from_env(env);
+                }
+                Decl::Module { .. } | Decl::ModuleEnd => {
+                    // The parser already updated its module scope.
                 }
                 Decl::Data(dt) => {
                     process_data(&dt, env)?;
@@ -233,21 +239,28 @@ fn process_file_source(
     Ok(())
 }
 
+/// The dedup key for an imported file: its canonical path plus the forced
+/// module prefix (an aliased file may be imported under several aliases, in
+/// which case each alias is a distinct namespace).
+type LoadedKey = (PathBuf, String);
+
 fn load_import(
     path: &str,
+    alias: &Option<String>,
     env: &mut Env,
-    loaded: &mut HashSet<PathBuf>,
-    loading: &mut HashSet<PathBuf>,
+    loaded: &mut HashSet<LoadedKey>,
+    loading: &mut HashSet<LoadedKey>,
     import_base: &Path,
     last_def: &mut Option<RunOutput>,
 ) -> Result<(), RunError> {
     let resolved = resolve_import_path(import_base, path);
     let canonical = canonical_import_path(&resolved);
+    let key: LoadedKey = (canonical.clone(), alias.clone().unwrap_or_default());
 
-    if loaded.contains(&canonical) {
+    if loaded.contains(&key) {
         return Ok(());
     }
-    if !loading.insert(canonical.clone()) {
+    if !loading.insert(key.clone()) {
         return Err(RunError::Import(format!(
             "circular import involving '{}'",
             resolved.display()
@@ -259,10 +272,18 @@ fn load_import(
     })?;
 
     let nested_base = resolved.parent().unwrap_or(import_base);
-    process_file_source(&source, nested_base, env, loaded, loading, last_def)?;
+    process_file_source(
+        &source,
+        nested_base,
+        env,
+        loaded,
+        loading,
+        last_def,
+        alias.as_deref(),
+    )?;
 
-    loading.remove(&canonical);
-    loaded.insert(canonical);
+    loading.remove(&key);
+    loaded.insert(key);
     Ok(())
 }
 
@@ -536,6 +557,82 @@ mod tests {
 
         let err = run(&a_path).unwrap_err();
         assert!(matches!(err, RunError::Import(_)));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_aliased_import_qualifies_names() {
+        let dir = std::env::temp_dir().join(format!("cubical_alias_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let arith_path = dir.join("arith.owl");
+        let main_path = dir.join("main.owl");
+
+        fs::write(
+            &arith_path,
+            "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n\
+             def add : Nat -> Nat -> Nat := fun m n => match m return Nat with\n\
+             \x20 | zero => n\n  | suc m' => suc (add m' n)\n",
+        )
+        .unwrap();
+        fs::write(
+            &main_path,
+            "import \"arith.owl\" as A\n\
+             def four : A.Nat := A.add (A.suc (A.suc A.zero)) (A.suc (A.suc A.zero))\n",
+        )
+        .unwrap();
+
+        let output = run(&main_path).expect("aliased import should run");
+        assert_eq!(output.name, "four");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_nested_modules_and_aliased_folding() {
+        let dir = std::env::temp_dir().join(format!("cubical_module_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let outer_path = dir.join("outer.owl");
+        let plain_path = dir.join("plain.owl");
+        let aliased_path = dir.join("aliased.owl");
+
+        // Library with nested modules; self-references are unqualified so the
+        // file works both plainly imported and folded under an alias.
+        fs::write(
+            &outer_path,
+            "module Outer where\n\
+             \x20 module Inner where\n\
+             \x20   inductive T where\n\
+             \x20     | mk : T\n\
+             \x20 end\n\
+             \x20 def get : T := mk\n\
+             end\n",
+        )
+        .unwrap();
+        // Plain import keeps the file's own module names.
+        fs::write(
+            &plain_path,
+            "import \"outer.owl\"\n\
+             def v : Outer.Inner.T := Outer.Inner.mk\n\
+             def w : Outer.Inner.T := Outer.get\n",
+        )
+        .unwrap();
+        // Aliased import folds the file's modules into the alias, so nested
+        // datatypes become `O.T` (flattened) — visible unqualified as `T`.
+        fs::write(
+            &aliased_path,
+            "import \"outer.owl\" as O\n\
+             def v : O.T := O.mk\n\
+             def w : O.T := O.get\n",
+        )
+        .unwrap();
+
+        let plain = run(&plain_path).expect("plain nested import should run");
+        assert_eq!(plain.name, "w");
+        let aliased = run(&aliased_path).expect("aliased nested import should run");
+        assert_eq!(aliased.name, "w");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -964,6 +1061,18 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
             .join("examples")
             .join("nat_path_algebra.owl");
         check(&path).expect("examples/nat_path_algebra.owl should typecheck");
+    }
+
+    #[test]
+    fn forall_after_arrow_example_checks() {
+        // Guard against regressions in `forall` binders following a
+        // non-dependent `->` (H10 ergonomics): `A -> forall (x : B), C` must
+        // parse with the forall binding looser than the arrow, and the whole
+        // thing must typecheck.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("forall_after_arrow.owl");
+        check(&path).expect("examples/forall_after_arrow.owl should typecheck");
     }
 
     #[test]

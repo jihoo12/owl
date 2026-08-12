@@ -1,0 +1,25 @@
+-- `forall` binders may now directly follow a non-dependent `->`.
+-- Previously this was a parse error; the binder must be declared before the
+-- arrow chain.  Now `A -> forall (x : B), C` parses as
+-- `A -> (forall (x : B), C)`, with the forall binding looser than `->`.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- `Nat -> forall (n : Nat), Nat` = `forall (_ : Nat), forall (n : Nat), Nat`
+def zero_id : Nat -> forall (n : Nat), Nat := fun _ n => n
+
+-- Composition with a dependent codomain: `(B -> C) -> forall (x : A), ...`
+def compose : forall (A : U0), forall (B : U0), forall (C : U0),
+  (B -> C) -> forall (x : A), (A -> B) -> C :=
+  fun A B C f x g => f (g x)
+
+-- Reflexivity as a function returning a path, with the codomain dependent
+def refl_under_pi : forall (A : U0), (A -> forall (x : A), Path A x x) :=
+  fun A _ x => <i> x
+
+-- The original style (all binders before the arrow chain) still works
+def all_binders_first : forall (a : Nat), forall (b : Nat),
+  Path Nat a b -> Path Nat b a :=
+  fun a b p => <i> p @ (~ i)

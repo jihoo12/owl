@@ -210,16 +210,22 @@ A -> B                   -- non-dependent (shorthand)
 The codomain `B` may reference the argument `x`. Non-dependent function
 types are sugar for `forall (_ : A), B`.
 
-**`forall` position**: `forall` / `∀` is only recognized at term top-level —
-it cannot follow a non-dependent `->`. Declare every binder before the arrow
-chain:
+**`forall` position**: a `forall` / `∀` binder may appear at term top-level **or
+directly after a non-dependent `->`**, and it binds looser than `->`. The
+classic form — declare every binder before the arrow chain — still works:
 
 ```
 forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat b a
 ```
 
-A type such as `Path Nat a b -> forall (m : Nat), ...` is a parse error
-(`unknown name or constructor 'forall'`).
+A dependent codomain after an arrow is now accepted:
+
+```
+Path Nat a b -> forall (m : Nat), Path Nat m m     -- parses as (Path Nat a b) -> (forall (m : Nat), Path Nat m m)
+```
+
+The `forall` absorbs everything to its right, so
+`A -> forall (x : B), C -> D` parses as `A -> (forall (x : B), (C -> D))`.
 
 ### Sigma Types (Dependent Pairs)
 
@@ -2052,12 +2058,49 @@ fun A B a b => a
 ### Import Syntax
 
 ```
-import "relative/path/to/file.owl"
+import "relative/path/to/file.owl"            -- merge names as-is
+import "relative/path/to/file.owl" as A       -- alias: force the `A.` namespace
 ```
 
 Imports read and process another Owl file, making all its definitions and
 datatypes available in the current file. Paths are relative to the importing
 file's directory.
+
+**Aliased imports** (`as A`) force every name from the imported file under the
+`A.` prefix, regardless of what the file declares: `A.Nat`, `A.add`, `A.T`.
+This is how two libraries that both define `Nat` can coexist. A file whose
+top-level names are already inside `module` blocks is **folded** into the
+alias: from `import "outer.owl" as O`, a datatype `Outer.Inner.T` is available
+as `O.T` (the file's module segments are dropped).
+
+### Modules
+
+```
+module MyModule where
+  def a : U0 := U0
+  module Nested where
+    inductive T where
+      | mk : T
+  end
+end
+```
+
+A `module M where ... end` block namespaces everything declared inside it:
+
+- Declarations inside get qualified names (`MyModule.a`, `MyModule.Nested.T`,
+  `MyModule.Nested.mk`), so the same datatype or def name can be used in
+  different modules.
+- Inside the module, unqualified names resolve to the current module first,
+  then enclosing modules. A datatype in a nested module is also visible
+  unqualified from an enclosing module (`T` for `Nested.T` from inside
+  `MyModule`).
+- Constructors are qualified by their datatype's module (`Nested.mk`).
+- Consumer code references the full dotted path: `MyModule.Nested.T`.
+
+**Portability rule**: a library file intended for aliased import should use
+unqualified self-references inside its `module` blocks (write `T`, not
+`Outer.Inner.T`) — under an alias the file's own module segments are dropped,
+so qualified self-references would dangle.
 
 ### How Imports Work
 
@@ -2066,6 +2109,10 @@ file's directory.
    current environment
 3. Subsequent declarations in the current file can reference imported names
 4. Circular imports are detected and rejected with an error
+
+Each file is processed once per (canonical path, alias) pair: importing the
+same file twice with different aliases creates two separate namespaces;
+importing it under the same alias twice is a no-op.
 
 ### Example
 
@@ -2089,9 +2136,6 @@ def four : Nat := add (suc (suc zero)) (suc (suc zero))
 
 def main : Nat := four
 ```
-
-Each file is processed only once, even if imported multiple times from
-different paths (deduplication by canonical path).
 
 ---
 

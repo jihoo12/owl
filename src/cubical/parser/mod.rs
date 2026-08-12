@@ -65,7 +65,19 @@ pub enum Decl {
     Record(Datatype),
     Import {
         path: String,
+        /// `import "f.owl" as X` — the imported file's names are stored under
+        /// the `X.` prefix (forced module), overriding the file's own `module`
+        /// declarations. `None` keeps the file's own names.
+        alias: Option<Name>,
     },
+    /// `module M where ...` — starts a namespace; following declarations get
+    /// the `M.` prefix. The parser already updated its scope, the driver just
+    /// sees this for bookkeeping.
+    Module {
+        name: Name,
+    },
+    /// `end` — closes the innermost `module ... where` block.
+    ModuleEnd,
 }
 
 #[allow(dead_code)]
@@ -93,13 +105,27 @@ pub fn parse_program(src: &str) -> Result<Vec<Decl>, ParseError> {
 /// so later declarations can resolve names from the merged environment.
 pub struct ProgramParser {
     parser: Parser,
+    /// When set, the file is parsed as if wrapped in `module <prefix> where`.
+    /// Used by `import "f.owl" as X`; the file's own `module` declarations are
+    /// then folded into the alias (ignored).
+    forced_prefix: Option<String>,
 }
 
 impl ProgramParser {
     pub fn new(src: &str) -> Result<Self, ParseError> {
+        Self::new_with_prefix(src, None)
+    }
+
+    /// Parse `src` with an optional forced module prefix (aliased imports).
+    pub fn new_with_prefix(src: &str, prefix: Option<&str>) -> Result<Self, ParseError> {
         let tokens = Lexer::new(src).lex()?;
+        let mut parser = Parser::new(tokens);
+        if let Some(prefix) = prefix {
+            parser.module_stack.push(prefix.to_string());
+        }
         Ok(Self {
-            parser: Parser::new(tokens),
+            parser,
+            forced_prefix: prefix.map(|s| s.to_string()),
         })
     }
 
@@ -115,6 +141,17 @@ impl ProgramParser {
         self.parser.decl_positions.clear();
         let decl = if self.parser.consume_ident("def") {
             self.parser.parse_def()?
+        } else if self.parser.consume_ident("module") {
+            self.parse_module_decl()?
+        } else if self.parser.consume_ident("end") {
+            if self.forced_prefix.is_some() {
+                // Aliased import: the file's `end` is folded into the alias.
+                Decl::ModuleEnd
+            } else if self.parser.module_stack.pop().is_some() {
+                Decl::ModuleEnd
+            } else {
+                return Err(self.parser.error_here("'end' without a matching 'module'"));
+            }
         } else if self.parser.consume_ident("inductive") {
             self.parser.parse_data_decl()?
         } else if self.parser.consume_ident("record") {
@@ -127,6 +164,7 @@ impl ProgramParser {
         };
         match &decl {
             Decl::Def { .. } => {}
+            Decl::Module { .. } | Decl::ModuleEnd => {}
             Decl::Data(dt) => self.parser.datatypes.push(dt.clone()),
             Decl::DataMutual(dts) => {
                 for dt in dts {
@@ -142,6 +180,33 @@ impl ProgramParser {
             Decl::Import { .. } => {}
         }
         Ok(Some(decl))
+    }
+
+    /// Parse `module M where`: pushes the (qualified) module name onto the
+    /// parser's module stack. Under an aliased import the declaration is
+    /// ignored — the alias is the namespace.
+    fn parse_module_decl(&mut self) -> Result<Decl, ParseError> {
+        let raw = self
+            .parser
+            .expect_ident("expected module name after 'module'")?;
+        self.parser
+            .expect_ident("expected 'where' after module name")
+            .and_then(|keyword| {
+                if keyword == "where" {
+                    Ok(())
+                } else {
+                    Err(self.parser.error_here("expected 'where' after module name"))
+                }
+            })?;
+        if self.forced_prefix.is_some() {
+            return Ok(Decl::ModuleEnd);
+        }
+        // Qualify before pushing so the new segment isn't included.
+        let name = self.parser.qualify(&raw);
+        // The stack stores raw segments so `qualify` can join the full path
+        // (`module Inner where` inside `module Outer where` → `Outer.Inner`).
+        self.parser.module_stack.push(raw);
+        Ok(Decl::Module { name })
     }
 
     /// Collect the name-position table accumulated while parsing the most
@@ -192,6 +257,7 @@ pub fn typecheck_program(
             Decl::Import { .. } => {
                 return Err("import requires a file path; use cubical::run instead".to_string());
             }
+            Decl::Module { .. } | Decl::ModuleEnd => {}
             Decl::Data(dt) => {
                 // Check positivity before making the datatype available.
                 crate::cubical::syntax::check_datatype_positivity(&dt)

@@ -18,6 +18,10 @@ pub(super) struct Parser {
     pub(super) ivar_env: Vec<Name>,
     pub(super) global_env: Vec<Name>,
     pub(super) datatypes: Vec<Datatype>,
+    /// Module path segments for the current scope (outermost first).
+    /// While non-empty, names defined here are qualified as `A.B.<name>` and
+    /// unqualified references prefer the innermost module's qualified name.
+    pub(super) module_stack: Vec<Name>,
     /// `(name, source position, is_introduction)` for every variable name
     /// observed while parsing the current top-level declaration, in source
     /// order. The driver installs this into the typechecker's thread-local
@@ -45,6 +49,7 @@ impl Parser {
             ivar_env: Vec::new(),
             global_env: Vec::new(),
             datatypes: Vec::new(),
+            module_stack: Vec::new(),
             decl_positions: Vec::new(),
             stop_at_with: false,
             stop_at_in: false,
@@ -56,11 +61,17 @@ impl Parser {
 
     pub(super) fn parse_import(&mut self) -> Result<Decl, ParseError> {
         let path = self.expect_string("expected string literal after 'import'")?;
-        Ok(Decl::Import { path })
+        let alias = if self.consume_ident("as") {
+            Some(self.expect_ident("expected module name after 'as'")?)
+        } else {
+            None
+        };
+        Ok(Decl::Import { path, alias })
     }
 
     pub(super) fn parse_def(&mut self) -> Result<Decl, ParseError> {
-        let name = self.expect_ident("expected definition name")?;
+        let raw_name = self.expect_ident("expected definition name")?;
+        let name = self.qualify(&raw_name);
         let (line, col) = self.token_pos();
         self.record_name_pos(&name, line, col, true);
         self.expect(
@@ -120,7 +131,8 @@ impl Parser {
                 return Ok(Decl::DataMutual(all_dts));
             } else {
                 // Induction-recursion: `with f : T := e`
-                let func_name = self.expect_ident("expected function name after 'with'")?;
+                let raw_func = self.expect_ident("expected function name after 'with'")?;
+                let func_name = self.qualify(&raw_func);
                 self.expect(
                     TokenKind::Colon,
                     format!("expected ':' after '{}'", func_name),
@@ -154,7 +166,8 @@ impl Parser {
     /// Parse a single inductive datatype block. Returns the `Datatype` directly.
     /// Used by both `parse_data_decl` and the mutual-inductive `with` handler.
     pub(super) fn parse_data_decl_inner(&mut self) -> Result<Datatype, ParseError> {
-        let name = self.expect_ident("expected datatype name")?;
+        let raw_name = self.expect_ident("expected datatype name")?;
+        let name = self.qualify(&raw_name);
 
         // Parse optional parameter binders: `inductive Trunc (A : Type) where`
         let mut params: Vec<(Name, Term)> = Vec::new();
@@ -380,7 +393,8 @@ impl Parser {
     ///
     /// Desugars to a single-constructor inductive type plus projection definitions.
     pub(super) fn parse_record_decl(&mut self) -> Result<Datatype, ParseError> {
-        let name = self.expect_ident("expected record type name")?;
+        let raw_name = self.expect_ident("expected record type name")?;
+        let name = self.qualify(&raw_name);
 
         // Parse optional parameter binders: `record Pair (A : Type) where`
         let mut params: Vec<(Name, Term)> = Vec::new();
@@ -690,11 +704,27 @@ impl Parser {
         let left = self.parse_sigma()?;
         if self.consume(&TokenKind::Arrow) {
             self.term_env.insert(0, "_".to_string());
-            let right = self.parse_arrow()?;
+            let right = self.parse_arrow_codomain()?;
             self.term_env.remove(0);
             Ok(Term::TPi("_".to_string(), Box::new(left), Box::new(right)))
         } else {
             Ok(left)
+        }
+    }
+
+    /// Parse the codomain of a `->`.  A `forall`/`∀` binder may directly
+    /// follow a non-dependent arrow — it binds looser than `->`, so
+    /// `A -> forall (x : B), C -> D` parses as `A -> forall (x : B), (C -> D)`.
+    fn parse_arrow_codomain(&mut self) -> Result<Term, ParseError> {
+        if self.consume_ident("∀") || self.consume_ident("forall") {
+            let (binder, ty) = self.parse_parenthesized_binder("Pi")?;
+            self.expect_binder_separator("Pi")?;
+            self.term_env.insert(0, binder.clone());
+            let body = self.parse_term()?;
+            self.term_env.remove(0);
+            Ok(Term::TPi(binder, Box::new(ty), Box::new(body)))
+        } else {
+            self.parse_arrow()
         }
     }
 
@@ -848,6 +878,22 @@ impl Parser {
         }
         if self.consume_ident("Next") {
             return Ok(Term::TNext(Box::new(self.parse_prefix_or_atom()?)));
+        }
+        // Module-qualified reference: `M.name`, `M.Nat`, `M.Nat.zero`.  Only
+        // fires when the leading segment is a module prefix; otherwise the
+        // name falls through to the plain atom / record-projection path.
+        if let TokenKind::Ident(first) = &self.peek().kind
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Dot)
+            )
+            && self.is_module_prefix(first)
+        {
+            let mut segments = vec![self.expect_ident("expected module name")?];
+            while self.consume(&TokenKind::Dot) {
+                segments.push(self.expect_ident("expected name after '.'")?);
+            }
+            return self.resolve_dotted(&segments);
         }
         // Record field projection: `record.field` — parse as TProj
         // This is handled after prefix operators so that `Force x.y` etc. work.
@@ -1921,6 +1967,184 @@ impl Parser {
     }
 
     /// Record a variable name occurrence for the current declaration so the
+    /// The current module path as a single dotted name ("" at top level).
+    fn current_prefix(&self) -> String {
+        self.module_stack.join(".")
+    }
+
+    /// Qualify a raw definition/datatype name with the current module path.
+    pub(super) fn qualify(&self, raw: &Name) -> Name {
+        let prefix = self.current_prefix();
+        if prefix.is_empty() {
+            raw.clone()
+        } else {
+            format!("{}.{}", prefix, raw)
+        }
+    }
+
+    /// Module path prefixes innermost-first for candidate lookup, e.g. the
+    /// stack `["A", "B"]` yields `["A.B", "A"]`.
+    fn module_path_prefixes(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut acc: Vec<Name> = Vec::new();
+        for seg in &self.module_stack {
+            acc.push(seg.clone());
+            out.push(acc.join("."));
+        }
+        out
+    }
+
+    /// Candidate names for unqualified global/datatype resolution inside the
+    /// current module: innermost-qualified first, then top-level plain name.
+    fn qualified_candidates(&self, name: &Name) -> Vec<Name> {
+        let mut out = Vec::new();
+        for prefix in self.module_path_prefixes() {
+            out.push(format!("{}.{}", prefix, name));
+        }
+        out.push(name.clone());
+        out
+    }
+
+    /// True if `prefix` is usable as a module-qualification prefix: a segment
+    /// of the current module path, a module nested in the current module, or
+    /// the leading segment of some global or datatype name (which covers
+    /// `import "f.owl" as X` — the imported names are stored as `X.<name>`).
+    fn is_module_prefix(&self, prefix: &str) -> bool {
+        if self.module_stack.iter().any(|s| s == prefix) {
+            return true;
+        }
+        let qualified = self.qualify(&prefix.to_string());
+        let dot = format!("{}.", qualified);
+        self.global_env.iter().any(|n| n.starts_with(&dot))
+            || self.datatypes.iter().any(|dt| dt.name.starts_with(&dot))
+    }
+
+    /// Resolve a dotted, module-qualified reference `M.name`, `M.Nat`, or
+    /// `M.Nat.zero` (also datatype-qualified constructors like `Nat.zero`).
+    /// Both the absolute path (`Outer.Inner.T`) and the current-module-relative
+    /// path (`Inner.T` from inside `Outer`) are attempted.
+    fn resolve_dotted(&mut self, segments: &[Name]) -> Result<Term, ParseError> {
+        let (line, col) = self.token_pos();
+        let joined = segments.join(".");
+        let qualified_joined = self.qualify(&joined);
+        let mut candidates: Vec<String> = Vec::new();
+        if qualified_joined != joined {
+            candidates.push(qualified_joined.clone());
+        }
+        candidates.push(joined.clone());
+        for cand in &candidates {
+            if let Some(idx) = self.global_env.iter().position(|n| n == cand) {
+                self.record_name_pos(cand, line, col, false);
+                return Ok(Term::TVar((self.term_env.len() + idx) as i32));
+            }
+        }
+        for cand in &candidates {
+            if self.datatypes.iter().any(|dt| dt.name == *cand) {
+                return Ok(Term::TData(cand.clone(), vec![]));
+            }
+        }
+        // Constructor reference: the trailing segments name a constructor of a
+        // datatype whose qualified name is the leading segments.
+        for k in 1..segments.len() {
+            let member = segments[k..].join(".");
+            let mut prefixes = Vec::new();
+            let raw_prefix = segments[..k].join(".");
+            let qualified_prefix = self.qualify(&raw_prefix);
+            if qualified_prefix != raw_prefix {
+                prefixes.push(qualified_prefix);
+            }
+            prefixes.push(raw_prefix);
+            for prefix in &prefixes {
+                for dt in self.datatypes.iter().rev() {
+                    if dt.name == *prefix || dt.name.starts_with(&format!("{}.", prefix)) {
+                        if let Some(c) = dt.cons.iter().find(|c| c.name == member) {
+                            return Ok(Term::TCon(dt.name.clone(), member, Vec::new()));
+                        }
+                        if let Some(c) = dt.pcons.iter().find(|c| c.name == member) {
+                            return Ok(Term::TCon(dt.name.clone(), member, Vec::new()));
+                        }
+                        if let Some(c) = dt.sqcons.iter().find(|c| c.name == member) {
+                            return Ok(Term::TCon(dt.name.clone(), member, Vec::new()));
+                        }
+                        if let Some(c) = dt.cellcons.iter().find(|c| c.name == member) {
+                            return Ok(Term::TCon(dt.name.clone(), member, Vec::new()));
+                        }
+                    }
+                }
+            }
+        }
+        Err(self.error_here(format!(
+            "unknown name '{}' in module '{}'",
+            segments.last().unwrap(),
+            segments[..segments.len() - 1].join(".")
+        )))
+    }
+
+    /// Global definition index for an unqualified name, preferring the current
+    /// module's qualified names (innermost first), then the top-level name.
+    fn find_global_candidate(&self, name: &Name) -> Option<usize> {
+        for cand in self.qualified_candidates(name) {
+            if let Some(idx) = self.global_env.iter().position(|n| n == &cand) {
+                return Some(idx);
+            }
+        }
+        None
+    }
+
+    /// Datatype name for an unqualified name, preferring the current module's
+    /// qualified datatype names. A datatype declared in a nested module is also
+    /// visible unqualified from an enclosing module (`Inner.T` as `T` from
+    /// inside `Outer`) — this keeps library files portable between plain and
+    /// aliased imports.
+    fn find_datatype_candidate(&self, name: &Name) -> Option<Name> {
+        for cand in self.qualified_candidates(name) {
+            if self.datatypes.iter().any(|dt| dt.name == cand) {
+                return Some(cand);
+            }
+        }
+        for prefix in self.module_path_prefixes() {
+            let dot = format!("{}.", prefix);
+            if let Some(dt) = self.datatypes.iter().find(|dt| {
+                dt.name.starts_with(&dot) && dt.name.rsplit('.').next() == Some(name.as_str())
+            }) {
+                return Some(dt.name.clone());
+            }
+        }
+        None
+    }
+
+    /// Constructor for an unqualified name, preferring datatypes declared in
+    /// the current module, then any datatype (existing behaviour).
+    fn find_constructor_candidate(&self, name: &str) -> Option<(Name, bool)> {
+        for prefix in self.module_path_prefixes() {
+            let dot = format!("{}.", prefix);
+            for dt in self.datatypes.iter().rev() {
+                if dt.name.starts_with(&dot) {
+                    if let Some((dtn, is_path)) = self.find_constructor_in_dt(dt, name) {
+                        return Some((dtn, is_path));
+                    }
+                }
+            }
+        }
+        self.find_constructor(name)
+    }
+
+    fn find_constructor_in_dt(&self, dt: &Datatype, name: &str) -> Option<(Name, bool)> {
+        if dt.cons.iter().any(|c| c.name == name) {
+            return Some((dt.name.clone(), false));
+        }
+        if dt.pcons.iter().any(|c| c.name == name) {
+            return Some((dt.name.clone(), true));
+        }
+        if dt.sqcons.iter().any(|c| c.name == name) {
+            return Some((dt.name.clone(), true));
+        }
+        if dt.cellcons.iter().any(|c| c.name == name) {
+            return Some((dt.name.clone(), true));
+        }
+        None
+    }
+
     /// typechecker can attach a source position to errors involving it.
     fn record_name_pos(&mut self, name: &Name, line: usize, col: usize, is_introduction: bool) {
         self.decl_positions
@@ -1954,7 +2178,9 @@ impl Parser {
             self.record_name_pos(&name, line, col, false);
             return Ok(Term::TVar(idx as i32));
         }
-        if let Some(idx) = self.global_env.iter().position(|n| n == &name) {
+        // Globals: prefer the current module's qualified names, then the
+        // top-level name.
+        if let Some(idx) = self.find_global_candidate(&name) {
             self.record_name_pos(&name, line, col, false);
             return Ok(Term::TVar((self.term_env.len() + idx) as i32));
         }
@@ -1962,14 +2188,11 @@ impl Parser {
             self.record_name_pos(&name, line, col, false);
             return Ok(Term::TInterval(I::Var(idx as i32)));
         }
-        if let Some((dt, is_path)) = self.find_constructor(&name) {
-            if is_path {
-                return Ok(Term::TCon(dt, name, Vec::new()));
-            }
-            return Ok(Term::TCon(dt, name, Vec::new()));
+        if let Some(dt_name) = self.find_datatype_candidate(&name) {
+            return Ok(Term::TData(dt_name, vec![]));
         }
-        if self.datatypes.iter().any(|dt| dt.name == name) {
-            return Ok(Term::TData(name, vec![]));
+        if let Some((dt, _)) = self.find_constructor_candidate(&name) {
+            return Ok(Term::TCon(dt, name, Vec::new()));
         }
         Err(self.error_here(format!("unknown name or constructor '{}'", name)))
     }
@@ -2108,7 +2331,13 @@ impl Parser {
     fn is_decl_start(&self) -> bool {
         matches!(
             &self.peek().kind,
-            TokenKind::Ident(name) if name == "def" || name == "inductive" || name == "record" || name == "import"
+            TokenKind::Ident(name)
+                if name == "def"
+                    || name == "inductive"
+                    || name == "record"
+                    || name == "import"
+                    || name == "module"
+                    || name == "end"
         )
     }
 
@@ -2151,7 +2380,7 @@ impl Parser {
         )
     }
 
-    fn expect_ident(&mut self, message: impl Into<String>) -> Result<Name, ParseError> {
+    pub(super) fn expect_ident(&mut self, message: impl Into<String>) -> Result<Name, ParseError> {
         match self.peek().kind.clone() {
             TokenKind::Ident(name) => {
                 self.pos += 1;
@@ -2478,6 +2707,8 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "inductive"
             | "record"
             | "import"
+            | "module"
+            | "end"
             | "match"
             | "return"
             | "with"
