@@ -25,15 +25,10 @@ pub fn err_names(ctx: &Ctx) -> Vec<Name> {
     ctx.iter().map(|(n, _)| n.clone()).collect()
 }
 
-use std::cell::Cell;
-
 // Thread-local flag: when true, skip PLam boundary checks in check_dt.
 // This is needed for HIT case bodies where the constructor variable is free
 // and can't reduce — the boundary conditions are already encoded in the
-// expected body type.
-thread_local! {
-    static SKIP_PLAM_ENDPT: Cell<bool> = Cell::new(false);
-}
+// expected body type. (Now stored in Session.)
 
 // ---------------------------------------------------------------------------
 // Context
@@ -697,7 +692,7 @@ pub fn infer(ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
 pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
     let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
     crate::debug_scope!("infer {} : ctx[{}]", show_term(&names, t), ctx.len());
-    crate::cubical::nbe::set_current_dts(dts);
+    crate::cubical::session::set_current_dts(dts);
     match t {
         // Variable
         Term::TVar(i) => lookup_ctx(*i, ctx),
@@ -2268,9 +2263,9 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     );
                     check_dt(dts, &case_ctx, &rebuilt, &expected_body_ty)?;
                 } else {
-                    SKIP_PLAM_ENDPT.with(|c| c.set(true));
+                    crate::cubical::session::set_skip_plam_endpt(true);
                     check_dt(dts, &case_ctx, &case.body, &expected_body_ty)?;
-                    SKIP_PLAM_ENDPT.with(|c| c.set(false));
+                    crate::cubical::session::set_skip_plam_endpt(false);
 
                     let body_at0 = match case.body.as_ref() {
                         Term::PLam(_, inner) => {
@@ -2420,9 +2415,9 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     Box::new(shift(2, 0, &face_j0_case)),
                     Box::new(shift(2, 0, &face_j1_case)),
                 );
-                SKIP_PLAM_ENDPT.with(|c| c.set(true));
+                crate::cubical::session::set_skip_plam_endpt(true);
                 check_dt(dts, &case_ctx_sq, &case.body, &expected_body_ty_sq)?;
-                SKIP_PLAM_ENDPT.with(|c| c.set(false));
+                crate::cubical::session::set_skip_plam_endpt(false);
 
                 // Boundary coherence for sqcon cases:
                 // Strip the two PLam binders from the case body, then use
@@ -2605,9 +2600,9 @@ pub fn infer_dt(dts: &[Datatype], ctx: &Ctx, t: &Term) -> Result<Term, TypeError
                     );
                 }
 
-                SKIP_PLAM_ENDPT.with(|c| c.set(true));
+                crate::cubical::session::set_skip_plam_endpt(true);
                 check_dt(dts, &case_ctx_cell, &case.body, &expected_body_ty)?;
-                SKIP_PLAM_ENDPT.with(|c| c.set(false));
+                crate::cubical::session::set_skip_plam_endpt(false);
 
                 // Boundary coherence for cellcon cases:
                 // For level k (0 = outermost), strip (k+1) outermost PLams
@@ -3021,7 +3016,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
         show_term(&names, ty),
         ctx.len()
     );
-    crate::cubical::nbe::set_current_dts(dts);
+    crate::cubical::session::set_current_dts(dts);
     match t {
         // Lambda introduction
         Term::TAbs(x, body) => {
@@ -3082,7 +3077,7 @@ pub fn check_dt(dts: &[Datatype], ctx: &Ctx, t: &Term, ty: &Term) -> Result<(), 
             // the constructor variable is free and can't reduce, so boundary
             // equality can't be verified. The expected body type already
             // encodes the correct faces from the constructor declaration.
-            if !SKIP_PLAM_ENDPT.with(|c| c.get()) {
+            if !crate::cubical::session::should_skip_plam_endpt() {
                 let body_at0 = {
                     let reduced =
                         reduce_pcon_endpoints_dt(dts, &apply_literal(&Literal::NegVar(0), body));

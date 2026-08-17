@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::fmt;
 
 use super::Ctx;
@@ -17,16 +16,14 @@ pub struct Pos {
 // accumulates these tables across the whole program and installs them before
 // typechecking each declaration, so type errors can point back to the source
 // location of the offending variable.
-thread_local! {
-    static DECL_NAME_POS: RefCell<Vec<(Name, Pos, bool)>> = RefCell::new(Vec::new());
-}
+// (Now stored in Session.)
 
 pub fn set_decl_name_positions(v: Vec<(Name, Pos, bool)>) {
-    DECL_NAME_POS.with(|t| *t.borrow_mut() = v);
+    crate::cubical::session::set_decl_name_positions(v);
 }
 
 pub fn clear_decl_name_positions() {
-    DECL_NAME_POS.with(|t| t.borrow_mut().clear());
+    crate::cubical::session::clear_decl_name_positions();
 }
 
 /// The de Bruijn index of the most-local variable occurrence in `t`
@@ -196,9 +193,8 @@ fn head_var_idx(t: &Term) -> Option<i32> {
 pub fn err_pos(ctx: &Ctx, t: &Term) -> Option<Pos> {
     let idx = head_var_idx(t)?;
     let name = ctx.get(idx as usize)?.0.clone();
-    DECL_NAME_POS.with(|table| {
+    crate::cubical::session::with_decl_name_positions(|table| {
         table
-            .borrow()
             .iter()
             .rev()
             .find(|(n, _, _)| *n == name)

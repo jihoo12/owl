@@ -4,41 +4,28 @@
 //! is made on a structurally smaller argument — one of the case binders
 //! introduced by the pattern match. This ensures termination.
 
-use std::cell::{Cell, RefCell};
-
 use crate::cubical::syntax::{ElimCase, Term};
-
-// Thread-local flag to skip the structural guard check.
-// Set by `process_def` when a definition is annotated with `by_wf`.
-thread_local! {
-    static SKIP_GUARD: Cell<bool> = Cell::new(false);
-    // Name of the definition currently being checked. The guard uses it to
-    // detect recursive calls that go through the definition's own name
-    // (a `TVar` reference applied to arguments) rather than through a nested
-    // `TElim`. Set by `process_def` around the body check.
-    static CURRENT_DEF: RefCell<Option<String>> = RefCell::new(None);
-}
 
 /// Check if the guard check should be skipped (well-founded recursion mode).
 pub fn should_skip_guard() -> bool {
-    SKIP_GUARD.with(|f| f.get())
+    crate::cubical::session::should_skip_guard()
 }
 
 /// Set or clear the skip-guard flag.
 pub fn set_skip_guard(skip: bool) {
-    SKIP_GUARD.with(|f| f.set(skip));
+    crate::cubical::session::set_skip_guard(skip)
 }
 
 /// The name of the definition whose body is currently being guard-checked,
 /// if any.
 pub fn current_def() -> Option<String> {
-    CURRENT_DEF.with(|c| c.borrow().clone())
+    crate::cubical::session::current_def()
 }
 
 /// Set the name of the definition being guard-checked; returns the previous
 /// value so callers can restore it.
 pub fn set_current_def(name: Option<String>) -> Option<String> {
-    CURRENT_DEF.with(|c| std::mem::replace(&mut *c.borrow_mut(), name))
+    crate::cubical::session::set_current_def(name)
 }
 
 /// Result of checking a single case body for structural recursion.

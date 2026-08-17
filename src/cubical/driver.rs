@@ -466,11 +466,11 @@ fn process_def(
     // current definition itself is not yet in `env.defs`, so its reference
     // (de Bruijn index 0 of the goal scope) stays neutral.
     let globals = crate::cubical::env::build_definition_values(env);
-    let prev_globals = crate::cubical::nbe::set_current_globals(Some(globals));
+    let prev_globals = crate::cubical::session::set_current_globals(Some(globals));
     let resolved_val =
         crate::cubical::tactics::resolve_tactics(&env.datatypes, val, &check_ty, &global_ctx)
             .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
-    crate::cubical::nbe::set_current_globals(prev_globals);
+    crate::cubical::session::set_current_globals(prev_globals);
     let resolved_val = resolved_val?;
 
     // Register before checking the body so recursive calls resolve.

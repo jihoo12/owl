@@ -4,7 +4,8 @@
 //   crate::syntax::{Name, Term, Datatype, shift, subst}
 //   crate::typechecker::{Ctx, TypeError, infer, check, infer_dt, check_dt}
 
-use crate::cubical::nbe::{Globals, Neutral, Scope, Value, eval_nbe, set_current_globals};
+use crate::cubical::nbe::{Globals, Neutral, Scope, Value, eval_nbe};
+use crate::cubical::session;
 use crate::cubical::syntax::{Datatype, Name, Term, shift, subst};
 use crate::cubical::typechecker::{Ctx, TypeError, check, check_dt, infer, infer_dt};
 
@@ -80,6 +81,7 @@ pub fn global_ctx(genv: &GlobalEnv) -> Ctx {
 /// We substitute one global at a time, outermost (highest index) first,
 /// so that earlier substitutions don't disturb the indices of later ones.
 /// After substituting index `k`, we shift the term down by 1 to close the gap.
+#[allow(dead_code)]
 pub fn apply_globals(genv: &GlobalEnv, t: &Term) -> Term {
     // Remove globals from the outside in: the oldest definition has the
     // highest de Bruijn index, so substituting it first cannot disturb the
@@ -93,6 +95,7 @@ pub fn apply_globals(genv: &GlobalEnv, t: &Term) -> Term {
 
 /// Substitute the global at de Bruijn index `k` with its value `v`,
 /// then shift the whole term down by 1 to account for the removed binding.
+#[allow(dead_code)]
 fn subst_global(k: i32, v: &Term, body: &Term) -> Term {
     shift(-1, k, &subst(k, &shift(k, 0, v), body))
 }
@@ -135,17 +138,17 @@ pub fn build_definition_values(env: &Env) -> Globals {
 /// Infer the type of a term in a full `Env`.
 pub fn infer_with_full_env(env: &Env, t: &Term) -> Result<Term, TypeError> {
     let globals = build_definition_values(env);
-    let prev = set_current_globals(Some(globals));
+    let prev = session::set_current_globals(Some(globals));
     let result = infer_dt(&env.datatypes, &global_ctx(&env.defs), t);
-    set_current_globals(prev);
+    session::set_current_globals(prev);
     result
 }
 
 /// Check a term against a type in a full `Env`.
 pub fn check_with_full_env(env: &Env, t: &Term, ty: &Term) -> Result<(), TypeError> {
     let globals = build_definition_values(env);
-    let prev = set_current_globals(Some(globals));
+    let prev = session::set_current_globals(Some(globals));
     let result = check_dt(&env.datatypes, &global_ctx(&env.defs), t, ty);
-    set_current_globals(prev);
+    session::set_current_globals(prev);
     result
 }

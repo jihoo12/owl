@@ -774,18 +774,14 @@ fn eta_eq_uncached(fuel: usize, ctx: &Ctx, t1: &Term, t2: &Term, memo: &mut EtaM
                     // definitions like nat_add/nat_mul terminate instead of
                     // overflowing the stack.
                     const ELIM_RECURSE_CAP: usize = 6;
-                    thread_local! {
-                        static ELIM_CASE_RECURSE: std::cell::Cell<usize> =
-                            const { std::cell::Cell::new(0) };
-                    }
-                    let depth = ELIM_CASE_RECURSE.with(|d| d.get());
+                    let depth = crate::cubical::session::elim_depth_enter();
                     if depth >= ELIM_RECURSE_CAP {
+                        crate::cubical::session::elim_depth_restore(depth);
                         NotEqual
                     } else {
-                        ELIM_CASE_RECURSE.with(|d| d.set(depth + 1));
                         let r =
                             and_result(acc, eta_eq_memo(fuel, &case_ctx, &c1.body, &c2.body, memo));
-                        ELIM_CASE_RECURSE.with(|d| d.set(depth));
+                        crate::cubical::session::elim_depth_restore(depth);
                         r
                     }
                 }
