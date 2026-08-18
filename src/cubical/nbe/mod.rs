@@ -14,42 +14,9 @@ use crate::cubical::syntax::{
 };
 
 use crate::cubical::debug;
+use crate::cubical::session::{self, Session};
+pub use crate::cubical::session::{set_current_dts, set_current_globals};
 use trace::record_step;
-
-// Thread-local storage for the current datatype definitions during evaluation.
-// This allows `do_papp` to look up square-constructor face terms for boundary reduction
-// without threading `dts` through every NbE function signature.
-thread_local! {
-    static CURRENT_DTS: std::cell::RefCell<Vec<Datatype>> = std::cell::RefCell::new(Vec::new());
-    static CURRENT_GLOBALS: std::cell::RefCell<Option<Globals>> = std::cell::RefCell::new(None);
-    static NBE_EVAL_CACHE: std::cell::RefCell<HashMap<Term, Term>> = std::cell::RefCell::new(HashMap::new());
-    static METAVAR_SOLUTIONS: std::cell::RefCell<Vec<Option<Term>>> = std::cell::RefCell::new(Vec::new());
-    static META_NAMES: std::cell::RefCell<Vec<Option<Name>>> = std::cell::RefCell::new(Vec::new());
-    static META_EXPECTED: std::cell::RefCell<Vec<Option<Term>>> = std::cell::RefCell::new(Vec::new());
-}
-
-/// Set the current datatype definitions for the duration of evaluation.
-pub fn set_current_dts(dts: &[Datatype]) {
-    CURRENT_DTS.with(|cell| {
-        *cell.borrow_mut() = dts.to_vec();
-    });
-}
-
-/// Get the current datatype definitions. Returns empty vec if not set.
-fn current_dts() -> Vec<Datatype> {
-    CURRENT_DTS.with(|cell| cell.borrow().clone())
-}
-
-/// Set the current global definition values used by `nbe_eval_ctx`.
-/// Returns the previously-set value so callers can restore it.
-pub fn set_current_globals(globals: Option<Globals>) -> Option<Globals> {
-    CURRENT_GLOBALS.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        let prev = slot.take();
-        *slot = globals;
-        prev
-    })
-}
 
 pub type Env = Vec<Value>;
 
@@ -512,22 +479,15 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
 /// `Closure::apply` / `IClosure` — recurses through `eval_nbe`, so the single
 /// guard below covers them all. Legitimate normal forms stay far below the cap.
 const EVAL_NBE_MAX_DEPTH: usize = 200;
-thread_local! {
-    static EVAL_NBE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
 
 pub fn eval_nbe(env: &Scope, globals: &Globals, global_offset: usize, t: &Term) -> Value {
-    let depth = EVAL_NBE_DEPTH.with(|c| {
-        let d = c.get();
-        c.set(d + 1);
-        d
-    });
+    let depth = session::eval_depth_enter();
     if depth >= EVAL_NBE_MAX_DEPTH {
-        EVAL_NBE_DEPTH.with(|c| c.set(depth));
+        session::eval_depth_restore(depth);
         return Value::VNeutral(Neutral::NVar(depth));
     }
     let result = eval_nbe_inner(env, globals, global_offset, t);
-    EVAL_NBE_DEPTH.with(|c| c.set(depth));
+    session::eval_depth_restore(depth);
     result
 }
 
@@ -773,7 +733,7 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
                 .collect();
             // Eagerly desugar when the record evaluates to a VCon.
             if let Value::VCon(ref dt, ref con, ref args) = r_val {
-                let dts = current_dts();
+                let dts = session::current_dts();
                 if let Some(dt_sig) = dts.iter().find(|d| &d.name == dt) {
                     if let Some(field_names) = &dt_sig.field_names {
                         let mut new_args = args.clone();
@@ -817,7 +777,7 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             // eval env) are left neutral.
             let mut reduced: Option<Term> = None;
             if let Some(endpoint) = value_to_endpoint(&r_v)
-                && let Some(dt) = current_dts().iter().find(|dt| &dt.name == data)
+                && let Some(dt) = session::current_dts().iter().find(|dt| &dt.name == data)
                 && let Some(sig) = dt.pcons.iter().find(|c| &c.name == con)
             {
                 let arity = args.len();
@@ -872,7 +832,7 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             // levels; faces referencing the datatype's parameters (levels
             // >= arity in the face scope) are left neutral.
             let mut reduced: Option<Term> = None;
-            if let Some(dt) = current_dts().iter().find(|dt| &dt.name == data)
+            if let Some(dt) = session::current_dts().iter().find(|dt| &dt.name == data)
                 && let Some(sig) = dt.sqcons.iter().find(|c| &c.name == con)
             {
                 let arity = args.len();
@@ -943,7 +903,7 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             // parameters (levels >= arity in the face scope) are left neutral.
             let mut reduced: Option<Term> = None;
             if !ivars.is_empty()
-                && let Some(dt) = current_dts().iter().find(|dt| &dt.name == data)
+                && let Some(dt) = session::current_dts().iter().find(|dt| &dt.name == data)
                 && let Some(sig) = dt.cellcons.iter().find(|c| &c.name == con)
                 && ivars.len() == sig.dimension()
             {
@@ -1071,7 +1031,7 @@ fn reduce_con_at_endpoint(
     args: &[Value],
     endpoint: &I,
 ) -> Option<Value> {
-    let dts = current_dts();
+    let dts = session::current_dts();
     let dt = dts.iter().find(|dt| &dt.name == data)?;
     let arity = args.len();
     let face: &Term = if let Some(sig) = dt.pcons.iter().find(|c| &c.name == con) {
@@ -1265,7 +1225,7 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
         //   sq @ 1 @ s  =  face_j1 @ s   (outer path at i=1 gives face_j1)
         Value::VSqCon(ref data, ref con, ref args, ref sq_r, ref sq_s) => {
             if let Some(endpoint) = value_to_endpoint(&r) {
-                let dts = current_dts();
+                let dts = session::current_dts();
                 if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
                     && let Some(sig) = dt.sqcons.iter().find(|c| &c.name == con)
                 {
@@ -1331,7 +1291,7 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value) -> V
         //   cell @ 1 @ r2 @ ... @ rn  =  (eval f_{2n-1}[args]) @ r2 @ ... @ rn
         Value::VCellCon(ref data, ref con, ref args, ref ivars) => {
             if let Some(endpoint) = value_to_endpoint(&r) {
-                let dts = current_dts();
+                let dts = session::current_dts();
                 if let Some(dt) = dts.iter().find(|dt| &dt.name == data)
                     && let Some(sig) = dt.cellcons.iter().find(|c| &c.name == con)
                 {
@@ -1548,7 +1508,7 @@ pub fn do_proj(field: &str, r: Value) -> Value {
         // Desugar record update on projection: (r { x = v }).y → r.y when field != x
         Value::VRecordUpdate(r_inner, ref updates) => {
             if let Value::VCon(ref dt, _, ref args) = *r_inner.as_ref() {
-                let dts = current_dts();
+                let dts = session::current_dts();
                 if let Some(dt_sig) = dts.iter().find(|d| &d.name == dt) {
                     if let Some(field_names) = &dt_sig.field_names {
                         if let Some((_, val)) = updates.iter().find(|(f, _)| f == field) {
@@ -1568,7 +1528,7 @@ pub fn do_proj(field: &str, r: Value) -> Value {
             )
         }
         Value::VCon(_, _, ref args) => {
-            let dts = current_dts();
+            let dts = session::current_dts();
             if let Some(dt) = dts.iter().find(|dt| {
                 dt.cons.len() == 1
                     && dt.pcons.is_empty()
@@ -2269,7 +2229,7 @@ fn transport_data_con(
     con_name: &str,
     args: &[Value],
 ) -> Value {
-    let dts = current_dts();
+    let dts = session::current_dts();
     let d_name = match clos.apply_i(I::I0) {
         Value::VData(name, _) => name,
         _ => {
@@ -2354,7 +2314,7 @@ fn transport_data_pcon(
     args: &[Value],
     r: &Value,
 ) -> Value {
-    let dts = current_dts();
+    let dts = session::current_dts();
     let d_name = match clos.apply_i(I::I0) {
         Value::VData(name, _) => name,
         _ => {
@@ -2449,7 +2409,7 @@ fn transport_data_sqcon(
     r: &Value,
     s: &Value,
 ) -> Value {
-    let dts = current_dts();
+    let dts = session::current_dts();
     let d_name = match clos.apply_i(I::I0) {
         Value::VData(name, _) => name,
         _ => {
@@ -2554,7 +2514,7 @@ fn transport_data_cellcon(
     args: &[Value],
     ivars: &[Value],
 ) -> Value {
-    let dts = current_dts();
+    let dts = session::current_dts();
     let d_name = match clos.apply_i(I::I0) {
         Value::VData(name, _) => name,
         _ => {
@@ -3100,9 +3060,6 @@ fn match_ctor_args<'a>(
     }
 }
 
-thread_local! {
-    static ALL_TUBES_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
-}
 
 /// Check if all tubes in the system are constant (tube @ I0 ≡ tube @ I1)
 /// AND coherent with base (tube @ I0 ≡ base). When this holds, the Kan
@@ -3121,14 +3078,13 @@ fn all_tubes_constant_and_coherent(
     // ring_demo overflow). This check is only an optimization (the
     // constant-tube shortcut); bailing out is safe — the hcomp simply stays
     // stuck instead of reducing to base.
-    let depth = ALL_TUBES_DEPTH.with(|d| d.get() + 1);
-    ALL_TUBES_DEPTH.with(|d| d.set(depth));
-    if depth > 1 {
-        ALL_TUBES_DEPTH.with(|d| d.set(depth - 1));
+    let depth = session::all_tubes_depth_enter();
+    if depth > 0 {
+        session::all_tubes_depth_restore(depth);
         return false;
     }
     let result = all_tubes_constant_and_coherent_inner(globals, global_offset, sys, base);
-    ALL_TUBES_DEPTH.with(|d| d.set(depth - 1));
+    session::all_tubes_depth_restore(depth);
     result
 }
 
@@ -3366,7 +3322,7 @@ pub fn do_hcomp(
                     _ => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
                 };
 
-                let dts = current_dts();
+                let dts = session::current_dts();
                 let dt = match dts.iter().find(|dt| dt.name == *d_name) {
                     Some(dt) => dt.clone(),
                     None => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
@@ -3663,7 +3619,7 @@ pub fn do_comp(
                     }
                 };
 
-                let dts = current_dts();
+                let dts = session::current_dts();
                 let dt = match dts.iter().find(|dt| dt.name == *d_name) {
                     Some(dt) => dt.clone(),
                     None => {
@@ -4033,7 +3989,7 @@ pub fn do_fill(
                     }
                 };
 
-                let dts = current_dts();
+                let dts = session::current_dts();
                 let dt = match dts.iter().find(|dt| dt.name == *d_name) {
                     Some(dt) => dt.clone(),
                     None => {
@@ -4439,7 +4395,7 @@ pub fn do_hfill(
                     }
                 };
 
-                let dts = current_dts();
+                let dts = session::current_dts();
                 let dt = match dts.iter().find(|dt| dt.name == *d_name) {
                     Some(dt) => dt.clone(),
                     None => {
@@ -4621,9 +4577,6 @@ pub fn do_hfill(
     }
 }
 
-thread_local! {
-    static QUOTE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
 
 /// Quoting can also diverge independently of `eval_nbe`: re-quoting a lambda
 /// whose body re-references the same global value grows the quote recursion one
@@ -4637,17 +4590,13 @@ thread_local! {
 const QUOTE_MAX_DEPTH: usize = 200;
 
 pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value) -> Term {
-    let n = QUOTE_DEPTH.with(|c| {
-        let d = c.get() + 1;
-        c.set(d);
-        d
-    });
-    if n > QUOTE_MAX_DEPTH {
-        QUOTE_DEPTH.with(|c| c.set(n - 1));
+    let n = session::quote_depth_enter();
+    if n >= QUOTE_MAX_DEPTH {
+        session::quote_depth_restore(n);
         return Term::TVar(size as i32);
     }
     let r = quote_inner(size, globals, global_offset, v);
-    QUOTE_DEPTH.with(|c| c.set(n - 1));
+    session::quote_depth_restore(n);
     r
 }
 
@@ -5470,7 +5419,7 @@ pub fn eval_system(
 /// Evaluate a closed term without global definitions (original behavior).
 pub fn nbe_eval(t: &Term) -> Term {
     if !has_meta_in_term(t) {
-        let cached = NBE_EVAL_CACHE.with(|cache| cache.borrow().get(t).cloned());
+        let cached = session::eval_cache_get(t);
         if let Some(result) = cached {
             return result;
         }
@@ -5490,7 +5439,7 @@ pub fn nbe_eval(t: &Term) -> Term {
         }
     };
     if !has_meta_in_term(t) {
-        NBE_EVAL_CACHE.with(|cache| cache.borrow_mut().insert(t.clone(), result.clone()));
+        session::eval_cache_insert(t.clone(), result.clone());
     }
     result
 }
@@ -5513,7 +5462,7 @@ pub fn nbe_eval_with_globals(t: &Term, globals: &Globals, global_offset: usize) 
 /// the typechecker convention that global definitions sit at the bottom of the
 /// context. Falls back to `nbe_eval` (no globals) when none are set.
 pub fn nbe_eval_ctx(ctx_len: usize, t: &Term) -> Term {
-    let Some(globals) = CURRENT_GLOBALS.with(|cell| cell.borrow().clone()) else {
+    let Some(globals) = session::get_current_globals() else {
         return nbe_eval(t);
     };
     let n_globals = globals.borrow().len();
@@ -5627,86 +5576,32 @@ fn level_to_var(size: usize, level: usize) -> Term {
 }
 
 // ---------------------------------------------------------------------------
-// Metavariable store and helpers
+// Metavariable store and helpers — delegated to session module
 // ---------------------------------------------------------------------------
 
-pub fn fresh_meta_id() -> i32 {
-    METAVAR_SOLUTIONS.with(|s| {
-        let mut store = s.borrow_mut();
-        let id = store.len() as i32;
-        store.push(None);
-        META_NAMES.with(|n| n.borrow_mut().push(None));
-        META_EXPECTED.with(|e| e.borrow_mut().push(None));
-        id
-    })
-}
+pub use session::fresh_meta_id;
 
 /// Register a display name for a hole (from `?name` syntax).
 /// Anonymous holes (`_`, `?`) have no name.
-pub fn set_meta_name(id: i32, name: Name) {
-    META_NAMES.with(|n| {
-        if id >= 0 && (id as usize) < n.borrow().len() {
-            n.borrow_mut()[id as usize] = Some(name);
-        }
-    });
-}
+pub use session::set_meta_name;
 
-pub fn get_meta_name(id: i32) -> Option<Name> {
-    if id < 0 {
-        return None;
-    }
-    META_NAMES.with(|n| n.borrow().get(id as usize).and_then(|o| o.clone()))
-}
+pub use session::get_meta_name;
 
 /// Record the expected type of a hole as discovered by `check_dt`.
 /// Only meaningful while the hole is unsolved.
-pub fn set_meta_expected(id: i32, ty: Term) {
-    META_EXPECTED.with(|e| {
-        if id >= 0 && (id as usize) < e.borrow().len() {
-            let mut store = e.borrow_mut();
-            if store[id as usize].is_none() {
-                store[id as usize] = Some(ty);
-            }
-        }
-    });
-}
+pub use session::set_meta_expected;
 
-pub fn get_meta_expected(id: i32) -> Option<Term> {
-    if id < 0 {
-        return None;
-    }
-    META_EXPECTED.with(|e| e.borrow().get(id as usize).and_then(|o| o.clone()))
-}
+pub use session::get_meta_expected;
 
-pub fn solve_meta(id: i32, solution: Term) {
-    METAVAR_SOLUTIONS.with(|s| {
-        if id >= 0 && (id as usize) < s.borrow().len() {
-            s.borrow_mut()[id as usize] = Some(solution);
-        }
-    });
-}
+pub use session::solve_meta;
 
-pub fn get_meta_solution(id: i32) -> Option<Term> {
-    if id < 0 {
-        return None;
-    }
-    METAVAR_SOLUTIONS.with(|s| s.borrow().get(id as usize).and_then(|opt| opt.clone()))
-}
+pub use session::get_meta_solution;
 
-pub fn clear_metavars() {
-    METAVAR_SOLUTIONS.with(|s| s.borrow_mut().clear());
-    META_NAMES.with(|n| n.borrow_mut().clear());
-    META_EXPECTED.with(|e| e.borrow_mut().clear());
-}
+pub use session::clear_metavars;
 
-pub fn clear_nbe_cache() {
-    NBE_EVAL_CACHE.with(|cache| cache.borrow_mut().clear());
-}
+pub use session::clear_nbe_cache;
 
-pub fn clear_all_caches() {
-    clear_nbe_cache();
-    clear_metavars();
-}
+pub use session::clear_all_caches;
 
 pub fn meta_mentions(id: i32, t: &Term) -> bool {
     match t {

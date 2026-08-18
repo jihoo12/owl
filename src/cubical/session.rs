@@ -169,8 +169,8 @@ pub fn eval_depth_restore(d: usize) {
 pub fn quote_depth_enter() -> usize {
     SESSION.with(|cell| {
         let mut s = cell.borrow_mut();
-        let d = s.quote_depth + 1;
-        s.quote_depth = d;
+        let d = s.quote_depth;
+        s.quote_depth += 1;
         d
     })
 }
