@@ -28,29 +28,27 @@ mod tests {
 
     #[test]
     fn constant_pi_transport_is_identity() {
-        // Family: λi. (x : U) → U
-        // Input:  λx. λy. y   (the identity on U)
-        // Result: identity function unchanged
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
+                b(Term::TPi(
+                    "x".to_string(),
+                    b(Term::TUniv(0)),
+                    b(Term::TUniv(0)),
+                )),
+            );
+            let input = Term::TAbs(
                 "x".to_string(),
-                b(Term::TUniv(0)),
-                b(Term::TUniv(0)),
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TAbs("y".to_string(), b(Term::TVar(0)))),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        // Constant family → transport is identity → result should be the original lambda
-        match result {
-            Value::VLam(_, _) => {}
-            other => panic!("expected VLam (identity), got: {:?}", other),
-        }
+                b(Term::TAbs("y".to_string(), b(Term::TVar(0)))),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            match result {
+                Value::VLam(_, _) => {}
+                other => panic!("expected VLam (identity), got: {:?}", other),
+            }
+        });
     }
 
     // ---------------------------------------------------------------
@@ -59,36 +57,27 @@ mod tests {
 
     #[test]
     fn nondependent_codomain_pi_transport_reduces() {
-        // Family: λi. (x : U) → U_i
-        //   where U_i = TVar(0) = the interval variable
-        //   → codomain is VIntervalVar at the formal position, domain is constant U
-        //   → uses_var_at_level(codomain_body, 0) = false (TUniv doesn't reference var 0)
-        //
-        // Input:  λx. λy. x
-        // Result: TAbs wrapping a TTransport over the codomain family
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
+                b(Term::TPi(
+                    "x".to_string(),
+                    b(Term::TUniv(0)),
+                    b(Term::TUniv(0)),
+                )),
+            );
+            let input = Term::TAbs(
                 "x".to_string(),
-                b(Term::TUniv(0)),
-                b(Term::TUniv(0)), // constant codomain
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TAbs(
-                "y".to_string(),
-                b(Term::TVar(1)), // returns x
-            )),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        // Should produce a TAbs (reduced), not a stuck TTransport
-        match &result {
-            Value::VLam(_, _) => {}
-            other => panic!("expected TAbs/VLam, got: {:?}", other),
-        }
+                b(Term::TAbs("y".to_string(), b(Term::TVar(1)))),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            match &result {
+                Value::VLam(_, _) => {}
+                other => panic!("expected TAbs/VLam, got: {:?}", other),
+            }
+        });
     }
 
     // ---------------------------------------------------------------
@@ -97,36 +86,28 @@ mod tests {
 
     #[test]
     fn varying_domain_constant_codomain_pi_transport() {
-        // Family: λi. (x : A(i)) → U
-        //   A(i) = TApp(TVar(0), TVar(0)) — applies interval var to itself
-        //   codomain is TUniv(0) — constant, doesn't reference i
-        //
-        // Input:  λx. λy. y
-        //
-        // Since codomain doesn't use var 0 (the interval var), this is
-        // the non-dependent path. The codomain family is extracted and
-        // transport is applied to each argument.
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
+                b(Term::TPi(
+                    "x".to_string(),
+                    b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
+                    b(Term::TUniv(0)),
+                )),
+            );
+            let input = Term::TAbs(
                 "x".to_string(),
-                b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-                b(Term::TUniv(0)),
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TAbs("y".to_string(), b(Term::TVar(0)))),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        // Should reduce to TAbs, not stay stuck
-        assert!(
-            !matches!(&result, Value::VTransport(_, _)),
-            "should not be stuck as VTransport: {:?}",
-            result
-        );
+                b(Term::TAbs("y".to_string(), b(Term::TVar(0)))),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            assert!(
+                !matches!(&result, Value::VTransport(_, _)),
+                "should not be stuck as VTransport: {:?}",
+                result
+            );
+        });
     }
 
     // ---------------------------------------------------------------
@@ -135,41 +116,37 @@ mod tests {
 
     #[test]
     fn dependent_codomain_pi_transport_reduces() {
-        // Family: λi. (x : A) → (y : U) → x
-        //   codomain body = TVar(1) references x (the Pi argument)
-        //   → uses_var_at_level(codomain_body, 0) = true
-        //   → must use fallback path
-        //
-        // Input:  λx. λy. x
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
-                "x".to_string(),
-                b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
                 b(Term::TPi(
-                    "y".to_string(),
-                    b(Term::TUniv(0)),
-                    b(Term::TVar(1)), // references x → dependent!
+                    "x".to_string(),
+                    b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
+                    b(Term::TPi(
+                        "y".to_string(),
+                        b(Term::TUniv(0)),
+                        b(Term::TVar(1)),
+                    )),
                 )),
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TAbs("y".to_string(), b(Term::TVar(1)))),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        assert!(
-            !matches!(&result, Value::VTransport(_, _)),
-            "dependent Pi transport should reduce, got stuck: {:?}",
-            result
-        );
-        assert!(
-            matches!(&result, Value::VLam(_, _)),
-            "expected VLam, got: {:?}",
-            result
-        );
+            );
+            let input = Term::TAbs(
+                "x".to_string(),
+                b(Term::TAbs("y".to_string(), b(Term::TVar(1)))),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            assert!(
+                !matches!(&result, Value::VTransport(_, _)),
+                "dependent Pi transport should reduce, got stuck: {:?}",
+                result
+            );
+            assert!(
+                matches!(&result, Value::VLam(_, _)),
+                "expected VLam, got: {:?}",
+                result
+            );
+        });
     }
 
     // ---------------------------------------------------------------
@@ -178,47 +155,44 @@ mod tests {
 
     #[test]
     fn deeply_nested_dependent_codomain_transport() {
-        // Family: λi. (x : U) → (y : U) → (z : U) → x
-        //   codomain body = TVar(2) references x through 2 binders
-        //   → uses_var_at_level(body, 0) = true (under 2 binders, checks level 0+2=2)
-        //
-        // Input:  λx. λy. λz. x
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
-                "x".to_string(),
-                b(Term::TUniv(0)),
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
                 b(Term::TPi(
-                    "y".to_string(),
+                    "x".to_string(),
                     b(Term::TUniv(0)),
                     b(Term::TPi(
-                        "z".to_string(),
+                        "y".to_string(),
                         b(Term::TUniv(0)),
-                        b(Term::TVar(2)), // references x, two binders deep
+                        b(Term::TPi(
+                            "z".to_string(),
+                            b(Term::TUniv(0)),
+                            b(Term::TVar(2)), // references x, two binders deep
+                        )),
                     )),
                 )),
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TAbs(
-                "y".to_string(),
-                b(Term::TAbs("z".to_string(), b(Term::TVar(2)))),
-            )),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        assert!(
-            !matches!(&result, Value::VTransport(_, _)),
-            "deeply dependent Pi transport should reduce, got stuck: {:?}",
-            result
-        );
-        assert!(
-            matches!(&result, Value::VLam(_, _)),
-            "expected VLam, got: {:?}",
-            result
-        );
+            );
+            let input = Term::TAbs(
+                "x".to_string(),
+                b(Term::TAbs(
+                    "y".to_string(),
+                    b(Term::TAbs("z".to_string(), b(Term::TVar(2)))),
+                )),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            assert!(
+                !matches!(&result, Value::VTransport(_, _)),
+                "deeply dependent Pi transport should reduce, got stuck: {:?}",
+                result
+            );
+            assert!(
+                matches!(&result, Value::VLam(_, _)),
+                "expected VLam, got: {:?}",
+                result
+            );
+        });
     }
 
     // ---------------------------------------------------------------
@@ -227,38 +201,35 @@ mod tests {
 
     #[test]
     fn nested_pi_transport() {
-        // Family: λi. (x : U) → (y : U) → U
-        //   non-dependent: neither codomain references i
-        //
-        // Input:  λx. λy. λz. z
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
-                "x".to_string(),
-                b(Term::TUniv(0)),
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
                 b(Term::TPi(
-                    "y".to_string(),
+                    "x".to_string(),
                     b(Term::TUniv(0)),
-                    b(Term::TUniv(0)),
+                    b(Term::TPi(
+                        "y".to_string(),
+                        b(Term::TUniv(0)),
+                        b(Term::TUniv(0)),
+                    )),
                 )),
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TAbs(
-                "y".to_string(),
-                b(Term::TAbs("z".to_string(), b(Term::TVar(0)))),
-            )),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        // Should reduce to a nested TAbs
-        assert!(
-            matches!(&result, Value::VLam(_, _)),
-            "expected VLam, got: {:?}",
-            result
-        );
+            );
+            let input = Term::TAbs(
+                "x".to_string(),
+                b(Term::TAbs(
+                    "y".to_string(),
+                    b(Term::TAbs("z".to_string(), b(Term::TVar(0)))),
+                )),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            assert!(
+                matches!(&result, Value::VLam(_, _)),
+                "expected VLam, got: {:?}",
+                result
+            );
+        });
     }
 
     // ---------------------------------------------------------------
@@ -267,35 +238,28 @@ mod tests {
 
     #[test]
     fn codomain_references_interval_var() {
-        // Family: λi. (x : U) → i
-        //   codomain = TVar(0) = interval variable (at de Bruijn 0 in the body)
-        //   → after shifting, this is the interval var, not the Pi argument
-        //   → uses_var_at_level(TVar(0), 0) in the shifted body... tricky
-        //
-        // Input:  λx. i0
-        //
-        // This should exercise the non-dependent fast path.
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
+                b(Term::TPi(
+                    "x".to_string(),
+                    b(Term::TUniv(0)),
+                    b(Term::TVar(0)), // interval variable (after shift, this is the Pi arg NOT i)
+                )),
+            );
+            let input = Term::TAbs(
                 "x".to_string(),
-                b(Term::TUniv(0)),
-                b(Term::TVar(0)), // interval variable (after shift, this is the Pi arg NOT i)
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TVar(0)), // just returns x
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        // Should reduce
-        assert!(
-            !matches!(&result, Value::VTransport(_, _)),
-            "Pi transport should reduce, got stuck: {:?}",
-            result
-        );
+                b(Term::TVar(0)), // just returns x
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            assert!(
+                !matches!(&result, Value::VTransport(_, _)),
+                "Pi transport should reduce, got stuck: {:?}",
+                result
+            );
+        });
     }
 
     // ---------------------------------------------------------------
@@ -376,104 +340,94 @@ mod tests {
 
     #[test]
     fn parser_roundtrip_pi_transport_term() {
-        // Construct a complex Pi transport term and verify it normalizes
-        // without panicking via nbe_eval.
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
-                "x".to_string(),
-                b(Term::TUniv(0)),
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
                 b(Term::TPi(
-                    "y".to_string(),
+                    "x".to_string(),
                     b(Term::TUniv(0)),
                     b(Term::TPi(
-                        "z".to_string(),
-                        b(Term::TUniv(1)),
+                        "y".to_string(),
                         b(Term::TUniv(0)),
+                        b(Term::TPi(
+                            "z".to_string(),
+                            b(Term::TUniv(1)),
+                            b(Term::TUniv(0)),
+                        )),
                     )),
                 )),
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TAbs(
-                "y".to_string(),
-                b(Term::TAbs("z".to_string(), b(Term::TUniv(0)))),
-            )),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let result = nbe_eval(&term);
-        // Just verify it normalizes without panicking
-        let _ = crate::cubical::syntax::show_term(&[], &result);
+            );
+            let input = Term::TAbs(
+                "x".to_string(),
+                b(Term::TAbs(
+                    "y".to_string(),
+                    b(Term::TAbs("z".to_string(), b(Term::TUniv(0)))),
+                )),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let result = nbe_eval(&term, session);
+            // Just verify it normalizes without panicking
+            let _ = crate::cubical::syntax::show_term(&[], &result);
+        });
     }
 
     #[test]
     fn dependent_pi_transport_through_sigma_codomain() {
-        // Family: λi. (x : U) → Sigma (y : U) * x
-        //   codomain = Sigma(y:U) * TVar(1)
-        //   TVar(1) references x (the Pi arg), so this is dependent
-        //
-        // Input:  λx. (x, x)  (pair)
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
-                "x".to_string(),
-                b(Term::TUniv(0)),
-                b(Term::TSigma(
-                    "y".to_string(),
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
+                b(Term::TPi(
+                    "x".to_string(),
                     b(Term::TUniv(0)),
-                    b(Term::TVar(1)), // references x
+                    b(Term::TSigma(
+                        "y".to_string(),
+                        b(Term::TUniv(0)),
+                        b(Term::TVar(1)),
+                    )),
                 )),
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::TPair(b(Term::TVar(0)), b(Term::TVar(0)))),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        // Should reduce to a function (TAbs/VLam)
-        assert!(
-            matches!(&result, Value::VLam(_, _)),
-            "expected VLam, got: {:?}",
-            result
-        );
+            );
+            let input = Term::TAbs(
+                "x".to_string(),
+                b(Term::TPair(b(Term::TVar(0)), b(Term::TVar(0)))),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            assert!(
+                matches!(&result, Value::VLam(_, _)),
+                "expected VLam, got: {:?}",
+                result
+            );
+        });
     }
 
     #[test]
     fn dependent_pi_transport_through_path_codomain() {
-        // Family: λi. (x : U) → Path x x
-        //   codomain = Path TVar(1) TVar(1)
-        //   references x, so dependent
-        //
-        // Input:  λx. <i> x
-        let fam = Term::PLam(
-            "i".to_string(),
-            b(Term::TPi(
-                "x".to_string(),
-                b(Term::TUniv(0)),
-                b(Term::TPath(
-                    b(Term::TVar(1)),
-                    b(Term::TVar(1)),
-                    b(Term::TVar(1)),
+        crate::cubical::session::with_session_mut(|session| {
+            let fam = Term::PLam(
+                "i".to_string(),
+                b(Term::TPi(
+                    "x".to_string(),
+                    b(Term::TUniv(0)),
+                    b(Term::TPath(
+                        b(Term::TVar(1)),
+                        b(Term::TVar(1)),
+                        b(Term::TVar(1)),
+                    )),
                 )),
-            )),
-        );
-        let input = Term::TAbs(
-            "x".to_string(),
-            b(Term::PLam(
-                "j".to_string(),
-                b(Term::TVar(1)), // returns x
-            )),
-        );
-        let term = Term::TTransport(b(fam), b(input));
-        let globals = empty_globals();
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &term);
-        assert!(
-            matches!(&result, Value::VLam(_, _)),
-            "expected VLam, got: {:?}",
-            result
-        );
+            );
+            let input = Term::TAbs(
+                "x".to_string(),
+                b(Term::PLam("j".to_string(), b(Term::TVar(1)))),
+            );
+            let term = Term::TTransport(b(fam), b(input));
+            let globals = empty_globals();
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &term, session);
+            assert!(
+                matches!(&result, Value::VLam(_, _)),
+                "expected VLam, got: {:?}",
+                result
+            );
+        });
     }
 }

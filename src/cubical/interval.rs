@@ -208,6 +208,7 @@ pub fn dnf_leq(a: &DNF, b: &DNF) -> bool {
 }
 
 /// Check face equivalence: `a ⇔ b` (i.e. `a ⇒ b ∧ b ⇒ a`).
+#[allow(dead_code)]
 pub fn dnf_equiv(a: &DNF, b: &DNF) -> bool {
     dnf_leq(a, b) && dnf_leq(b, a)
 }

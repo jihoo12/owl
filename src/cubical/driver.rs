@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::cubical::env::{Env, check_with_full_env, infer_with_full_env};
 use crate::cubical::nbe::{nbe_eval, nbe_eval_with_globals, zonk};
 use crate::cubical::parser::{Decl, ProgramParser};
+use crate::cubical::session::Session;
 use crate::cubical::syntax::{Name, Term};
 use crate::cubical::typechecker::errors::ContextualError;
 use crate::cubical::typechecker::{Ctx, TypeError};
@@ -78,35 +79,39 @@ impl From<TypeError> for RunError {
 /// the environment, definitions are checked against their annotations, and the
 /// `main` definition (or the last definition if no `main` exists) is normalized
 /// and returned as the program result.
-pub fn run(path: impl AsRef<Path>) -> Result<RunOutput, RunError> {
+pub fn run(path: impl AsRef<Path>, session: &mut Session) -> Result<RunOutput, RunError> {
     let path = path.as_ref();
     let source = std::fs::read_to_string(path)?;
-    run_source(path, &source)
+    run_source(path, &source, session)
 }
 
 /// Read and typecheck a cubical source file without evaluating an entry point.
 ///
 /// This accepts libraries containing only datatype declarations, which makes it
 /// suitable for the `owl check` command and for checking imported modules.
-pub fn check(path: impl AsRef<Path>) -> Result<(), RunError> {
+pub fn check(path: impl AsRef<Path>, session: &mut Session) -> Result<(), RunError> {
     let path = path.as_ref();
     let source = std::fs::read_to_string(path)?;
-    check_source(path, &source)
+    check_source(path, &source, session)
 }
 
 /// Typecheck and evaluate cubical source from a string, using the current
 /// directory for import resolution.
-pub fn run_str(source: &str) -> Result<RunOutput, RunError> {
-    run_source(Path::new("."), source)
+pub fn run_str(source: &str, session: &mut Session) -> Result<RunOutput, RunError> {
+    run_source(Path::new("."), source, session)
 }
 
 /// Typecheck cubical source from a string, without requiring a `main`
 /// definition. Imports are resolved relative to the current directory.
-pub fn check_str(source: &str) -> Result<(), RunError> {
-    check_source(Path::new("."), source)
+pub fn check_str(source: &str, session: &mut Session) -> Result<(), RunError> {
+    check_source(Path::new("."), source, session)
 }
 
-fn run_source(root_path: &Path, source: &str) -> Result<RunOutput, RunError> {
+fn run_source(
+    root_path: &Path,
+    source: &str,
+    session: &mut Session,
+) -> Result<RunOutput, RunError> {
     let mut env = Env::new();
     let mut loaded = HashSet::new();
     let import_base = root_path.parent().unwrap_or_else(|| Path::new("."));
@@ -120,35 +125,39 @@ fn run_source(root_path: &Path, source: &str) -> Result<RunOutput, RunError> {
         &mut HashSet::new(),
         &mut last_def,
         None,
+        session,
     )?;
 
     // Prefer `main` over the last definition when both exist.
     if let Some((name, _, _)) = env.defs.iter().find(|(name, _, _)| name == "main") {
-        Ok(normalize_definition(&env, name))
+        Ok(normalize_definition(&env, name, session))
     } else {
         last_def
-            .map(|output| normalize_definition(&env, &output.name))
+            .map(|output| normalize_definition(&env, &output.name, session))
             .ok_or(RunError::NoEntryPoint)
     }
 }
 
-fn normalize_definition(env: &Env, name: &str) -> RunOutput {
+fn normalize_definition(env: &Env, name: &str, session: &mut Session) -> RunOutput {
     let index = env
         .defs
         .iter()
         .position(|(candidate, _, _)| candidate == name)
         .expect("definition selected from environment must exist");
     let (name, ty, value) = &env.defs[index];
-    let globals = crate::cubical::env::build_definition_values(env);
+    let globals = crate::cubical::env::build_definition_values(env, session);
     RunOutput {
         name: name.clone(),
-        ty: zonk(ty),
-        value: zonk(&nbe_eval_with_globals(value, &globals, index)),
+        ty: zonk(ty, session),
+        value: zonk(
+            &nbe_eval_with_globals(value, &globals, index, session),
+            session,
+        ),
         global_names: env.defs.iter().map(|(name, _, _)| name.clone()).collect(),
     }
 }
 
-fn check_source(root_path: &Path, source: &str) -> Result<(), RunError> {
+fn check_source(root_path: &Path, source: &str, session: &mut Session) -> Result<(), RunError> {
     let mut env = Env::new();
     let mut loaded = HashSet::new();
     let import_base = root_path.parent().unwrap_or_else(|| Path::new("."));
@@ -161,6 +170,7 @@ fn check_source(root_path: &Path, source: &str) -> Result<(), RunError> {
         &mut HashSet::new(),
         &mut last_def,
         None,
+        session,
     )
 }
 
@@ -185,33 +195,43 @@ fn process_file_source(
     loading: &mut HashSet<(PathBuf, String)>,
     last_def: &mut Option<RunOutput>,
     forced_prefix: Option<&str>,
+    session: &mut Session,
 ) -> Result<(), RunError> {
-    let mut parser = ProgramParser::new_with_prefix(source, forced_prefix)?;
-    crate::cubical::nbe::clear_nbe_cache();
+    let mut parser = ProgramParser::new_with_prefix(source, forced_prefix, session)?;
+    session.clear_nbe_cache();
     // Accumulate name positions across the whole program so globals from
     // earlier declarations (which may only surface as inferred types) resolve
     // to a position. Reverse lookup prefers the most recent occurrence.
     let mut decl_positions = Vec::new();
     while let Some(decl) = parser.next_decl()? {
         decl_positions.extend(parser.take_decl_positions());
-        crate::cubical::typechecker::errors::set_decl_name_positions(decl_positions.clone());
+        session.set_decl_name_positions(decl_positions.clone());
         let result: Result<(), RunError> = (|| {
             match decl {
                 Decl::Import { path, alias } => {
-                    load_import(&path, &alias, env, loaded, loading, import_base, last_def)?;
+                    load_import(
+                        &path,
+                        &alias,
+                        env,
+                        loaded,
+                        loading,
+                        import_base,
+                        last_def,
+                        session,
+                    )?;
                     parser.sync_from_env(env);
                 }
                 Decl::Module { .. } | Decl::ModuleEnd => {
                     // The parser already updated its module scope.
                 }
                 Decl::Data(dt) => {
-                    process_data(&dt, env)?;
+                    process_data(&dt, env, session)?;
                 }
                 Decl::DataMutual(dts) => {
-                    process_data_mutual(&dts, env)?;
+                    process_data_mutual(&dts, env, session)?;
                 }
                 Decl::Record(dt) => {
-                    process_data(&dt, env)?;
+                    process_data(&dt, env, session)?;
                 }
                 Decl::DataWithFunc {
                     dt,
@@ -219,7 +239,7 @@ fn process_file_source(
                     func_ty,
                     func_val,
                 } => {
-                    process_data_with_func(&dt, &func_name, &func_ty, &func_val, env)?;
+                    process_data_with_func(&dt, &func_name, &func_ty, &func_val, env, session)?;
                 }
                 Decl::Def {
                     name,
@@ -227,15 +247,15 @@ fn process_file_source(
                     val,
                     by_wf,
                 } => {
-                    *last_def = Some(process_def(&name, &ty, &val, env, by_wf)?);
+                    *last_def = Some(process_def(&name, &ty, &val, env, by_wf, session)?);
                 }
             }
             Ok(())
         })();
         result?;
-        crate::cubical::nbe::clear_nbe_cache();
+        session.clear_nbe_cache();
     }
-    crate::cubical::typechecker::errors::clear_decl_name_positions();
+    session.clear_decl_name_positions();
     Ok(())
 }
 
@@ -252,6 +272,7 @@ fn load_import(
     loading: &mut HashSet<LoadedKey>,
     import_base: &Path,
     last_def: &mut Option<RunOutput>,
+    session: &mut Session,
 ) -> Result<(), RunError> {
     let resolved = resolve_import_path(import_base, path);
     let canonical = canonical_import_path(&resolved);
@@ -280,6 +301,7 @@ fn load_import(
         loading,
         last_def,
         alias.as_deref(),
+        session,
     )?;
 
     loading.remove(&key);
@@ -287,7 +309,11 @@ fn load_import(
     Ok(())
 }
 
-fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<(), RunError> {
+fn process_data(
+    dt: &crate::cubical::syntax::Datatype,
+    env: &mut Env,
+    session: &mut Session,
+) -> Result<(), RunError> {
     // Check positivity before registering the datatype.
     crate::cubical::syntax::check_datatype_positivity(dt).map_err(|e| {
         RunError::Type(Box::new(crate::cubical::typechecker::TypeError::Other(
@@ -324,12 +350,13 @@ fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<
                 &param_ctx,
                 arg_ty,
                 &Term::TUniv(0),
+                session,
             )
             .map_err(|e| RunError::Type(Box::new(e)))?;
         }
     }
     // Check boundary coherence for square constructors.
-    crate::cubical::typechecker::check_sqcon_coherence(&env.datatypes, dt)
+    crate::cubical::typechecker::check_sqcon_coherence(&env.datatypes, dt, session)
         .map_err(|e| RunError::Type(Box::new(e)))?;
     Ok(())
 }
@@ -339,6 +366,7 @@ fn process_data(dt: &crate::cubical::syntax::Datatype, env: &mut Env) -> Result<
 fn process_data_mutual(
     dts: &[crate::cubical::syntax::Datatype],
     env: &mut Env,
+    session: &mut Session,
 ) -> Result<(), RunError> {
     // Phase 1: Register all datatypes so they can reference each other.
     for dt in dts {
@@ -369,11 +397,12 @@ fn process_data_mutual(
                     &param_ctx,
                     arg_ty,
                     &Term::TUniv(0),
+                    session,
                 )
                 .map_err(|e| RunError::Type(Box::new(e)))?;
             }
         }
-        crate::cubical::typechecker::check_sqcon_coherence(&env.datatypes, dt)
+        crate::cubical::typechecker::check_sqcon_coherence(&env.datatypes, dt, session)
             .map_err(|e| RunError::Type(Box::new(e)))?;
     }
     Ok(())
@@ -387,23 +416,186 @@ fn process_data_with_func(
     func_ty: &Term,
     func_val: &Term,
     env: &mut Env,
+    session: &mut Session,
 ) -> Result<RunOutput, RunError> {
     // First, process the datatype (positivity check + register).
-    process_data(dt, env)?;
+    process_data(dt, env, session)?;
     // Then, process the function definition with the datatype in scope.
-    process_def(func_name, func_ty, func_val, env, false)
+    process_def(func_name, func_ty, func_val, env, false, session)
 }
 
 /// Collect the unsolved holes (with names and expected types) in `t`.
-fn unsolved_hole_report(t: &Term) -> Vec<(i32, Name, Option<Term>)> {
-    crate::cubical::nbe::collect_unsolved_metas(t)
-        .into_iter()
+fn unsolved_hole_report(t: &Term, session: &Session) -> Vec<(i32, Name, Option<Term>)> {
+    let mut ids = Vec::new();
+    collect_meta_ids(t, &mut ids);
+    ids.into_iter()
+        .filter(|id| session.get_meta_solution(*id).is_none())
         .map(|id| {
-            let name = crate::cubical::nbe::get_meta_name(id).unwrap_or_default();
-            let expected = crate::cubical::nbe::get_meta_expected(id);
+            let name = session.get_meta_name(id).unwrap_or_default();
+            let expected = session.get_meta_expected(id);
             (id, name, expected)
         })
         .collect()
+}
+
+fn collect_meta_ids(t: &Term, out: &mut Vec<i32>) {
+    match t {
+        Term::Meta(i) => {
+            if !out.contains(i) {
+                out.push(*i);
+            }
+        }
+        Term::TApp(a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::TAbs(_, b) => {
+            collect_meta_ids(b, out);
+        }
+        Term::TLift(a, _) | Term::TLower(a) => {
+            collect_meta_ids(a, out);
+        }
+        Term::TPi(_, a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::TPath(a, b, c) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+            collect_meta_ids(c, out);
+        }
+        Term::PLam(_, b) => {
+            collect_meta_ids(b, out);
+        }
+        Term::PApp(a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::THComp(a, faces, c) => {
+            collect_meta_ids(a, out);
+            for f in faces {
+                collect_meta_ids(&f.1, out);
+            }
+            collect_meta_ids(c, out);
+        }
+        Term::TComp(a, faces, c) => {
+            collect_meta_ids(a, out);
+            for f in faces {
+                collect_meta_ids(&f.1, out);
+            }
+            collect_meta_ids(c, out);
+        }
+        Term::TFill(a, faces, c) => {
+            collect_meta_ids(a, out);
+            for f in faces {
+                collect_meta_ids(&f.1, out);
+            }
+            collect_meta_ids(c, out);
+        }
+        Term::THFill(a, faces, c) => {
+            collect_meta_ids(a, out);
+            for f in faces {
+                collect_meta_ids(&f.1, out);
+            }
+            collect_meta_ids(c, out);
+        }
+        Term::TTransport(a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::TGlue(a, b, c) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+            collect_meta_ids(c, out);
+        }
+        Term::TGlueElem(a, b, c) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+            collect_meta_ids(c, out);
+        }
+        Term::TUnglue(a, b, c) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+            collect_meta_ids(c, out);
+        }
+        Term::TPartial(a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::TEquiv(a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::TMkEquiv(a, b, c, d, e, f) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+            collect_meta_ids(c, out);
+            collect_meta_ids(d, out);
+            collect_meta_ids(e, out);
+            collect_meta_ids(f, out);
+        }
+        Term::TEquivFwd(a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::TUa(a) => {
+            collect_meta_ids(a, out);
+        }
+        Term::TSigma(_, a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::TPair(a, b) => {
+            collect_meta_ids(a, out);
+            collect_meta_ids(b, out);
+        }
+        Term::TFst(a) | Term::TSnd(a) => {
+            collect_meta_ids(a, out);
+        }
+        Term::TData(_, args) | Term::TCon(_, _, args) => {
+            for a in args {
+                collect_meta_ids(a, out);
+            }
+        }
+        Term::TPCon(_, _, args, r) => {
+            for a in args {
+                collect_meta_ids(a, out);
+            }
+            collect_meta_ids(r, out);
+        }
+        Term::TSqCon(_, _, args, r, s) => {
+            for a in args {
+                collect_meta_ids(a, out);
+            }
+            collect_meta_ids(r, out);
+            collect_meta_ids(s, out);
+        }
+        Term::TCellCon(_, _, args, ivars) => {
+            for a in args {
+                collect_meta_ids(a, out);
+            }
+            for a in ivars {
+                collect_meta_ids(a, out);
+            }
+        }
+        Term::TElim(motive, cases, scrut) => {
+            collect_meta_ids(motive, out);
+            for c in cases {
+                collect_meta_ids(&c.body, out);
+            }
+            collect_meta_ids(scrut, out);
+        }
+        Term::TProj(_, a) => {
+            collect_meta_ids(a, out);
+        }
+        Term::TRecordUpdate(a, fields) => {
+            collect_meta_ids(a, out);
+            for (_, v) in fields {
+                collect_meta_ids(v, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn process_def(
@@ -412,11 +604,12 @@ fn process_def(
     val: &Term,
     env: &mut Env,
     by_wf: bool,
+    session: &mut Session,
 ) -> Result<RunOutput, RunError> {
-    crate::cubical::nbe::clear_nbe_cache();
+    session.clear_nbe_cache();
     crate::debug_log!("process_def '{}':", name);
     if by_wf {
-        crate::cubical::typechecker::termination::set_skip_guard(true);
+        crate::cubical::typechecker::termination::set_skip_guard(true, session);
     }
     crate::debug_log!(
         "process_def '{}' raw_ty: {}",
@@ -436,7 +629,7 @@ fn process_def(
     // If the type annotation is a `_` hole, skip the universe-level check;
     // it will be solved during body typechecking.
     if !matches!(ty, Term::Meta(_)) {
-        match nbe_eval(&infer_with_full_env(env, ty)?) {
+        match nbe_eval(&infer_with_full_env(env, ty, session)?, session) {
             Term::TUniv(_) => {}
             other => {
                 return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse {
@@ -465,12 +658,17 @@ fn process_def(
     // thread-local globals exactly like `check_with_full_env` does. The
     // current definition itself is not yet in `env.defs`, so its reference
     // (de Bruijn index 0 of the goal scope) stays neutral.
-    let globals = crate::cubical::env::build_definition_values(env);
-    let prev_globals = crate::cubical::session::set_current_globals(Some(globals));
-    let resolved_val =
-        crate::cubical::tactics::resolve_tactics(&env.datatypes, val, &check_ty, &global_ctx)
-            .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
-    crate::cubical::session::set_current_globals(prev_globals);
+    let globals = crate::cubical::env::build_definition_values(env, session);
+    let prev_globals = session.set_current_globals(Some(globals));
+    let resolved_val = crate::cubical::tactics::resolve_tactics(
+        &env.datatypes,
+        val,
+        &check_ty,
+        &global_ctx,
+        session,
+    )
+    .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
+    session.set_current_globals(prev_globals);
     let resolved_val = resolved_val?;
 
     // Register before checking the body so recursive calls resolve.
@@ -479,18 +677,19 @@ fn process_def(
     // (`nbe_eval_ctx(ctx.len(), shift(j+1, 0, annotation))`) see a clean,
     // non-inlined annotation.
     env.define(name.clone(), ty.clone(), resolved_val.clone());
-    let prev_def = crate::cubical::typechecker::termination::set_current_def(Some(name.clone()));
-    let result = check_with_full_env(env, &resolved_val, &check_ty)
+    let prev_def =
+        crate::cubical::typechecker::termination::set_current_def(Some(name.clone()), session);
+    let result = check_with_full_env(env, &resolved_val, &check_ty, session)
         .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
-    crate::cubical::typechecker::termination::set_current_def(prev_def);
+    crate::cubical::typechecker::termination::set_current_def(prev_def, session);
     if by_wf {
-        crate::cubical::typechecker::termination::set_skip_guard(false);
+        crate::cubical::typechecker::termination::set_skip_guard(false, session);
     }
     result?;
 
     // Unsolved-hole check: a definition may not leave `?` / `_` holes open.
-    let mut metas = unsolved_hole_report(&zonk(&resolved_val));
-    metas.extend(unsolved_hole_report(&zonk(ty)));
+    let mut metas = unsolved_hole_report(&zonk(&resolved_val, session), session);
+    metas.extend(unsolved_hole_report(&zonk(ty, session), session));
     if !metas.is_empty() {
         let names: Vec<Name> = env.defs.iter().map(|(n, _, _)| n.clone()).collect();
         return Err(RunError::Type(Box::new(
@@ -500,8 +699,8 @@ fn process_def(
 
     let output = RunOutput {
         name: name.clone(),
-        ty: zonk(ty),
-        value: zonk(&nbe_eval(&resolved_val)),
+        ty: zonk(ty, session),
+        value: zonk(&nbe_eval(&resolved_val, session), session),
         global_names: env.defs.iter().map(|(n, _, _)| n.clone()).collect(),
     };
 
@@ -513,6 +712,18 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
+
+    fn run(path: impl AsRef<Path>) -> Result<RunOutput, RunError> {
+        crate::cubical::session::with_session_mut(|session| super::run(path, session))
+    }
+
+    fn check(path: impl AsRef<Path>) -> Result<(), RunError> {
+        crate::cubical::session::with_session_mut(|session| super::check(path, session))
+    }
+
+    fn run_str(source: &str) -> Result<RunOutput, RunError> {
+        crate::cubical::session::with_session_mut(|session| super::run_str(source, session))
+    }
 
     #[test]
     fn run_with_import_merges_declarations() {
@@ -681,7 +892,7 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("main.owl");
         fs::write(&path, src).unwrap();
-        let output = run(&path).expect("mul should compute");
+        let _output = run(&path).expect("mul should compute");
         let _ = fs::remove_dir_all(&dir);
     }
 

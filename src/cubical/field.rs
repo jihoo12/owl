@@ -33,6 +33,7 @@ use crate::cubical::ring::{
     cong_mul_r, decomp, expand, inst, numeral_of, poly_merge, prod_term, regroup, sum_canon, syp,
     trp,
 };
+use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError, check_dt, infer_dt};
 
@@ -54,9 +55,14 @@ struct Field {
 
 /// The `inv` operation of a `Field A add mul inv zero one` record: it is a
 /// record *parameter*, extracted from the record type's parameter list.
-fn field_inv_from_type(dts: &[Datatype], ctx: &Ctx, field_term: &Term) -> Result<Term, TypeError> {
-    let inst_ty = infer_dt(dts, ctx, field_term)?;
-    match nbe_eval_ctx(ctx.len(), &inst_ty) {
+fn field_inv_from_type(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    field_term: &Term,
+    session: &mut Session,
+) -> Result<Term, TypeError> {
+    let inst_ty = infer_dt(dts, ctx, field_term, session)?;
+    match nbe_eval_ctx(ctx.len(), &inst_ty, session) {
         Term::TData(dname, params) if dname == "Field" && params.len() == 6 => {
             Ok(params[3].clone())
         }
@@ -69,16 +75,16 @@ fn field_inv_from_type(dts: &[Datatype], ctx: &Ctx, field_term: &Term) -> Result
 
 /// Search the context for a `Field A add mul inv zero one` record whose
 /// carrier matches `carrier`, returning the `TVar` reference to it.
-fn find_field_instance(ctx: &Ctx, carrier: &Term) -> Option<Term> {
-    let car_nf = nbe_eval_ctx(ctx.len(), carrier);
+fn find_field_instance(ctx: &Ctx, carrier: &Term, session: &mut Session) -> Option<Term> {
+    let car_nf = nbe_eval_ctx(ctx.len(), carrier, session);
     for (i, (_name, ty)) in ctx.iter().enumerate() {
         // Stored binder types are binder-relative; re-anchor as `lookup_ctx`
         // does before comparing the carrier.
         let ty_shifted = shift(i as i32 + 1, 0, ty);
-        if let Term::TData(dname, params) = nbe_eval_ctx(ctx.len(), &ty_shifted) {
+        if let Term::TData(dname, params) = nbe_eval_ctx(ctx.len(), &ty_shifted, session) {
             if dname == "Field"
                 && params.len() == 6
-                && nbe_eval_ctx(ctx.len(), &params[0]) == car_nf
+                && nbe_eval_ctx(ctx.len(), &params[0], session) == car_nf
             {
                 return Some(Term::TVar(i as i32));
             }
@@ -88,14 +94,19 @@ fn find_field_instance(ctx: &Ctx, carrier: &Term) -> Option<Term> {
 }
 
 impl Field {
-    fn resolve(dts: &[Datatype], ctx: &Ctx, field_term: &Term) -> Result<Field, TypeError> {
-        let ring = Ring::resolve(dts, ctx, Some(field_term))?;
+    fn resolve(
+        dts: &[Datatype],
+        ctx: &Ctx,
+        field_term: &Term,
+        session: &mut Session,
+    ) -> Result<Field, TypeError> {
+        let ring = Ring::resolve(dts, ctx, Some(field_term), session)?;
         let proj = |field: &str| -> Result<Term, TypeError> {
             Ok(Term::TProj(field.to_string(), Box::new(field_term.clone())))
         };
         Ok(Field {
             ring,
-            inv: field_inv_from_type(dts, ctx, field_term)?,
+            inv: field_inv_from_type(dts, ctx, field_term, session)?,
             inv_mul: proj("inv_mul")?,
             inv_one: proj("inv_one")?,
             inv_mul_dist: proj("inv_mul_dist")?,
@@ -244,12 +255,12 @@ fn merge_atoms(la: &[Term], lb: &[Term]) -> Vec<Term> {
 
 /// A `Term` wrapper for the `inv` operation: `t ~ inv x` in Structured mode
 /// when `t`'s normal form applies the resolved `inv` head to `x`.
-fn as_inv(f: &Field, t: &Term) -> Option<Term> {
-    let nf = nbe_eval_ctx(f.ring.ctx_len, t);
+fn as_inv(f: &Field, t: &Term, session: &mut Session) -> Option<Term> {
+    let nf = nbe_eval_ctx(f.ring.ctx_len, t, session);
     match nf {
         Term::TApp(g, x) => {
-            let inv_nf = nbe_eval_ctx(f.ring.ctx_len, &f.inv);
-            if nbe_eval_ctx(f.ring.ctx_len, &g) == inv_nf {
+            let inv_nf = nbe_eval_ctx(f.ring.ctx_len, &f.inv, session);
+            if nbe_eval_ctx(f.ring.ctx_len, &g, session) == inv_nf {
                 Some(*x)
             } else {
                 None
@@ -269,9 +280,9 @@ fn as_inv(f: &Field, t: &Term) -> Option<Term> {
 /// `nz_one`, strip canonical `add _ zero` / `mul (numeral 1) _` wrappers,
 /// decompose products with `nz_mul`, and finally match a context hypothesis
 /// whose type normalizes to `(Path A zero x -> Empty)`.
-fn discharge(f: &Field, ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
+fn discharge(f: &Field, ctx: &Ctx, t: &Term, session: &mut Session) -> Result<Term, TypeError> {
     let r = &f.ring;
-    let nf = nbe_eval_ctx(ctx.len(), t);
+    let nf = nbe_eval_ctx(ctx.len(), t, session);
     if nf == r.zero {
         return Err(TypeError::Other(format!(
             "field: division by zero in '{}'",
@@ -281,21 +292,21 @@ fn discharge(f: &Field, ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
     if nf == r.one {
         return Ok(f.nz_one.clone());
     }
-    if let Some((x, y)) = as_add(r, &nf) {
-        if nbe_eval_ctx(ctx.len(), &y) == r.zero {
-            return discharge(f, ctx, &x);
+    if let Some((x, y)) = as_add(r, &nf, session) {
+        if nbe_eval_ctx(ctx.len(), &y, session) == r.zero {
+            return discharge(f, ctx, &x, session);
         }
-        if nbe_eval_ctx(ctx.len(), &x) == r.zero {
-            return discharge(f, ctx, &y);
+        if nbe_eval_ctx(ctx.len(), &x, session) == r.zero {
+            return discharge(f, ctx, &y, session);
         }
         return Err(TypeError::Other(format!(
             "field: cannot prove '{}' nonzero (sum of terms)",
             t
         )));
     }
-    if let Some((x, y)) = as_mul(r, &nf) {
-        match numeral_of(r, &x) {
-            Some(1) => return discharge(f, ctx, &y),
+    if let Some((x, y)) = as_mul(r, &nf, session) {
+        match numeral_of(r, &x, session) {
+            Some(1) => return discharge(f, ctx, &y, session),
             Some(_) => {
                 return Err(TypeError::Other(format!(
                     "field: cannot prove '{}' nonzero (numeral multiple)",
@@ -303,13 +314,13 @@ fn discharge(f: &Field, ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
                 )));
             }
             None => {
-                let nx = discharge(f, ctx, &x)?;
-                let ny = discharge(f, ctx, &y)?;
+                let nx = discharge(f, ctx, &x, session)?;
+                let ny = discharge(f, ctx, &y, session)?;
                 return Ok(inst(&f.nz_mul, &[&x, &y, &nx, &ny]));
             }
         }
     }
-    if let Some(h) = nz_hypothesis(f, ctx, &nf) {
+    if let Some(h) = nz_hypothesis(f, ctx, &nf, session) {
         return Ok(h);
     }
     Err(TypeError::Other(format!(
@@ -320,16 +331,18 @@ fn discharge(f: &Field, ctx: &Ctx, t: &Term) -> Result<Term, TypeError> {
 
 /// Find a context hypothesis of type `(Path A zero x -> Empty)` whose domain
 /// target normalizes to `nf`; returns the de Bruijn variable (index in `ctx`).
-fn nz_hypothesis(f: &Field, ctx: &Ctx, nf: &Term) -> Option<Term> {
+fn nz_hypothesis(f: &Field, ctx: &Ctx, nf: &Term, session: &mut Session) -> Option<Term> {
     let r = &f.ring;
     for (p, (_n, ty)) in ctx.iter().enumerate() {
         let shifted = shift(p as i32 + 1, 0, ty);
-        let ty_nf = nbe_eval_ctx(ctx.len(), &shifted);
+        let ty_nf = nbe_eval_ctx(ctx.len(), &shifted, session);
         if let Term::TPi(_, dom, codom) = ty_nf {
-            let dom_nf = nbe_eval_ctx(ctx.len(), &dom);
+            let dom_nf = nbe_eval_ctx(ctx.len(), &dom, session);
             if let Term::TPath(_, z, x) = dom_nf {
-                if nbe_eval_ctx(ctx.len(), &z) == r.zero && nbe_eval_ctx(ctx.len(), &x) == *nf {
-                    let codom_nf = nbe_eval_ctx(ctx.len(), &codom);
+                if nbe_eval_ctx(ctx.len(), &z, session) == r.zero
+                    && nbe_eval_ctx(ctx.len(), &x, session) == *nf
+                {
+                    let codom_nf = nbe_eval_ctx(ctx.len(), &codom, session);
                     if matches!(codom_nf, Term::TData(d, p) if d == "Empty" && p.is_empty()) {
                         return Some(Term::TVar(p as i32));
                     }
@@ -345,9 +358,9 @@ fn nz_hypothesis(f: &Field, ctx: &Ctx, nf: &Term) -> Option<Term> {
 // ---------------------------------------------------------------------------
 
 /// Prove `u = v` by the ring solver (both sides canonicalized; must coincide).
-fn ring_eq(r: &Ring, u: &Term, v: &Term) -> Result<EqP, TypeError> {
-    let (pu, pfu) = decomp(r, u)?;
-    let (pv, pfv) = decomp(r, v)?;
+fn ring_eq(r: &Ring, u: &Term, v: &Term, session: &mut Session) -> Result<EqP, TypeError> {
+    let (pu, pfu) = decomp(r, u, session)?;
+    let (pv, pfv) = decomp(r, v, session)?;
     let cu = canon_term(r, &pu);
     let cv = canon_term(r, &pv);
     if cu != cv {
@@ -360,9 +373,9 @@ fn ring_eq(r: &Ring, u: &Term, v: &Term) -> Result<EqP, TypeError> {
 }
 
 /// `inv x = one` for `x = canon [one-monomial]` (i.e. `mul (numeral 1) one`).
-fn inv_canon_one(f: &Field, x: &Term) -> Result<EqP, TypeError> {
+fn inv_canon_one(f: &Field, x: &Term, session: &mut Session) -> Result<EqP, TypeError> {
     let r = &f.ring;
-    let e1 = ring_eq(r, x, &r.one)?;
+    let e1 = ring_eq(r, x, &r.one, session)?;
     let e2 = inst(&f.cong_inv, &[x, &r.one, &e1.p]);
     let e3 = inst(&f.inv_one, &[]);
     Ok(trp(
@@ -409,6 +422,7 @@ fn scale_frac(
     d2m: &Mono,
     num2: &[Mono],
     e_num: &EqP,
+    session: &mut Session,
 ) -> Result<EqP, TypeError> {
     let r = &f.ring;
     let d1t = prod_term(r, &d1m.atoms);
@@ -423,9 +437,9 @@ fn scale_frac(
     let inv_d1 = inv_term(f, &d1t);
     let inv_d2 = inv_term(f, &d2t);
     let inv_dd = inv_term(f, &ddt);
-    let nz1 = discharge(f, ctx, &d1t)?;
-    let nz2 = discharge(f, ctx, &d2t)?;
-    let e_dd = ring_eq(r, &mul_term(r, &d1t, &d2t), &ddt)?;
+    let nz1 = discharge(f, ctx, &d1t, session)?;
+    let nz2 = discharge(f, ctx, &d2t, session)?;
+    let e_dd = ring_eq(r, &mul_term(r, &d1t, &d2t), &ddt, session)?;
 
     let m_d2_invd2 = mul_term(r, &d2t, &inv_d2);
     // e_insert : mul n_term inv_d1 = mul n_term (mul one inv_d1)
@@ -488,7 +502,7 @@ fn scale_frac(
     // e_num is `mul (canon num) (canon [d2m]) = canon num'`; the e-chain above
     // carries the *raw* denominator `d2t`, so bridge `d2t = canon [d2m]` first.
     let canon_d2 = canon_term(r, &[d2m.clone()]);
-    let e_canon_d2 = ring_eq(r, &d2t, &canon_d2)?;
+    let e_canon_d2 = ring_eq(r, &d2t, &canon_d2, session)?;
     let e8 = trp(
         r,
         &cong_mul_l(r, &cong_mul_r(r, &e_canon_d2, &n_term), &inv_dd),
@@ -516,29 +530,29 @@ fn scale_frac(
 
 /// Reify `t` as a fraction.  Base case (atom / numeral / opaque application):
 /// `num` is the ring canonical form of `t` and `den` is `one`.
-fn reify(f: &Field, ctx: &Ctx, t: &Term) -> Result<RF, TypeError> {
+fn reify(f: &Field, ctx: &Ctx, t: &Term, session: &mut Session) -> Result<RF, TypeError> {
     let r = &f.ring;
-    if let Some((s, z)) = as_add(r, t) {
-        let rf1 = reify(f, ctx, &s)?;
-        let rf2 = reify(f, ctx, &z)?;
-        return reify_add(f, ctx, &s, &z, &rf1, &rf2);
+    if let Some((s, z)) = as_add(r, t, session) {
+        let rf1 = reify(f, ctx, &s, session)?;
+        let rf2 = reify(f, ctx, &z, session)?;
+        return reify_add(f, ctx, &s, &z, &rf1, &rf2, session);
     }
-    if let Some(x) = as_inv(f, t) {
-        return reify_inv(f, ctx, &x);
+    if let Some(x) = as_inv(f, t, session) {
+        return reify_inv(f, ctx, &x, session);
     }
-    if let Some((s, a)) = as_mul(r, t) {
-        let rf1 = reify(f, ctx, &s)?;
-        let rf2 = reify(f, ctx, &a)?;
-        return reify_mul(f, ctx, &s, &a, &rf1, &rf2);
+    if let Some((s, a)) = as_mul(r, t, session) {
+        let rf1 = reify(f, ctx, &s, session)?;
+        let rf2 = reify(f, ctx, &a, session)?;
+        return reify_mul(f, ctx, &s, &a, &rf1, &rf2, session);
     }
-    let (num, pfn) = decomp(r, t)?;
+    let (num, pfn) = decomp(r, t, session)?;
     let den = vec![Mono {
         coeff: 1,
         atoms: Vec::new(),
     }];
     let d_term = prod_term(r, &den[0].atoms);
     let canon_num = canon_term(r, &num);
-    let e_inv = inv_canon_one(f, &d_term)?;
+    let e_inv = inv_canon_one(f, &d_term, session)?;
     let e5 = cong_mul_r(r, &e_inv, &canon_num);
     let e6 = EqP {
         a: mul_term(r, &canon_num, &r.one),
@@ -567,6 +581,7 @@ fn reify_add(
     z: &Term,
     rf1: &RF,
     rf2: &RF,
+    session: &mut Session,
 ) -> Result<RF, TypeError> {
     let r = &f.ring;
     let dd_mono = Mono {
@@ -576,8 +591,26 @@ fn reify_add(
     let ddt = prod_term(r, &dd_mono.atoms);
     let (n1, pf_n1) = expand_poly(r, &rf1.num, &rf2.den)?;
     let (n2, pf_n2) = expand_poly(r, &rf2.num, &rf1.den)?;
-    let s1 = scale_frac(f, ctx, &rf1.num, &rf1.den[0], &rf2.den[0], &n1, &pf_n1)?;
-    let s2 = scale_frac(f, ctx, &rf2.num, &rf2.den[0], &rf1.den[0], &n2, &pf_n2)?;
+    let s1 = scale_frac(
+        f,
+        ctx,
+        &rf1.num,
+        &rf1.den[0],
+        &rf2.den[0],
+        &n1,
+        &pf_n1,
+        session,
+    )?;
+    let s2 = scale_frac(
+        f,
+        ctx,
+        &rf2.num,
+        &rf2.den[0],
+        &rf1.den[0],
+        &n2,
+        &pf_n2,
+        session,
+    )?;
     let (num, _pf_m) = poly_merge(r, &n1, &n2);
     let n2t = canon_term(r, &rf2.num);
     let n1s = canon_term(r, &n1);
@@ -606,6 +639,7 @@ fn reify_add(
                 &mul_term(r, &n2s, &inv_dd),
             ),
             &mul_term(r, &num_t, &inv_dd),
+            session,
         )?,
     );
     Ok(RF {
@@ -628,6 +662,7 @@ fn reify_mul(
     a: &Term,
     rf1: &RF,
     rf2: &RF,
+    session: &mut Session,
 ) -> Result<RF, TypeError> {
     let r = &f.ring;
     let dd_mono = Mono {
@@ -642,10 +677,10 @@ fn reify_mul(
     let inv_d1 = inv_term(f, &d1t);
     let inv_d2 = inv_term(f, &d2t);
     let inv_dd = inv_term(f, &ddt);
-    let nz1 = discharge(f, ctx, &d1t)?;
-    let nz2 = discharge(f, ctx, &d2t)?;
+    let nz1 = discharge(f, ctx, &d1t, session)?;
+    let nz2 = discharge(f, ctx, &d2t, session)?;
     let (num, pf_num) = expand_poly(r, &rf1.num, &rf2.num)?;
-    let e_dd = ring_eq(r, &mul_term(r, &d1t, &d2t), &ddt)?;
+    let e_dd = ring_eq(r, &mul_term(r, &d1t, &d2t), &ddt, session)?;
     let m_n1n2 = mul_term(r, &n1t, &n2t);
     let e0 = trp(
         r,
@@ -693,22 +728,22 @@ fn reify_mul(
 
 /// Inverse of a fraction whose numerator is a single coefficient-1 monomial:
 /// swap numerator and denominator via `inv_div`.
-fn reify_inv(f: &Field, ctx: &Ctx, x: &Term) -> Result<RF, TypeError> {
+fn reify_inv(f: &Field, ctx: &Ctx, x: &Term, session: &mut Session) -> Result<RF, TypeError> {
     let r = &f.ring;
-    let rf = reify(f, ctx, x)?;
+    let rf = reify(f, ctx, x, session)?;
     match rf.num.as_slice() {
         [m] if m.coeff == 1 => {
             let m_term = prod_term(r, &m.atoms);
             let d_term = prod_term(r, &rf.den[0].atoms);
-            let nz_m = discharge(f, ctx, &m_term)?;
-            let nz_d = discharge(f, ctx, &d_term)?;
+            let nz_m = discharge(f, ctx, &m_term, session)?;
+            let nz_d = discharge(f, ctx, &d_term, session)?;
             let div_term = mul_term(r, &m_term, &inv_term(f, &d_term));
             let inv_div_term = inv_term(f, &div_term);
             // `rf.pf : x = mul (canon rf.num) (inv d_term)`; the swapped
             // fraction uses the raw numerator term `m_term`, so bridge
             // `mul m_term (inv d_term) = mul (canon rf.num) (inv d_term)`.
             let canon_num = canon_term(r, &rf.num);
-            let e_canon_num = ring_eq(r, &m_term, &canon_num)?;
+            let e_canon_num = ring_eq(r, &m_term, &canon_num, session)?;
             let e_bridge = cong_mul_l(r, &e_canon_num, &inv_term(f, &d_term));
             let pf_div = trp(r, &rf.pf, &syp(r, &e_bridge));
             let e1 = inst(&f.cong_inv, &[x, &div_term, &pf_div.p]);
@@ -717,7 +752,7 @@ fn reify_inv(f: &Field, ctx: &Ctx, x: &Term) -> Result<RF, TypeError> {
             // `den = [m]` (raw), so re-anchor the numerator side of the
             // swapped inverse `mul d_term (inv m_term)` onto `canon rf.den`.
             let canon_nd = canon_term(r, &rf.den);
-            let e_canon = ring_eq(r, &d_term, &canon_nd)?;
+            let e_canon = ring_eq(r, &d_term, &canon_nd, session)?;
             let e3 = cong_mul_l(r, &e_canon, &inv_term(f, &m_term));
             let target = mul_term(r, &canon_nd, &inv_term(f, &m_term));
             let p = trp(
@@ -889,12 +924,13 @@ pub fn prove(
     _num_tactic: usize,
     _num_intro: usize,
     field_term: Option<&Term>,
+    session: &mut Session,
 ) -> Result<Term, TypeError> {
     let (u, v, carrier) = {
-        let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty);
+        let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty, session);
         match goal_nf {
             Term::TPath(a, u, v) => {
-                let a_nf = nbe_eval_ctx(ctx.len(), &a);
+                let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
                 (*u, *v, a_nf)
             }
             other => {
@@ -908,7 +944,7 @@ pub fn prove(
 
     let field_term = match field_term {
         some @ Some(_) => some.cloned(),
-        None => match find_field_instance(ctx, &carrier) {
+        None => match find_field_instance(ctx, &carrier, session) {
             Some(inst) => Some(inst),
             None => {
                 return Err(TypeError::Other(format!(
@@ -922,28 +958,28 @@ pub fn prove(
         TypeError::Other("field: internal error — no field term after instance search".into())
     })?;
 
-    let f = Field::resolve(dts, ctx, field_term)?;
+    let f = Field::resolve(dts, ctx, field_term, session)?;
     let r = &f.ring;
 
-    let rf0 = reify(&f, ctx, &u)?;
-    let rf1 = reify(&f, ctx, &v)?;
+    let rf0 = reify(&f, ctx, &u, session)?;
+    let rf1 = reify(&f, ctx, &v, session)?;
 
     let n0 = canon_term(r, &rf0.num);
     let d0 = prod_term(r, &rf0.den[0].atoms);
     let n1 = canon_term(r, &rf1.num);
     let d1 = prod_term(r, &rf1.den[0].atoms);
 
-    let nz0 = discharge(&f, ctx, &d0)?;
-    let nz1 = discharge(&f, ctx, &d1)?;
-    let cross = ring_eq(r, &mul_term(r, &n0, &d1), &mul_term(r, &n1, &d0))?;
+    let nz0 = discharge(&f, ctx, &d0, session)?;
+    let nz1 = discharge(&f, ctx, &d1, session)?;
+    let cross = ring_eq(r, &mul_term(r, &n0, &d1), &mul_term(r, &n1, &d0), session)?;
     let scale = frac_eq(&f, &n0, &d0, &n1, &d1, &nz0, &nz1, &cross)?;
 
     let p = trp(r, &trp(r, &rf0.pf, &scale), &syp(r, &rf1.pf));
 
-    let prev_skip = crate::cubical::typechecker::termination::should_skip_guard();
-    crate::cubical::typechecker::termination::set_skip_guard(true);
-    let check_res = check_dt(dts, ctx, &p.p, goal_ty);
-    crate::cubical::typechecker::termination::set_skip_guard(prev_skip);
+    let prev_skip = crate::cubical::typechecker::termination::should_skip_guard(session);
+    crate::cubical::typechecker::termination::set_skip_guard(true, session);
+    let check_res = check_dt(dts, ctx, &p.p, goal_ty, session);
+    crate::cubical::typechecker::termination::set_skip_guard(prev_skip, session);
     if let Err(e) = check_res {
         let detail = match &e {
             crate::cubical::typechecker::TypeError::TypeMismatch {

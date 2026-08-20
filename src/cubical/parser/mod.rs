@@ -20,6 +20,7 @@ use grammar::Parser;
 use lexer::{Lexer, TokenKind};
 use std::fmt;
 
+use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Name, Term};
 use crate::cubical::typechecker::errors::Pos;
 
@@ -81,17 +82,17 @@ pub enum Decl {
 }
 
 #[allow(dead_code)]
-pub fn parse_term(src: &str) -> Result<Term, ParseError> {
+pub fn parse_term(src: &str, session: &mut Session) -> Result<Term, ParseError> {
     let tokens = Lexer::new(src).lex()?;
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::new(tokens, session);
     let term = parser.parse_term()?;
     parser.expect(TokenKind::Eof, "expected end of input")?;
     Ok(term)
 }
 
 #[allow(dead_code)]
-pub fn parse_program(src: &str) -> Result<Vec<Decl>, ParseError> {
-    let mut parser = ProgramParser::new(src)?;
+pub fn parse_program(src: &str, session: &mut Session) -> Result<Vec<Decl>, ParseError> {
+    let mut parser = ProgramParser::new(src, session)?;
     let mut decls = Vec::new();
     while let Some(decl) = parser.next_decl()? {
         decls.push(decl);
@@ -112,14 +113,18 @@ pub struct ProgramParser {
 }
 
 impl ProgramParser {
-    pub fn new(src: &str) -> Result<Self, ParseError> {
-        Self::new_with_prefix(src, None)
+    pub fn new(src: &str, session: &mut Session) -> Result<Self, ParseError> {
+        Self::new_with_prefix(src, None, session)
     }
 
     /// Parse `src` with an optional forced module prefix (aliased imports).
-    pub fn new_with_prefix(src: &str, prefix: Option<&str>) -> Result<Self, ParseError> {
+    pub fn new_with_prefix(
+        src: &str,
+        prefix: Option<&str>,
+        session: &mut Session,
+    ) -> Result<Self, ParseError> {
         let tokens = Lexer::new(src).lex()?;
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(tokens, session);
         if let Some(prefix) = prefix {
             parser.module_stack.push(prefix.to_string());
         }
@@ -229,6 +234,7 @@ impl ProgramParser {
 #[allow(dead_code, clippy::type_complexity)]
 pub fn typecheck_program(
     src: &str,
+    session: &mut crate::cubical::session::Session,
 ) -> Result<
     (
         Vec<crate::cubical::syntax::Datatype>,
@@ -243,7 +249,7 @@ pub fn typecheck_program(
     use crate::cubical::syntax::Datatype;
     use crate::cubical::typechecker::check_closed_dt;
 
-    let decls = parse_program(src).map_err(|e| e.to_string())?;
+    let decls = parse_program(src, session).map_err(|e| e.to_string())?;
 
     let mut dts: Vec<Datatype> = Vec::new();
     let mut defs: Vec<(
@@ -281,7 +287,7 @@ pub fn typecheck_program(
                 crate::cubical::syntax::check_datatype_positivity(&dt)
                     .map_err(|e| format!("{}", e))?;
                 dts.push(dt.clone());
-                check_closed_dt(&dts, &func_val, &func_ty)
+                check_closed_dt(&dts, &func_val, &func_ty, session)
                     .map_err(|e| format!("type error in '{}': {}", func_name, e))?;
                 defs.push((func_name, func_ty, func_val));
             }
@@ -294,7 +300,7 @@ pub fn typecheck_program(
             Decl::Def { name, ty, val, .. } => {
                 // Check the definition body against its declared type, with
                 // all datatypes declared so far in scope.
-                check_closed_dt(&dts, &val, &ty)
+                check_closed_dt(&dts, &val, &ty, session)
                     .map_err(|e| format!("type error in '{}': {}", name, e))?;
                 defs.push((name, ty, val));
             }

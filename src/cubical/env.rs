@@ -5,7 +5,7 @@
 //   crate::typechecker::{Ctx, TypeError, infer, check, infer_dt, check_dt}
 
 use crate::cubical::nbe::{Globals, Neutral, Scope, Value, eval_nbe};
-use crate::cubical::session;
+use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Name, Term, shift, subst};
 use crate::cubical::typechecker::{Ctx, TypeError, check, check_dt, infer, infer_dt};
 
@@ -106,14 +106,23 @@ fn subst_global(k: i32, v: &Term, body: &Term) -> Term {
 
 /// Infer the type of a term in the context of a `GlobalEnv` (no datatypes).
 #[allow(dead_code)]
-pub fn infer_with_env(genv: &GlobalEnv, t: &Term) -> Result<Term, TypeError> {
-    infer(&global_ctx(genv), t)
+pub fn infer_with_env(
+    genv: &GlobalEnv,
+    t: &Term,
+    session: &mut Session,
+) -> Result<Term, TypeError> {
+    infer(&global_ctx(genv), t, session)
 }
 
 /// Check a term against a type in the context of a `GlobalEnv` (no datatypes).
 #[allow(dead_code)]
-pub fn check_with_env(genv: &GlobalEnv, t: &Term, ty: &Term) -> Result<(), TypeError> {
-    check(&global_ctx(genv), t, ty)
+pub fn check_with_env(
+    genv: &GlobalEnv,
+    t: &Term,
+    ty: &Term,
+    session: &mut Session,
+) -> Result<(), TypeError> {
+    check(&global_ctx(genv), t, ty, session)
 }
 
 // ---------------------------------------------------------------------------
@@ -125,30 +134,35 @@ pub fn check_with_env(genv: &GlobalEnv, t: &Term, ty: &Term) -> Result<(), TypeE
 /// Definitions are stored newest-first, so we evaluate oldest-first; the
 /// shared vector lets closures see their recursive definition once its
 /// placeholder has been replaced.
-pub fn build_definition_values(env: &Env) -> Globals {
+pub fn build_definition_values(env: &Env, session: &mut Session) -> Globals {
     let placeholder = Value::VNeutral(Neutral::NVar(0));
     let globals = std::rc::Rc::new(std::cell::RefCell::new(vec![placeholder; env.defs.len()]));
     for index in (0..env.defs.len()).rev() {
         let (_, _, value) = &env.defs[index];
-        globals.borrow_mut()[index] = eval_nbe(&Scope::empty(), &globals, index, value);
+        globals.borrow_mut()[index] = eval_nbe(&Scope::empty(), &globals, index, value, session);
     }
     globals
 }
 
 /// Infer the type of a term in a full `Env`.
-pub fn infer_with_full_env(env: &Env, t: &Term) -> Result<Term, TypeError> {
-    let globals = build_definition_values(env);
-    let prev = session::set_current_globals(Some(globals));
-    let result = infer_dt(&env.datatypes, &global_ctx(&env.defs), t);
-    session::set_current_globals(prev);
+pub fn infer_with_full_env(env: &Env, t: &Term, session: &mut Session) -> Result<Term, TypeError> {
+    let globals = build_definition_values(env, session);
+    let prev = session.set_current_globals(Some(globals));
+    let result = infer_dt(&env.datatypes, &global_ctx(&env.defs), t, session);
+    session.set_current_globals(prev);
     result
 }
 
 /// Check a term against a type in a full `Env`.
-pub fn check_with_full_env(env: &Env, t: &Term, ty: &Term) -> Result<(), TypeError> {
-    let globals = build_definition_values(env);
-    let prev = session::set_current_globals(Some(globals));
-    let result = check_dt(&env.datatypes, &global_ctx(&env.defs), t, ty);
-    session::set_current_globals(prev);
+pub fn check_with_full_env(
+    env: &Env,
+    t: &Term,
+    ty: &Term,
+    session: &mut Session,
+) -> Result<(), TypeError> {
+    let globals = build_definition_values(env, session);
+    let prev = session.set_current_globals(Some(globals));
+    let result = check_dt(&env.datatypes, &global_ctx(&env.defs), t, ty, session);
+    session.set_current_globals(prev);
     result
 }

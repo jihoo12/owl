@@ -4,6 +4,14 @@ use std::fmt;
 
 use super::{Datatype, Name, Tactic, Term};
 
+fn get_meta_name_for_display(id: i32) -> Option<Name> {
+    if let Some(session) = crate::cubical::session::current_session() {
+        session.get_meta_name(id)
+    } else {
+        crate::cubical::session::get_meta_name(id)
+    }
+}
+
 pub fn nat_to_int(t: &Term) -> Option<i64> {
     match t {
         Term::TCon(d, c, args) if d == "Nat" => match (c.as_str(), args.as_slice()) {
@@ -225,7 +233,7 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
                 show_term(env, scrut)
             )
         }
-        Term::Meta(i) => match crate::cubical::nbe::get_meta_name(*i) {
+        Term::Meta(i) => match get_meta_name_for_display(*i) {
             Some(name) => format!("?{}", name),
             None => format!("?_{}", i),
         },

@@ -1,5 +1,6 @@
 use crate::cubical::equality::EtaResult;
 use crate::cubical::nbe::{nbe_eval, nbe_eval_ctx};
+use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Name, Term, beta, shift, show_term};
 use crate::cubical::typechecker::{Ctx, TypeError, err_pos, infer_dt};
 
@@ -166,7 +167,7 @@ impl<'a> TacticEngine<'a> {
     }
 
     /// Process pending goal transition **after** a tactic has run.
-    fn process_pending_goal(&mut self) -> Result<(), TypeError> {
+    fn process_pending_goal(&mut self, session: &mut Session) -> Result<(), TypeError> {
         let pending = match self.pending_goal.take() {
             Some(pg) => pg,
             None => return Ok(()),
@@ -182,10 +183,10 @@ impl<'a> TacticEngine<'a> {
                     }
                 };
                 let snd_ty = beta(&snd_ty_template, &fst_result);
-                self.goal_ty = nbe_eval(&snd_ty);
+                self.goal_ty = nbe_eval(&snd_ty, session);
                 self.pending_goal = Some(PendingGoal::SplitSecond {
                     fst_result,
-                    snd_ty: nbe_eval(&snd_ty),
+                    snd_ty: nbe_eval(&snd_ty, session),
                 });
             }
             PendingGoal::SplitSecond {
@@ -227,7 +228,7 @@ impl<'a> TacticEngine<'a> {
                     self.result = Some(con);
                 } else {
                     let next_ty = arg_tys.remove(0);
-                    self.goal_ty = nbe_eval(&next_ty);
+                    self.goal_ty = nbe_eval(&next_ty, session);
                     self.pending_goal = Some(PendingGoal::ConstructorNext {
                         con_name,
                         dt_name,
@@ -260,7 +261,7 @@ impl<'a> TacticEngine<'a> {
                     self.result = Some(con);
                 } else {
                     let next_ty = arg_tys.remove(0);
-                    self.goal_ty = nbe_eval(&next_ty);
+                    self.goal_ty = nbe_eval(&next_ty, session);
                     self.pending_goal = Some(PendingGoal::ConstructorNext {
                         con_name,
                         dt_name,
@@ -284,14 +285,14 @@ impl<'a> TacticEngine<'a> {
                     Box::new(p1.clone()),
                     Box::new(Term::TInterval(crate::cubical::interval::I::I1)),
                 );
-                let y_nf = nbe_eval(&y);
+                let y_nf = nbe_eval(&y, session);
                 // Second goal: Path A y z
                 self.goal_ty =
                     Term::TPath(Box::new(a_ty.clone()), Box::new(y_nf), Box::new(z.clone()));
                 self.pending_goal = Some(PendingGoal::TransitivitySecond {
                     p1,
                     x: x.clone(),
-                    y: nbe_eval(&y),
+                    y: nbe_eval(&y, session),
                     z: z.clone(),
                     a_ty: a_ty.clone(),
                 });
@@ -313,7 +314,7 @@ impl<'a> TacticEngine<'a> {
                     Box::new(Term::TInterval(crate::cubical::interval::I::I1)),
                 );
                 let composed = beta(&p2, &sub);
-                self.result = Some(nbe_eval(&composed));
+                self.result = Some(nbe_eval(&composed, session));
             }
 
             // ── destruct (multi-goal) ─────────────────────────────────
@@ -404,7 +405,7 @@ impl<'a> TacticEngine<'a> {
                     let scrutinee = Term::TVar(0);
 
                     let elim = Term::TElim(Box::new(motive), cases, Box::new(scrutinee));
-                    self.result = Some(nbe_eval(&elim));
+                    self.result = Some(nbe_eval(&elim, session));
                 } else {
                     // More goals to prove: pop the next one.
                     let (next_ctx, next_goal) = goals.remove(0);
@@ -426,22 +427,28 @@ impl<'a> TacticEngine<'a> {
         &mut self,
         tactic: &super::syntax::Tactic,
         outer_ctx: &Ctx,
+        session: &mut Session,
     ) -> Result<(), TypeError> {
         use super::syntax::Tactic;
 
         match tactic {
             Tactic::Intro(names) => {
-                let mut current_ty =
-                    nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &self.goal_ty);
+                let mut current_ty = nbe_eval_ctx(
+                    self.tactic_ctx.len() + outer_ctx.len(),
+                    &self.goal_ty,
+                    session,
+                );
 
                 for name in names {
                     match current_ty {
                         Term::TPi(_x, a, b) => {
-                            let dom = nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &a);
+                            let dom =
+                                nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &a, session);
                             // Use the user-provided name, not the type's binder name,
                             // so that name-based tactics (destruct, assumption) work.
                             self.tactic_ctx.insert(0, (name.clone(), dom));
-                            current_ty = nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &b);
+                            current_ty =
+                                nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &b, session);
                             self.intro_names.push(name.clone());
                         }
                         other => {
@@ -466,11 +473,12 @@ impl<'a> TacticEngine<'a> {
                 let mut combined_ctx = self.tactic_ctx.clone();
                 combined_ctx.extend_from_slice(outer_ctx);
 
-                let expected_nf = nbe_eval(&self.goal_ty);
-                let inferred = infer_dt(self.dts, &combined_ctx, term)?;
-                let inferred_nf = nbe_eval(&inferred);
+                let expected_nf = nbe_eval(&self.goal_ty, session);
+                let inferred = infer_dt(self.dts, &combined_ctx, term, session)?;
+                let inferred_nf = nbe_eval(&inferred, session);
 
-                match definitionally_equal_ctx_r(&combined_ctx, &expected_nf, &inferred_nf) {
+                match definitionally_equal_ctx_r(&combined_ctx, &expected_nf, &inferred_nf, session)
+                {
                     EtaResult::Equal => {
                         self.result = Some(term.clone());
                         Ok(())
@@ -481,7 +489,7 @@ impl<'a> TacticEngine<'a> {
                             expected: Box::new(expected_nf),
                             got: Box::new(inferred_nf),
                             names,
-                            pos: err_pos(&combined_ctx, term),
+                            pos: err_pos(&combined_ctx, term, session),
                         })
                     }
                     EtaResult::Exhausted => {
@@ -490,7 +498,7 @@ impl<'a> TacticEngine<'a> {
                             t1: Box::new(expected_nf),
                             t2: Box::new(inferred_nf),
                             names,
-                            pos: err_pos(&combined_ctx, term),
+                            pos: err_pos(&combined_ctx, term, session),
                         })
                     }
                 }
@@ -500,15 +508,15 @@ impl<'a> TacticEngine<'a> {
                 let mut combined_ctx = self.tactic_ctx.clone();
                 combined_ctx.extend_from_slice(outer_ctx);
                 let ctx_len = combined_ctx.len();
-                let expected_nf = nbe_eval(&self.goal_ty);
+                let expected_nf = nbe_eval(&self.goal_ty, session);
 
                 for i in 0..ctx_len {
                     let var = Term::TVar((ctx_len - 1 - i) as i32);
-                    let var_ty = infer_dt(self.dts, &combined_ctx, &var)?;
-                    let var_nf = nbe_eval(&var_ty);
+                    let var_ty = infer_dt(self.dts, &combined_ctx, &var, session)?;
+                    let var_nf = nbe_eval(&var_ty, session);
 
                     if let EtaResult::Equal =
-                        definitionally_equal_ctx_r(&combined_ctx, &expected_nf, &var_nf)
+                        definitionally_equal_ctx_r(&combined_ctx, &expected_nf, &var_nf, session)
                     {
                         self.result = Some(var);
                         return Ok(());
@@ -526,17 +534,17 @@ impl<'a> TacticEngine<'a> {
                 let mut combined_ctx = self.tactic_ctx.clone();
                 combined_ctx.extend_from_slice(outer_ctx);
 
-                let f_ty = infer_dt(self.dts, &combined_ctx, term)?;
-                let f_ty_nf = nbe_eval(&f_ty);
+                let f_ty = infer_dt(self.dts, &combined_ctx, term, session)?;
+                let f_ty_nf = nbe_eval(&f_ty, session);
                 match f_ty_nf {
                     Term::TPi(ref _x, ref a_ty, ref b_ty) => {
-                        let goal_nf = nbe_eval(&self.goal_ty);
-                        let b_nf = nbe_eval(&b_ty);
+                        let goal_nf = nbe_eval(&self.goal_ty, session);
+                        let b_nf = nbe_eval(&b_ty, session);
 
-                        match definitionally_equal_ctx_r(&combined_ctx, &goal_nf, &b_nf) {
+                        match definitionally_equal_ctx_r(&combined_ctx, &goal_nf, &b_nf, session) {
                             EtaResult::Equal => {
                                 self.pending_apps.push(term.clone());
-                                self.goal_ty = nbe_eval(&a_ty);
+                                self.goal_ty = nbe_eval(&a_ty, session);
                                 Ok(())
                             }
                             EtaResult::NotEqual => Err(TypeError::Other(format!(
@@ -550,7 +558,7 @@ impl<'a> TacticEngine<'a> {
                                     t1: Box::new(goal_nf),
                                     t2: Box::new(b_nf),
                                     names,
-                                    pos: err_pos(&combined_ctx, term),
+                                    pos: err_pos(&combined_ctx, term, session),
                                 })
                             }
                         }
@@ -560,7 +568,7 @@ impl<'a> TacticEngine<'a> {
                         Err(TypeError::ExpectedPi {
                             ty: other,
                             names,
-                            pos: err_pos(&combined_ctx, term),
+                            pos: err_pos(&combined_ctx, term, session),
                         })
                     }
                 }
@@ -570,13 +578,13 @@ impl<'a> TacticEngine<'a> {
             Tactic::Reflexivity => {
                 let mut combined_ctx = self.tactic_ctx.clone();
                 combined_ctx.extend_from_slice(outer_ctx);
-                let goal_nf = nbe_eval(&self.goal_ty);
+                let goal_nf = nbe_eval(&self.goal_ty, session);
 
                 match goal_nf {
                     Term::TPath(_a, u, v) => {
-                        let u_nf = nbe_eval(&u);
-                        let v_nf = nbe_eval(&v);
-                        match definitionally_equal_ctx_r(&combined_ctx, &u_nf, &v_nf) {
+                        let u_nf = nbe_eval(&u, session);
+                        let v_nf = nbe_eval(&v, session);
+                        match definitionally_equal_ctx_r(&combined_ctx, &u_nf, &v_nf, session) {
                             EtaResult::Equal => {
                                 let i_name = "_i".to_string();
                                 let body = shift(1, 0, &u);
@@ -594,7 +602,7 @@ impl<'a> TacticEngine<'a> {
                                     t1: Box::new(u_nf),
                                     t2: Box::new(v_nf),
                                     names,
-                                    pos: err_pos(&combined_ctx, &u),
+                                    pos: err_pos(&combined_ctx, &u, session),
                                 })
                             }
                         }
@@ -612,7 +620,7 @@ impl<'a> TacticEngine<'a> {
 
             // ── symmetry ─────────────────────────────────────────────────
             Tactic::Symmetry => {
-                let goal_nf = nbe_eval(&self.goal_ty);
+                let goal_nf = nbe_eval(&self.goal_ty, session);
                 match goal_nf {
                     Term::TPath(a, u, v) => {
                         self.goal_ty = Term::TPath(a, Box::new(*v), Box::new(*u));
@@ -633,13 +641,13 @@ impl<'a> TacticEngine<'a> {
 
             // ── split ────────────────────────────────────────────────────
             Tactic::Split => {
-                let goal_nf = nbe_eval(&self.goal_ty);
+                let goal_nf = nbe_eval(&self.goal_ty, session);
                 match goal_nf {
                     Term::TSigma(_x, a_ty, b_ty) => {
                         self.pending_goal = Some(PendingGoal::SplitFirst {
                             snd_ty_template: *b_ty,
                         });
-                        self.goal_ty = nbe_eval(&a_ty);
+                        self.goal_ty = nbe_eval(&a_ty, session);
                         Ok(())
                     }
                     other => {
@@ -659,7 +667,7 @@ impl<'a> TacticEngine<'a> {
             Tactic::Constructor(maybe_name) => {
                 let mut combined_ctx = self.tactic_ctx.clone();
                 combined_ctx.extend_from_slice(outer_ctx);
-                let goal_nf = nbe_eval(&self.goal_ty);
+                let goal_nf = nbe_eval(&self.goal_ty, session);
 
                 match goal_nf {
                     Term::TData(ref dt_name, _) => {
@@ -669,7 +677,7 @@ impl<'a> TacticEngine<'a> {
                             .find(|d| &d.name == dt_name)
                             .ok_or_else(|| TypeError::UnknownDatatype {
                                 name: dt_name.clone(),
-                                pos: err_pos(&combined_ctx, &self.goal_ty),
+                                pos: err_pos(&combined_ctx, &self.goal_ty, session),
                             })?;
 
                         // Pick the constructor
@@ -682,7 +690,7 @@ impl<'a> TacticEngine<'a> {
                                 return Err(TypeError::UnknownConstructor {
                                     datatype: dt_name.clone(),
                                     con: con_name.clone(),
-                                    pos: err_pos(&combined_ctx, &self.goal_ty),
+                                    pos: err_pos(&combined_ctx, &self.goal_ty, session),
                                 });
                             }
                         } else if let Some(con) = dt.cons.first() {
@@ -697,7 +705,7 @@ impl<'a> TacticEngine<'a> {
                         };
 
                         let arg_tys: Vec<Term> =
-                            arg_tys_vec.iter().map(|ty| nbe_eval(ty)).collect();
+                            arg_tys_vec.iter().map(|ty| nbe_eval(ty, session)).collect();
 
                         if arg_tys.is_empty() {
                             self.result = Some(Term::TCon(dt_name.clone(), con_name, Vec::new()));
@@ -736,7 +744,7 @@ impl<'a> TacticEngine<'a> {
                         TypeError::Other(format!("destruct: '{}' not found in context", name))
                     })?;
 
-                let var_ty = nbe_eval(&combined_ctx[var_idx].1);
+                let var_ty = nbe_eval(&combined_ctx[var_idx].1, session);
                 let _var = Term::TVar(var_idx as i32);
 
                 // Infer the datatype name.
@@ -753,7 +761,7 @@ impl<'a> TacticEngine<'a> {
                 let dt = self.dts.iter().find(|d| d.name == dt_name).ok_or_else(|| {
                     TypeError::UnknownDatatype {
                         name: dt_name.clone(),
-                        pos: err_pos(&combined_ctx, &self.goal_ty),
+                        pos: err_pos(&combined_ctx, &self.goal_ty, session),
                     }
                 })?;
 
@@ -775,7 +783,7 @@ impl<'a> TacticEngine<'a> {
                     for (k, arg_ty) in con.arg_tys.iter().enumerate() {
                         let shifted_ty =
                             shift(-(var_idx as i32 + 1), 0, &shift(k as i32, 0, arg_ty));
-                        case_ctx.insert(0, (format!("_{}", k), nbe_eval(&shifted_ty)));
+                        case_ctx.insert(0, (format!("_{}", k), nbe_eval(&shifted_ty, session)));
                     }
                     goals.push((case_ctx, self.goal_ty.clone()));
                     con_names.push(con.name.clone());
@@ -785,7 +793,7 @@ impl<'a> TacticEngine<'a> {
                     for (k, arg_ty) in pcon.arg_tys.iter().enumerate() {
                         let shifted_ty =
                             shift(-(var_idx as i32 + 1), 0, &shift(k as i32, 0, arg_ty));
-                        case_ctx.insert(0, (format!("_{}", k), nbe_eval(&shifted_ty)));
+                        case_ctx.insert(0, (format!("_{}", k), nbe_eval(&shifted_ty, session)));
                     }
                     goals.push((case_ctx, self.goal_ty.clone()));
                     con_names.push(pcon.name.clone());
@@ -811,7 +819,7 @@ impl<'a> TacticEngine<'a> {
 
             // ── transitivity ──────────────────────────────────────────────
             Tactic::Transitivity => {
-                let goal_nf = nbe_eval(&self.goal_ty);
+                let goal_nf = nbe_eval(&self.goal_ty, session);
                 match goal_nf {
                     Term::TPath(a, x, z) => {
                         // First goal: Path A x y (for a fresh y).
@@ -952,7 +960,7 @@ impl<'a> TacticEngine<'a> {
                         //
                         // Let me implement this.
                         self.tactic_ctx
-                            .insert(0, ("_trans_y".to_string(), nbe_eval(&a)));
+                            .insert(0, ("_trans_y".to_string(), nbe_eval(&a, session)));
                         // Shift existing tactic_ctx entries up by 1.
                         // (The new variable _trans_y is at index 0.)
                         // Actually, inserting at position 0 already makes
@@ -990,7 +998,11 @@ impl<'a> TacticEngine<'a> {
             Tactic::Compute => {
                 // Normalize the goal type in place.  This doesn't produce a
                 // proof term; it just simplifies the goal.
-                self.goal_ty = nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &self.goal_ty);
+                self.goal_ty = nbe_eval_ctx(
+                    self.tactic_ctx.len() + outer_ctx.len(),
+                    &self.goal_ty,
+                    session,
+                );
                 Ok(())
             }
 
@@ -1000,13 +1012,13 @@ impl<'a> TacticEngine<'a> {
                 // endpoints, prove it.
                 let mut combined_ctx = self.tactic_ctx.clone();
                 combined_ctx.extend_from_slice(outer_ctx);
-                let goal_nf = nbe_eval_ctx(combined_ctx.len(), &self.goal_ty);
+                let goal_nf = nbe_eval_ctx(combined_ctx.len(), &self.goal_ty, session);
 
                 match goal_nf {
                     Term::TPath(_a, u, v) => {
-                        let u_nf = nbe_eval_ctx(combined_ctx.len(), &u);
-                        let v_nf = nbe_eval_ctx(combined_ctx.len(), &v);
-                        match definitionally_equal_ctx_r(&combined_ctx, &u_nf, &v_nf) {
+                        let u_nf = nbe_eval_ctx(combined_ctx.len(), &u, session);
+                        let v_nf = nbe_eval_ctx(combined_ctx.len(), &v, session);
+                        match definitionally_equal_ctx_r(&combined_ctx, &u_nf, &v_nf, session) {
                             EtaResult::Equal => {
                                 let body = shift(1, 0, &u);
                                 self.result = Some(Term::PLam("_i".to_string(), Box::new(body)));
@@ -1027,7 +1039,7 @@ impl<'a> TacticEngine<'a> {
                             .find(|d| &d.name == dt_name)
                             .ok_or_else(|| TypeError::UnknownDatatype {
                                 name: dt_name.clone(),
-                                pos: err_pos(&combined_ctx, &self.goal_ty),
+                                pos: err_pos(&combined_ctx, &self.goal_ty, session),
                             })?;
                         if let Some(con) = dt.cons.iter().find(|c| c.arity() == 0) {
                             self.result =
@@ -1060,6 +1072,7 @@ impl<'a> TacticEngine<'a> {
                     &self.goal_ty,
                     self.tactic_ctx.len(),
                     self.intro_names.len(),
+                    session,
                 )?;
                 self.result = Some(result);
                 Ok(())
@@ -1079,6 +1092,7 @@ impl<'a> TacticEngine<'a> {
                     self.tactic_ctx.len(),
                     self.intro_names.len(),
                     ring_term.as_ref(),
+                    session,
                 )?;
                 self.result = Some(result);
                 Ok(())
@@ -1098,6 +1112,7 @@ impl<'a> TacticEngine<'a> {
                     self.tactic_ctx.len(),
                     self.intro_names.len(),
                     field_term.as_ref(),
+                    session,
                 )?;
                 self.result = Some(result);
                 Ok(())
@@ -1105,7 +1120,7 @@ impl<'a> TacticEngine<'a> {
         }?;
 
         // ── process any pending goal transition AFTER the tactic ─────────
-        self.process_pending_goal()?;
+        self.process_pending_goal(session)?;
 
         Ok(())
     }
@@ -1113,9 +1128,9 @@ impl<'a> TacticEngine<'a> {
     /// Consume the engine and produce the final proof term, wrapping
     /// the result in TAbs for each name introduced by `intro` and
     /// applying any pending function applications from `apply`.
-    pub fn into_term(mut self) -> Result<Term, TypeError> {
+    pub fn into_term(mut self, session: &mut Session) -> Result<Term, TypeError> {
         // ── process any remaining pending goal ────────────────────────────
-        self.process_pending_goal()?;
+        self.process_pending_goal(session)?;
 
         let mut term = self
             .result
@@ -1148,15 +1163,16 @@ pub fn resolve_tactics(
     val: &Term,
     ty: &Term,
     ctx: &Ctx,
+    session: &mut Session,
 ) -> Result<Term, TypeError> {
     match val {
         Term::TBy(tactics) => {
-            let goal_ty = nbe_eval_ctx(ctx.len(), ty);
+            let goal_ty = nbe_eval_ctx(ctx.len(), ty, session);
             let mut engine = TacticEngine::new(dts, goal_ty);
             for tac in tactics {
-                engine.run_tactic(tac, ctx)?;
+                engine.run_tactic(tac, ctx, session)?;
             }
-            engine.into_term()
+            engine.into_term(session)
         }
         // For non-TBy values, return as-is
         _ => Ok(val.clone()),

@@ -25,6 +25,7 @@
 //! surfaces as an error rather than an unsound proof.
 
 use crate::cubical::nbe::nbe_eval_ctx;
+use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError, check_dt, infer_dt};
 
@@ -39,9 +40,10 @@ pub(crate) fn ring_ops_from_type(
     dts: &[Datatype],
     ctx: &Ctx,
     inst_term: &Term,
+    session: &mut Session,
 ) -> Result<(Term, Term, Term, Term), TypeError> {
-    let inst_ty = infer_dt(dts, ctx, inst_term)?;
-    match nbe_eval_ctx(ctx.len(), &inst_ty) {
+    let inst_ty = infer_dt(dts, ctx, inst_term, session)?;
+    match nbe_eval_ctx(ctx.len(), &inst_ty, session) {
         // CommRing A add mul zero one
         Term::TData(dname, params) if dname == "CommRing" && params.len() == 5 => Ok((
             params[1].clone(),
@@ -67,20 +69,20 @@ pub(crate) fn ring_ops_from_type(
 /// matches `carrier`: a context variable `C` whose type is
 /// `CommRing A ...` or `Field A ...` with `A` definitionally equal to
 /// `carrier`.  Returns the `TVar` reference to the instance.
-fn find_ring_instance(ctx: &Ctx, carrier: &Term) -> Option<Term> {
-    let car_nf = nbe_eval_ctx(ctx.len(), carrier);
+fn find_ring_instance(ctx: &Ctx, carrier: &Term, session: &mut Session) -> Option<Term> {
+    let car_nf = nbe_eval_ctx(ctx.len(), carrier, session);
     for (i, (_name, ty)) in ctx.iter().enumerate() {
         // Stored binder types are recorded relative to the binder's own frame
         // (binder at index 0); re-anchor with the same shift `lookup_ctx`
         // applies before comparing against the carrier.
         let ty_shifted = shift(i as i32 + 1, 0, ty);
-        if let Term::TData(dname, params) = nbe_eval_ctx(ctx.len(), &ty_shifted) {
+        if let Term::TData(dname, params) = nbe_eval_ctx(ctx.len(), &ty_shifted, session) {
             let arity = match dname.as_str() {
                 "CommRing" => 5,
                 "Field" => 6,
                 _ => continue,
             };
-            if params.len() == arity && nbe_eval_ctx(ctx.len(), &params[0]) == car_nf {
+            if params.len() == arity && nbe_eval_ctx(ctx.len(), &params[0], session) == car_nf {
                 return Some(Term::TVar(i as i32));
             }
         }
@@ -159,6 +161,7 @@ impl Ring {
         dts: &[Datatype],
         ctx: &Ctx,
         ring_term: Option<&Term>,
+        session: &mut Session,
     ) -> Result<Ring, TypeError> {
         let mode = if ring_term.is_some() {
             Mode::Structured
@@ -187,12 +190,12 @@ impl Ring {
         // from the bundled record's type (`CommRing A add mul zero one` /
         // `Field A add mul inv zero one`), so they work regardless of how the
         // parameter names are bound in the context.
-        let op = |name: &str| -> Result<Term, TypeError> {
+        let mut op = |name: &str| -> Result<Term, TypeError> {
             match mode {
                 Mode::Concrete => var(name),
                 Mode::Structured => {
                     let c = ring_term.unwrap();
-                    let (add, mul, zero, one) = ring_ops_from_type(dts, ctx, c)?;
+                    let (add, mul, zero, one) = ring_ops_from_type(dts, ctx, c, session)?;
                     match name {
                         "add" => Ok(add),
                         "mul" => Ok(mul),
@@ -352,17 +355,17 @@ pub(crate) fn numeral(r: &Ring, k: i64) -> Term {
 /// the canonical shapes are recognized (`zero`, `add one (add one ...)`), so
 /// the recognized term may still need a propositional proof to equal
 /// `numeral(k)` — see `numeral_refl_eq`.
-pub(crate) fn numeral_of(r: &Ring, t: &Term) -> Option<i64> {
+pub(crate) fn numeral_of(r: &Ring, t: &Term, session: &mut Session) -> Option<i64> {
     match r.mode {
         Mode::Concrete => match t {
             Term::TCon(d, c, args) if d == "Nat" && c == "zero" && args.is_empty() => Some(0),
             Term::TCon(d, c, args) if d == "Nat" && c == "suc" && args.len() == 1 => {
-                numeral_of(r, &args[0]).map(|k| k + 1)
+                numeral_of(r, &args[0], session).map(|k| k + 1)
             }
             _ => None,
         },
         Mode::Structured => {
-            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t);
+            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session);
             if nf == r.zero {
                 return Some(0);
             }
@@ -372,7 +375,7 @@ pub(crate) fn numeral_of(r: &Ring, t: &Term) -> Option<i64> {
             match nf {
                 Term::TApp(outer, inner) => match *outer {
                     Term::TApp(g, one_t) if *g == r.add && *one_t == r.one => {
-                        numeral_of(r, &inner).map(|j| j + 1)
+                        numeral_of(r, &inner, session).map(|j| j + 1)
                     }
                     _ => None,
                 },
@@ -559,10 +562,10 @@ fn is_addshape_elim(t: &Term) -> bool {
 /// unfolded eliminator and a stuck application of the `add` global (which is
 /// what an add-call with neutral arguments reduces to). `t` is read in a
 /// case-body frame, i.e. under one extra binder.
-fn is_add_call(r: &Ring, t: &Term) -> bool {
+fn is_add_call(r: &Ring, t: &Term, session: &mut Session) -> bool {
     match t {
         Term::TApp(_, _) => {
-            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len + 1, t);
+            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len + 1, t, session);
             is_addshape_elim(&nf)
         }
         _ => is_addshape_elim(t),
@@ -571,7 +574,7 @@ fn is_add_call(r: &Ring, t: &Term) -> bool {
 
 /// The mul-eliminator shape:
 /// `elim[fun _ => Nat] { zero -> zero | suc m' -> add (mul m' _) _ } _`.
-fn is_mulshape_elim(r: &Ring, t: &Term) -> bool {
+fn is_mulshape_elim(r: &Ring, t: &Term, session: &mut Session) -> bool {
     match t {
         Term::TElim(motive, cases, _) => {
             if !(is_nat_motive(motive)
@@ -588,7 +591,7 @@ fn is_mulshape_elim(r: &Ring, t: &Term) -> bool {
                 Term::TCon(d, c, args) if d == "Nat" && c == "zero" && args.is_empty()
             );
             // suc-case body must be an add-call: `add (mul m' b) b`.
-            let suc_body_is_add = is_add_call(r, &cases[1].body);
+            let suc_body_is_add = is_add_call(r, &cases[1].body, session);
             zero_body && suc_body_is_add
         }
         _ => false,
@@ -602,11 +605,11 @@ fn is_mulshape_elim(r: &Ring, t: &Term) -> bool {
 ///   eliminator normal form.
 /// - `Structured`: normalize `t` and match its head symbol against the
 ///   bundled ring's `add` projection (both compared in normal form).
-pub(crate) fn as_add(r: &Ring, t: &Term) -> Option<(Term, Term)> {
+pub(crate) fn as_add(r: &Ring, t: &Term, session: &mut Session) -> Option<(Term, Term)> {
     match r.mode {
         Mode::Concrete => {
             let nf = match t {
-                Term::TApp(_, _) => crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t),
+                Term::TApp(_, _) => crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session),
                 _ => t.clone(),
             };
             if is_addshape_elim(&nf) {
@@ -617,12 +620,12 @@ pub(crate) fn as_add(r: &Ring, t: &Term) -> Option<(Term, Term)> {
             None
         }
         Mode::Structured => {
-            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t);
+            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session);
             match nf {
                 Term::TApp(outer, b) => match *outer {
                     Term::TApp(g, a) => {
-                        let add_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.add);
-                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &g) == add_nf {
+                        let add_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.add, session);
+                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &g, session) == add_nf {
                             Some((*a, *b))
                         } else {
                             None
@@ -648,14 +651,14 @@ fn mul_suc_arg(body: &Term) -> Term {
 }
 
 /// Treat `t` as a `mul` operation, returning `(a, b)` with `t ~ mul a b`.
-pub(crate) fn as_mul(r: &Ring, t: &Term) -> Option<(Term, Term)> {
+pub(crate) fn as_mul(r: &Ring, t: &Term, session: &mut Session) -> Option<(Term, Term)> {
     match r.mode {
         Mode::Concrete => {
             let nf = match t {
-                Term::TApp(_, _) => crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t),
+                Term::TApp(_, _) => crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session),
                 _ => t.clone(),
             };
-            if is_mulshape_elim(r, &nf) {
+            if is_mulshape_elim(r, &nf, session) {
                 if let Term::TElim(_, cases, scrut) = nf {
                     let arg = mul_suc_arg(&cases[1].body);
                     return Some(((*scrut).clone(), arg));
@@ -664,12 +667,12 @@ pub(crate) fn as_mul(r: &Ring, t: &Term) -> Option<(Term, Term)> {
             None
         }
         Mode::Structured => {
-            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t);
+            let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session);
             match nf {
                 Term::TApp(outer, b) => match *outer {
                     Term::TApp(g, a) => {
-                        let mul_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.mul);
-                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &g) == mul_nf {
+                        let mul_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.mul, session);
+                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &g, session) == mul_nf {
                             Some((*a, *b))
                         } else {
                             None
@@ -688,18 +691,22 @@ pub(crate) fn as_mul(r: &Ring, t: &Term) -> Option<(Term, Term)> {
 // ---------------------------------------------------------------------------
 
 /// Reify `t` into a canonical polynomial with a proof `Path t canon`.
-pub(crate) fn decomp(r: &Ring, t: &Term) -> Result<(Vec<Mono>, EqP), TypeError> {
-    if let Some((s, z)) = as_add(r, t) {
-        let (ps, pfs) = decomp(r, &s)?;
-        let (pz, pfz) = decomp(r, &z)?;
+pub(crate) fn decomp(
+    r: &Ring,
+    t: &Term,
+    session: &mut Session,
+) -> Result<(Vec<Mono>, EqP), TypeError> {
+    if let Some((s, z)) = as_add(r, t, session) {
+        let (ps, pfs) = decomp(r, &s, session)?;
+        let (pz, pfz) = decomp(r, &z, session)?;
         return reify_add(r, &s, &ps, &pfs, &z, &pz, &pfz);
     }
-    if let Some((s, a)) = as_mul(r, t) {
-        let (ps, pfs) = decomp(r, &s)?;
-        let (pa, pfa) = decomp(r, &a)?;
+    if let Some((s, a)) = as_mul(r, t, session) {
+        let (ps, pfs) = decomp(r, &s, session)?;
+        let (pa, pfa) = decomp(r, &a, session)?;
         return reify_mul(r, &s, &ps, &pfs, &a, &pa, &pfa);
     }
-    if let Some(k) = numeral_of(r, t) {
+    if let Some(k) = numeral_of(r, t, session) {
         if k == 0 {
             return Ok((
                 Vec::new(),
@@ -1563,12 +1570,13 @@ pub fn prove(
     _num_tactic: usize,
     _num_intro: usize,
     ring_term: Option<&Term>,
+    session: &mut Session,
 ) -> Result<Term, TypeError> {
     let (u, v, carrier) = {
-        let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty);
+        let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty, session);
         match goal_nf {
             Term::TPath(a, u, v) => {
-                let a_nf = nbe_eval_ctx(ctx.len(), &a);
+                let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
                 (*u, *v, a_nf)
             }
             other => {
@@ -1588,7 +1596,7 @@ pub fn prove(
             if matches!(carrier, Term::TData(ref d, ref p) if d == "Nat" && p.is_empty()) {
                 None
             } else {
-                match find_ring_instance(ctx, &carrier) {
+                match find_ring_instance(ctx, &carrier, session) {
                     Some(inst) => Some(inst),
                     None => {
                         return Err(TypeError::Other(format!(
@@ -1602,10 +1610,10 @@ pub fn prove(
         }
     };
 
-    let ring = Ring::resolve(dts, ctx, ring_term.as_ref())?;
+    let ring = Ring::resolve(dts, ctx, ring_term.as_ref(), session)?;
 
-    let (pu, pfu) = decomp(&ring, &u)?;
-    let (pv, pfv) = decomp(&ring, &v)?;
+    let (pu, pfu) = decomp(&ring, &u, session)?;
+    let (pv, pfv) = decomp(&ring, &v, session)?;
 
     let cu = canon_term(&ring, &pu);
     let cv = canon_term(&ring, &pv);
@@ -1629,10 +1637,10 @@ pub fn prove(
     // The raw proof already checks: kernel re-infers each leaf from raw law
     // declarations (lookup_ctx / TApp raw beta), and check_dt(dts, ctx, &pf.p,
     // goal_ty) passes.
-    let prev_skip = crate::cubical::typechecker::termination::should_skip_guard();
-    crate::cubical::typechecker::termination::set_skip_guard(true);
-    let check_res = check_dt(dts, ctx, &pf.p, goal_ty);
-    crate::cubical::typechecker::termination::set_skip_guard(prev_skip);
+    let prev_skip = crate::cubical::typechecker::termination::should_skip_guard(session);
+    crate::cubical::typechecker::termination::set_skip_guard(true, session);
+    let check_res = check_dt(dts, ctx, &pf.p, goal_ty, session);
+    crate::cubical::typechecker::termination::set_skip_guard(prev_skip, session);
     if let Err(e) = check_res {
         let detail = match &e {
             crate::cubical::typechecker::TypeError::TypeMismatch {

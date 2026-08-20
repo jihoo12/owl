@@ -71,6 +71,10 @@
 
 - [x] Type errors point at the offending variable — The parser records the source position of every variable use (and each definition name) while parsing, exposing them via `ProgramParser::take_decl_positions`. The driver accumulates these across the whole program and installs them into the typechecker's thread-local `DECL_NAME_POS` table before checking each declaration. `err_pos` (the `pos` fields on `TypeError` variants) now resolves the most-local de Bruijn variable of the offending term to a real `line:col`, so messages print e.g. `Expected a Π-type, but found: Nat  at 5:43`.
 
+- [x] **Phase 4a: Threaded `&mut Session` through 62 NbE functions.** Converted 62 public functions in `nbe/mod.rs` to take `session: &mut Session`, updated 29 method calls and 659 internal call sites. Zero E0061 errors. All functions that touch mutable session state (eval cache, depth guards, metavariables, globals, datatypes) now receive session explicitly. Build: 0 errors. Tests: 207/207 pass.
+
+- [x] **Phase 4b: Threaded `&mut Session` through all external callers.** Modified 150 function signatures across 8 external files (typechecker/mod.rs, typechecker/errors.rs, equality.rs, tactics.rs, field.rs, ring.rs, omega.rs, driver.rs, env.rs, parser/mod.rs, parser/grammar.rs) and inserted `session` at 1054+ call sites. Key fixes: cross-file name collisions (reify_add/reify_mul), parser carries `&'a mut Session` to avoid RefCell re-entrancy, `zonk`/`try_solve_meta`/`err_pos`/`set_skip_plam_endpt`/`set_meta_expected`/`get_meta_name`/`get_meta_expected` all converted to session methods, `show_term` uses `current_session()` raw pointer for meta name lookup without RefCell re-borrow. Cleaned up all 35 old free-function accessors from session.rs (dead code). Build: 0 errors, 0 warnings. Tests: 207/207 pass.
+
 ---
 
 ## Remaining — Open Items by Category & Priority

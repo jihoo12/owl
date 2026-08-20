@@ -17,6 +17,7 @@
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::nbe::nbe_eval_ctx;
+use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError, check_dt};
 
@@ -32,10 +33,11 @@ pub fn prove(
     goal_ty: &Term,
     num_tactic: usize,
     _num_intro: usize,
+    session: &mut Session,
 ) -> Result<Term, TypeError> {
     // The goal must be a path over Nat.
     let (a, u, v) = {
-        let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty);
+        let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty, session);
         match goal_nf {
             Term::TPath(a, u, v) => (*a, *u, *v),
             other => {
@@ -46,7 +48,7 @@ pub fn prove(
             }
         }
     };
-    let a_nf = nbe_eval_ctx(ctx.len(), &a);
+    let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
     if !matches!(a_nf, Term::TData(ref d, ref p) if d == "Nat" && p.is_empty()) {
         return Err(TypeError::Other(format!(
             "omega: goal is not a path over Nat (got '{}')",
@@ -55,9 +57,9 @@ pub fn prove(
     }
 
     // 1. Reflexivity after normalization (definitional equality).
-    let u_nf = nbe_eval_ctx(ctx.len(), &u);
-    let v_nf = nbe_eval_ctx(ctx.len(), &v);
-    if definitionally_equal_ctx_r(ctx, &u_nf, &v_nf) == EtaResult::Equal {
+    let u_nf = nbe_eval_ctx(ctx.len(), &u, session);
+    let v_nf = nbe_eval_ctx(ctx.len(), &v, session);
+    if definitionally_equal_ctx_r(ctx, &u_nf, &v_nf, session) == EtaResult::Equal {
         return Ok(Term::PLam("_i".into(), Box::new(shift(1, 0, &u))));
     }
 
@@ -78,7 +80,7 @@ pub fn prove(
             for i in args {
                 cand = Term::TApp(Box::new(cand), Box::new(Term::TVar(i)));
             }
-            if check_dt(dts, ctx, &cand, goal_ty).is_ok() {
+            if check_dt(dts, ctx, &cand, goal_ty, session).is_ok() {
                 return Ok(cand);
             }
         }

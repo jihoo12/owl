@@ -5,8 +5,9 @@
 //! accessor functions preserve the existing API so the rest of the crate continues
 //! to compile without changes.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::ptr;
 use std::rc::Rc;
 
 use crate::cubical::nbe::trace::ReductionStep;
@@ -77,17 +78,200 @@ impl Default for Session {
     }
 }
 
+impl Session {
+    // ── NbE: datatypes ──────────────────────────────────────────────
+    pub fn set_current_dts(&mut self, dts: &[Datatype]) {
+        self.dts = dts.to_vec();
+    }
+    pub fn current_dts(&self) -> Vec<Datatype> {
+        self.dts.clone()
+    }
+
+    // ── NbE: globals ────────────────────────────────────────────────
+    pub fn set_current_globals(&mut self, globals: Option<Globals>) -> Option<Globals> {
+        std::mem::replace(&mut self.globals, globals)
+    }
+    pub fn get_current_globals(&self) -> Option<Globals> {
+        self.globals.clone()
+    }
+
+    // ── NbE: eval cache ────────────────────────────────────────────
+    pub fn eval_cache_get(&self, t: &Term) -> Option<Term> {
+        self.eval_cache.get(t).cloned()
+    }
+    pub fn eval_cache_insert(&mut self, t: Term, result: Term) {
+        self.eval_cache.insert(t, result);
+    }
+    pub fn clear_nbe_cache(&mut self) {
+        self.eval_cache.clear();
+    }
+
+    // ── NbE: eval depth ────────────────────────────────────────────
+    pub fn eval_depth_enter(&mut self) -> usize {
+        let d = self.eval_depth;
+        self.eval_depth += 1;
+        d
+    }
+    pub fn eval_depth_restore(&mut self, d: usize) {
+        self.eval_depth = d;
+    }
+
+    // ── NbE: quote depth ───────────────────────────────────────────
+    pub fn quote_depth_enter(&mut self) -> usize {
+        let d = self.quote_depth;
+        self.quote_depth += 1;
+        d
+    }
+    pub fn quote_depth_restore(&mut self, d: usize) {
+        self.quote_depth = d;
+    }
+
+    // ── NbE: all-tubes depth ───────────────────────────────────────
+    pub fn all_tubes_depth_enter(&mut self) -> usize {
+        let d = self.all_tubes_depth;
+        self.all_tubes_depth += 1;
+        d
+    }
+    pub fn all_tubes_depth_restore(&mut self, d: usize) {
+        self.all_tubes_depth = d;
+    }
+
+    // ── Metavariable store ─────────────────────────────────────────
+    pub fn fresh_meta_id(&mut self) -> i32 {
+        let id = self.meta_solutions.len() as i32;
+        self.meta_solutions.push(None);
+        self.meta_names.push(None);
+        self.meta_expected.push(None);
+        id
+    }
+    pub fn set_meta_name(&mut self, id: i32, name: Name) {
+        if id >= 0 && (id as usize) < self.meta_names.len() {
+            self.meta_names[id as usize] = Some(name);
+        }
+    }
+    pub fn get_meta_name(&self, id: i32) -> Option<Name> {
+        if id < 0 {
+            return None;
+        }
+        self.meta_names.get(id as usize).and_then(|o| o.clone())
+    }
+    pub fn set_meta_expected(&mut self, id: i32, ty: Term) {
+        if id >= 0
+            && (id as usize) < self.meta_expected.len()
+            && self.meta_expected[id as usize].is_none()
+        {
+            self.meta_expected[id as usize] = Some(ty);
+        }
+    }
+    pub fn get_meta_expected(&self, id: i32) -> Option<Term> {
+        if id < 0 {
+            return None;
+        }
+        self.meta_expected.get(id as usize).and_then(|o| o.clone())
+    }
+    pub fn solve_meta(&mut self, id: i32, solution: Term) {
+        if id >= 0 && (id as usize) < self.meta_solutions.len() {
+            self.meta_solutions[id as usize] = Some(solution);
+        }
+    }
+    pub fn get_meta_solution(&self, id: i32) -> Option<Term> {
+        if id < 0 {
+            return None;
+        }
+        self.meta_solutions.get(id as usize).and_then(|o| o.clone())
+    }
+    #[allow(dead_code)]
+    pub fn clear_metavars(&mut self) {
+        self.meta_solutions.clear();
+        self.meta_names.clear();
+        self.meta_expected.clear();
+    }
+    #[allow(dead_code)]
+    pub fn clear_all_caches(&mut self) {
+        self.eval_cache.clear();
+        self.meta_solutions.clear();
+        self.meta_names.clear();
+        self.meta_expected.clear();
+    }
+
+    // ── Equality ───────────────────────────────────────────────────
+    pub fn elim_depth_enter(&mut self) -> usize {
+        let d = self.elim_case_recurse_depth;
+        self.elim_case_recurse_depth += 1;
+        d
+    }
+    pub fn elim_depth_restore(&mut self, d: usize) {
+        self.elim_case_recurse_depth = d;
+    }
+
+    // ── Typechecker flags ──────────────────────────────────────────
+    pub fn should_skip_guard(&self) -> bool {
+        self.skip_guard
+    }
+    pub fn set_skip_guard(&mut self, skip: bool) {
+        self.skip_guard = skip;
+    }
+    pub fn current_def(&self) -> Option<String> {
+        self.current_def.clone()
+    }
+    pub fn set_current_def(&mut self, name: Option<String>) -> Option<String> {
+        std::mem::replace(&mut self.current_def, name)
+    }
+    pub fn should_skip_plam_endpt(&self) -> bool {
+        self.skip_plam_endpt
+    }
+    pub fn set_skip_plam_endpt(&mut self, skip: bool) {
+        self.skip_plam_endpt = skip;
+    }
+
+    // ── Error positions ────────────────────────────────────────────
+    pub fn set_decl_name_positions(&mut self, v: Vec<(Name, Pos, bool)>) {
+        self.decl_name_positions = v;
+    }
+    pub fn clear_decl_name_positions(&mut self) {
+        self.decl_name_positions.clear();
+    }
+    pub fn with_decl_name_positions<R>(&self, f: impl FnOnce(&[(Name, Pos, bool)]) -> R) -> R {
+        f(&self.decl_name_positions)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Single thread-local holding all session state.
 // ---------------------------------------------------------------------------
 
 thread_local! {
     static SESSION: RefCell<Session> = RefCell::new(Session::new());
+    /// Raw pointer to the active `Session`, set by `with_session_mut`.
+    /// Allows read-only access from code that doesn't receive `&Session`
+    /// (e.g. `show_term`) without triggering a RefCell re-borrow.
+    static CURRENT_SESSION: Cell<*const Session> = const { Cell::new(ptr::null()) };
 }
 
 /// Run a closure with mutable access to the session.
 pub fn with_session_mut<R>(f: impl FnOnce(&mut Session) -> R) -> R {
-    SESSION.with(|cell| f(&mut cell.borrow_mut()))
+    SESSION.with(|cell| {
+        let mut s = cell.borrow_mut();
+        let raw = &*s as *const Session;
+        CURRENT_SESSION.with(|c| c.set(raw));
+        let r = f(&mut s);
+        CURRENT_SESSION.with(|c| c.set(ptr::null()));
+        r
+    })
+}
+
+/// Borrow the current session as a shared reference, if one is active
+/// (i.e. we are inside `with_session_mut`). Returns `None` otherwise.
+/// Useful in code paths (like pretty-printing) that don't receive `&Session`.
+pub fn current_session() -> Option<&'static Session> {
+    CURRENT_SESSION.with(|c| {
+        let p = c.get();
+        if p.is_null() {
+            None
+        } else {
+            Some(unsafe { &*p })
+        }
+    })
 }
 
 /// Run a closure with shared access to the session.
@@ -109,156 +293,17 @@ pub fn take_session() -> Session {
 }
 
 // ===========================================================================
-// Drop-in accessor functions (same API as the old thread-locals)
+// Minimal backward-compat free functions kept for external call sites.
+// All internal callers should use Session methods directly.
 // ===========================================================================
 
-// ── NbE: datatypes ────────────────────────────────────────────────────
-
-pub fn set_current_dts(dts: &[Datatype]) {
-    SESSION.with(|cell| cell.borrow_mut().dts = dts.to_vec());
-}
-
-pub fn current_dts() -> Vec<Datatype> {
-    SESSION.with(|cell| cell.borrow().dts.clone())
-}
-
-// ── NbE: globals ──────────────────────────────────────────────────────
-
-pub fn set_current_globals(globals: Option<Globals>) -> Option<Globals> {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        std::mem::replace(&mut s.globals, globals)
-    })
-}
-
-pub fn get_current_globals() -> Option<Globals> {
-    SESSION.with(|cell| cell.borrow().globals.clone())
-}
-
-// ── NbE: eval cache ──────────────────────────────────────────────────
-
-pub fn eval_cache_get(t: &Term) -> Option<Term> {
-    SESSION.with(|cell| cell.borrow().eval_cache.get(t).cloned())
-}
-
-pub fn eval_cache_insert(t: Term, result: Term) {
-    SESSION.with(|cell| cell.borrow_mut().eval_cache.insert(t, result));
-}
-
-pub fn clear_nbe_cache() {
-    SESSION.with(|cell| cell.borrow_mut().eval_cache.clear());
-}
-
-// ── NbE: eval depth guard ────────────────────────────────────────────
-
-pub fn eval_depth_enter() -> usize {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        let d = s.eval_depth;
-        s.eval_depth += 1;
-        d
-    })
-}
-
-pub fn eval_depth_restore(d: usize) {
-    SESSION.with(|cell| cell.borrow_mut().eval_depth = d);
-}
-
-// ── NbE: quote depth guard ───────────────────────────────────────────
-
-pub fn quote_depth_enter() -> usize {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        let d = s.quote_depth;
-        s.quote_depth += 1;
-        d
-    })
-}
-
-pub fn quote_depth_restore(d: usize) {
-    SESSION.with(|cell| cell.borrow_mut().quote_depth = d);
-}
-
-// ── NbE: all-tubes depth guard ───────────────────────────────────────
-
-pub fn all_tubes_depth_enter() -> usize {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        let d = s.all_tubes_depth;
-        s.all_tubes_depth += 1;
-        d
-    })
-}
-
-pub fn all_tubes_depth_restore(d: usize) {
-    SESSION.with(|cell| cell.borrow_mut().all_tubes_depth = d);
-}
-
-// ── Metavariable store ───────────────────────────────────────────────
-
-pub fn fresh_meta_id() -> i32 {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        let id = s.meta_solutions.len() as i32;
-        s.meta_solutions.push(None);
-        s.meta_names.push(None);
-        s.meta_expected.push(None);
-        id
-    })
-}
-
-pub fn set_meta_name(id: i32, name: Name) {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        if id >= 0 && (id as usize) < s.meta_names.len() {
-            s.meta_names[id as usize] = Some(name);
-        }
-    });
-}
-
 pub fn get_meta_name(id: i32) -> Option<Name> {
-    if id < 0 {
-        return None;
-    }
     SESSION.with(|cell| {
         cell.borrow()
             .meta_names
             .get(id as usize)
             .and_then(|o| o.clone())
     })
-}
-
-pub fn set_meta_expected(id: i32, ty: Term) {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        if id >= 0
-            && (id as usize) < s.meta_expected.len()
-            && s.meta_expected[id as usize].is_none()
-        {
-            s.meta_expected[id as usize] = Some(ty);
-        }
-    });
-}
-
-pub fn get_meta_expected(id: i32) -> Option<Term> {
-    if id < 0 {
-        return None;
-    }
-    SESSION.with(|cell| {
-        cell.borrow()
-            .meta_expected
-            .get(id as usize)
-            .and_then(|o| o.clone())
-    })
-}
-
-pub fn solve_meta(id: i32, solution: Term) {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        if id >= 0 && (id as usize) < s.meta_solutions.len() {
-            s.meta_solutions[id as usize] = Some(solution);
-        }
-    });
 }
 
 pub fn get_meta_solution(id: i32) -> Option<Term> {
@@ -270,85 +315,5 @@ pub fn get_meta_solution(id: i32) -> Option<Term> {
             .meta_solutions
             .get(id as usize)
             .and_then(|o| o.clone())
-    })
-}
-
-pub fn clear_metavars() {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        s.meta_solutions.clear();
-        s.meta_names.clear();
-        s.meta_expected.clear();
-    });
-}
-
-pub fn clear_all_caches() {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        s.eval_cache.clear();
-        s.meta_solutions.clear();
-        s.meta_names.clear();
-        s.meta_expected.clear();
-    });
-}
-
-// ── Equality: elim-case recurse depth ────────────────────────────────
-
-pub fn elim_depth_enter() -> usize {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        let d = s.elim_case_recurse_depth;
-        s.elim_case_recurse_depth += 1;
-        d
-    })
-}
-
-pub fn elim_depth_restore(d: usize) {
-    SESSION.with(|cell| cell.borrow_mut().elim_case_recurse_depth = d);
-}
-
-// ── Typechecker flags ────────────────────────────────────────────────
-
-pub fn should_skip_guard() -> bool {
-    SESSION.with(|cell| cell.borrow().skip_guard)
-}
-
-pub fn set_skip_guard(skip: bool) {
-    SESSION.with(|cell| cell.borrow_mut().skip_guard = skip);
-}
-
-pub fn current_def() -> Option<String> {
-    SESSION.with(|cell| cell.borrow().current_def.clone())
-}
-
-pub fn set_current_def(name: Option<String>) -> Option<String> {
-    SESSION.with(|cell| {
-        let mut s = cell.borrow_mut();
-        std::mem::replace(&mut s.current_def, name)
-    })
-}
-
-pub fn should_skip_plam_endpt() -> bool {
-    SESSION.with(|cell| cell.borrow().skip_plam_endpt)
-}
-
-pub fn set_skip_plam_endpt(skip: bool) {
-    SESSION.with(|cell| cell.borrow_mut().skip_plam_endpt = skip);
-}
-
-// ── Error positions ──────────────────────────────────────────────────
-
-pub fn set_decl_name_positions(v: Vec<(Name, Pos, bool)>) {
-    SESSION.with(|cell| cell.borrow_mut().decl_name_positions = v);
-}
-
-pub fn clear_decl_name_positions() {
-    SESSION.with(|cell| cell.borrow_mut().decl_name_positions.clear());
-}
-
-pub fn with_decl_name_positions<R>(f: impl FnOnce(&[(Name, Pos, bool)]) -> R) -> R {
-    SESSION.with(|cell| {
-        let s = cell.borrow();
-        f(&s.decl_name_positions)
     })
 }

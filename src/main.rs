@@ -38,20 +38,20 @@ fn main() {
     args.retain(|a| a != "--debug" && a != "-d");
 
     let mut args_iter = args.into_iter();
-    let result = match args_iter.next().as_deref() {
+    let result = cubical::session::with_session_mut(|session| match args_iter.next().as_deref() {
         None | Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
             Ok(())
         }
         Some("check") => file_arg(args_iter.next(), "check").and_then(|path| {
             reject_extra(args_iter)?;
-            check(&path)
+            check(&path, session)
                 .map(|()| println!("{}: OK", path.display()))
                 .map_err(format_run_error)
         }),
         Some("eval") | Some("run") => file_arg(args_iter.next(), "eval").and_then(|path| {
             reject_extra(args_iter)?;
-            run(&path)
+            run(&path, session)
                 .map(|output| println!("{output}"))
                 .map_err(format_run_error)
         }),
@@ -59,14 +59,14 @@ fn main() {
             if args_iter.next().is_some() {
                 Err("`owl repl` does not accept a file argument".to_string())
             } else {
-                repl()
+                repl(session)
             }
         }
         Some(path) if !path.starts_with('-') => {
             if args_iter.next().is_some() {
                 Err("expected a single source file; run `owl help` for usage".to_string())
             } else {
-                run(path)
+                run(path, session)
                     .map(|output| println!("{output}"))
                     .map_err(format_run_error)
             }
@@ -74,7 +74,7 @@ fn main() {
         Some(command) => Err(format!(
             "unknown command `{command}`; run `owl help` for usage"
         )),
-    };
+    });
 
     if debug {
         let steps = cubical::nbe::trace::drain_trace();
@@ -119,7 +119,7 @@ fn reject_extra(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     }
 }
 
-fn repl() -> Result<(), String> {
+fn repl(session: &mut cubical::session::Session) -> Result<(), String> {
     println!("Owl cubical REPL. Enter one complete declaration per line.");
     println!("Commands: :help, :load <file>, :quit");
     let stdin = io::stdin();
@@ -150,21 +150,25 @@ fn repl() -> Result<(), String> {
             let source = std::fs::read_to_string(Path::new(path.trim()))
                 .map_err(|e| format!("cannot read {}: {e}", path.trim()))?;
             let candidate = format!("{program}\n{source}");
-            accept_repl_program(&mut program, candidate);
+            accept_repl_program(&mut program, candidate, session);
             continue;
         }
         let candidate = format!("{program}\n{line}");
-        accept_repl_program(&mut program, candidate);
+        accept_repl_program(&mut program, candidate, session);
     }
 }
 
-fn accept_repl_program(program: &mut String, candidate: String) {
-    if let Err(error) = check_str(&candidate) {
+fn accept_repl_program(
+    program: &mut String,
+    candidate: String,
+    session: &mut cubical::session::Session,
+) {
+    if let Err(error) = check_str(&candidate, session) {
         eprintln!("{error}");
         return;
     }
     *program = candidate;
-    match run_str(program) {
+    match run_str(program, session) {
         Ok(output) => println!("{output}"),
         Err(RunError::NoEntryPoint) => println!("OK"),
         Err(error) => eprintln!("{error}"),

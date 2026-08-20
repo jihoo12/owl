@@ -16,15 +16,7 @@ pub struct Pos {
 // accumulates these tables across the whole program and installs them before
 // typechecking each declaration, so type errors can point back to the source
 // location of the offending variable.
-// (Now stored in Session.)
-
-pub fn set_decl_name_positions(v: Vec<(Name, Pos, bool)>) {
-    crate::cubical::session::set_decl_name_positions(v);
-}
-
-pub fn clear_decl_name_positions() {
-    crate::cubical::session::clear_decl_name_positions();
-}
+// (Now stored in Session — use session.set/clear_decl_name_positions directly.)
 
 /// The de Bruijn index of the most-local variable occurrence in `t`
 /// (smallest index, leftmost pre-order).
@@ -190,10 +182,10 @@ fn head_var_idx(t: &Term) -> Option<i32> {
 
 /// Resolve the source position of the most-local variable in `t`, using the
 /// parser-observed name table for the current declaration.
-pub fn err_pos(ctx: &Ctx, t: &Term) -> Option<Pos> {
+pub fn err_pos(ctx: &Ctx, t: &Term, session: &crate::cubical::session::Session) -> Option<Pos> {
     let idx = head_var_idx(t)?;
     let name = ctx.get(idx as usize)?.0.clone();
-    crate::cubical::session::with_decl_name_positions(|table| {
+    session.with_decl_name_positions(|table| {
         table
             .iter()
             .rev()

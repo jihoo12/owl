@@ -38,10 +38,16 @@ pub(super) struct Parser {
     /// When true, `starts_atom` treats the keyword `field` as a stop token
     /// (used inside record field type parsing).
     stop_at_field: bool,
+    /// Raw pointer to the session, used only for `fresh_meta_id` / `set_meta_name`
+    /// in `parse_atom`. Safety invariant: the caller must ensure the pointer is
+    /// valid and that `&mut Session` is not used elsewhere while `parse_atom`
+    /// is executing.  In practice the driver yields the `&mut Session` reference
+    /// only during `next_decl` calls, so no aliasing occurs.
+    session_ptr: *mut crate::cubical::session::Session,
 }
 
 impl Parser {
-    pub(super) fn new(tokens: Vec<Token>) -> Self {
+    pub(super) fn new(tokens: Vec<Token>, session: &mut crate::cubical::session::Session) -> Self {
         Self {
             tokens,
             pos: 0,
@@ -56,7 +62,16 @@ impl Parser {
             stop_at_by_wf: false,
             stop_at_comma: false,
             stop_at_field: false,
+            session_ptr: session as *mut crate::cubical::session::Session,
         }
+    }
+
+    /// SAFETY: the caller must ensure the session pointer is valid and that
+    /// the `&mut Session` used to create this parser is not accessed elsewhere
+    /// while this reference is live.
+    fn session(&self) -> &mut crate::cubical::session::Session {
+        assert!(!self.session_ptr.is_null(), "session pointer must be set");
+        unsafe { &mut *self.session_ptr }
     }
 
     pub(super) fn parse_import(&mut self) -> Result<Decl, ParseError> {
@@ -1131,16 +1146,16 @@ impl Parser {
 
         if self.peek_ident() == "_" {
             self.pos += 1;
-            return Ok(Term::Meta(crate::cubical::nbe::fresh_meta_id()));
+            return Ok(Term::Meta(self.session().fresh_meta_id()));
         }
 
         if self.at(&TokenKind::Question) {
             // Hole: `?` (anonymous) or `?name` (named).
             self.pos += 1;
-            let id = crate::cubical::nbe::fresh_meta_id();
+            let id = self.session().fresh_meta_id();
             if let TokenKind::Ident(name) = self.peek().kind.clone() {
                 self.pos += 1;
-                crate::cubical::nbe::set_meta_name(id, name);
+                self.session().set_meta_name(id, name);
             }
             return Ok(Term::Meta(id));
         }
@@ -2057,16 +2072,16 @@ impl Parser {
             for prefix in &prefixes {
                 for dt in self.datatypes.iter().rev() {
                     if dt.name == *prefix || dt.name.starts_with(&format!("{}.", prefix)) {
-                        if let Some(c) = dt.cons.iter().find(|c| c.name == member) {
+                        if let Some(_c) = dt.cons.iter().find(|c| c.name == member) {
                             return Ok(Term::TCon(dt.name.clone(), member, Vec::new()));
                         }
-                        if let Some(c) = dt.pcons.iter().find(|c| c.name == member) {
+                        if let Some(_c) = dt.pcons.iter().find(|c| c.name == member) {
                             return Ok(Term::TCon(dt.name.clone(), member, Vec::new()));
                         }
-                        if let Some(c) = dt.sqcons.iter().find(|c| c.name == member) {
+                        if let Some(_c) = dt.sqcons.iter().find(|c| c.name == member) {
                             return Ok(Term::TCon(dt.name.clone(), member, Vec::new()));
                         }
-                        if let Some(c) = dt.cellcons.iter().find(|c| c.name == member) {
+                        if let Some(_c) = dt.cellcons.iter().find(|c| c.name == member) {
                             return Ok(Term::TCon(dt.name.clone(), member, Vec::new()));
                         }
                     }

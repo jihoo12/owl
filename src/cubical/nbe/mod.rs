@@ -3,19 +3,18 @@
 pub mod trace;
 
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use crate::cubical::equality::definitionally_equal;
 use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_top, eval_interval};
 use crate::cubical::syntax::{
-    Datatype, ElimCase, Level, Name, System, Tactic, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf,
-    max_var, shift, show_term, subst,
+    ElimCase, Level, Name, System, Tactic, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var,
+    shift, show_term, subst,
 };
 
 use crate::cubical::debug;
 use crate::cubical::session::{self, Session};
-pub use crate::cubical::session::{set_current_dts, set_current_globals};
 use trace::record_step;
 
 pub type Env = Vec<Value>;
@@ -101,8 +100,7 @@ pub type DNFSystem = Vec<(DNF, Value)>;
 /// recursive self-references resolve correctly after placeholder replacement.
 pub type Globals = Rc<RefCell<Vec<Value>>>;
 
-fn value_str(globals: &Globals, global_offset: usize, v: &Value,
-    session: &mut Session) -> String {
+fn value_str(globals: &Globals, global_offset: usize, v: &Value, session: &mut Session) -> String {
     if !debug::is_active() {
         return String::new();
     }
@@ -209,26 +207,22 @@ pub enum Neutral {
 }
 
 impl Closure {
-    pub fn apply(&self, v: Value,
-        session: &mut Session) -> Value {
+    pub fn apply(&self, v: Value, session: &mut Session) -> Value {
         let env = self.env.extend(v);
         eval_nbe(&env, &self.globals, self.global_offset, &self.body, session)
     }
 }
 
 impl IClosure {
-    pub fn apply_i(&self, i: I,
-        session: &mut Session) -> Value {
+    pub fn apply_i(&self, i: I, session: &mut Session) -> Value {
         self.apply_interval_value(Value::VInterval(i), session)
     }
 
-    fn apply_i_var(&self, level: usize,
-        session: &mut Session) -> Value {
+    fn apply_i_var(&self, level: usize, session: &mut Session) -> Value {
         self.apply_interval_value(Value::VIntervalVar(level), session)
     }
 
-    pub fn apply_interval_value(&self, v: Value,
-        session: &mut Session) -> Value {
+    pub fn apply_interval_value(&self, v: Value, session: &mut Session) -> Value {
         match &v {
             Value::VInterval(i) => {
                 // The closure body references its bound interval variable as
@@ -485,8 +479,13 @@ fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
 /// guard below covers them all. Legitimate normal forms stay far below the cap.
 const EVAL_NBE_MAX_DEPTH: usize = 200;
 
-pub fn eval_nbe(env: &Scope, globals: &Globals, global_offset: usize, t: &Term,
-    session: &mut Session) -> Value {
+pub fn eval_nbe(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    t: &Term,
+    session: &mut Session,
+) -> Value {
     let depth = session.eval_depth_enter();
     if depth >= EVAL_NBE_MAX_DEPTH {
         session.eval_depth_restore(depth);
@@ -497,8 +496,13 @@ pub fn eval_nbe(env: &Scope, globals: &Globals, global_offset: usize, t: &Term,
     result
 }
 
-fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term,
-    session: &mut Session) -> Value {
+fn eval_nbe_inner(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    t: &Term,
+    session: &mut Session,
+) -> Value {
     match t {
         Term::TVar(i) => {
             let i = *i as usize;
@@ -519,7 +523,8 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             global_offset,
             eval_nbe(env, globals, global_offset, f, session),
             eval_nbe(env, globals, global_offset, a, session),
-        session),
+            session,
+        ),
         Term::TAbs(x, b) => Value::VLam(
             x.clone(),
             Closure {
@@ -532,10 +537,13 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
         Term::TUniv(n) => Value::VUniv(*n),
         Term::TProp => Value::VProp,
         Term::TSSet => Value::VSSet,
-        Term::TLift(a, lvl) => {
-            Value::VLift(Box::new(eval_nbe(env, globals, global_offset, a, session)), *lvl)
+        Term::TLift(a, lvl) => Value::VLift(
+            Box::new(eval_nbe(env, globals, global_offset, a, session)),
+            *lvl,
+        ),
+        Term::TLower(a) => {
+            Value::VLower(Box::new(eval_nbe(env, globals, global_offset, a, session)))
         }
-        Term::TLower(a) => Value::VLower(Box::new(eval_nbe(env, globals, global_offset, a, session))),
         Term::TIntervalTy => Value::VIntervalTy,
         Term::TPi(x, a, b) => Value::VPi(
             x.clone(),
@@ -568,35 +576,40 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             global_offset,
             eval_nbe(env, globals, global_offset, p, session),
             eval_nbe(env, globals, global_offset, r, session),
-        session),
+            session,
+        ),
         Term::THComp(a, sys, base) => do_hcomp(
             globals,
             global_offset,
             eval_nbe(env, globals, global_offset, a, session),
             eval_system(env, globals, global_offset, sys, session),
             eval_nbe(env, globals, global_offset, base, session),
-        session),
+            session,
+        ),
         Term::TComp(a, sys, base) => do_comp(
             globals,
             global_offset,
             eval_nbe(env, globals, global_offset, a, session),
             eval_system(env, globals, global_offset, sys, session),
             eval_nbe(env, globals, global_offset, base, session),
-        session),
+            session,
+        ),
         Term::TFill(a, sys, base) => do_fill(
             globals,
             global_offset,
             eval_nbe(env, globals, global_offset, a, session),
             eval_system(env, globals, global_offset, sys, session),
             eval_nbe(env, globals, global_offset, base, session),
-        session),
+            session,
+        ),
         Term::THFill(a, sys, base) => do_hfill(
             globals,
             global_offset,
             eval_nbe(env, globals, global_offset, a, session),
             eval_system(env, globals, global_offset, sys, session),
             eval_nbe(env, globals, global_offset, base, session),
-        session),
+            session,
+        ),
         Term::TEquiv(a, b) => Value::VEquiv(
             Box::new(eval_nbe(env, globals, global_offset, a, session)),
             Box::new(eval_nbe(env, globals, global_offset, b, session)),
@@ -614,12 +627,20 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             global_offset,
             eval_nbe(env, globals, global_offset, e, session),
             eval_nbe(env, globals, global_offset, x, session),
-        session),
+            session,
+        ),
         Term::TUa(e) => Value::VUa(Box::new(eval_nbe(env, globals, global_offset, e, session))),
         Term::TTransport(p, x) => {
             let p_val = eval_nbe(env, globals, global_offset, p, session);
             let x_val = eval_nbe(env, globals, global_offset, x, session);
-            let res = do_transport(env, globals, global_offset, p_val.clone(), x_val.clone(), session);
+            let res = do_transport(
+                env,
+                globals,
+                global_offset,
+                p_val.clone(),
+                x_val.clone(),
+                session,
+            );
             match &res {
                 Value::VTransport(_, _) | Value::VNeutral(Neutral::NTransport(_, _)) => {
                     let p_term = quote(env.len(), globals, global_offset, p_val, session);
@@ -675,7 +696,8 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             Value::VSystemType(entries)
         }
         Term::TGlueElem(phi, t, a) => {
-            let phi_dnf = value_to_dnf(eval_nbe(env, globals, global_offset, phi, session), session);
+            let phi_dnf =
+                value_to_dnf(eval_nbe(env, globals, global_offset, phi, session), session);
             let a_val = eval_nbe(env, globals, global_offset, a, session);
             if phi_dnf == dnf_top() {
                 // phi=1: glue [1, t, a] = t
@@ -725,13 +747,19 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             globals,
             global_offset,
             eval_nbe(env, globals, global_offset, p, session),
-        session),
+            session,
+        ),
         Term::TSnd(p) => do_snd(
             globals,
             global_offset,
             eval_nbe(env, globals, global_offset, p, session),
-        session),
-        Term::TProj(field, r) => do_proj(field, eval_nbe(env, globals, global_offset, r, session), session),
+            session,
+        ),
+        Term::TProj(field, r) => do_proj(
+            field,
+            eval_nbe(env, globals, global_offset, r, session),
+            session,
+        ),
         Term::TRecordUpdate(r, updates) => {
             let r_val = eval_nbe(env, globals, global_offset, r, session);
             let updates_val: Vec<(Name, Value)> = updates
@@ -960,28 +988,31 @@ fn eval_nbe_inner(env: &Scope, globals: &Globals, global_offset: usize, t: &Term
             env,
             globals,
             global_offset,
-        session),
+            session,
+        ),
         Term::Meta(i) => {
             if *i >= 0 {
-                if let Some(solution) = get_meta_solution(*i) {
+                if let Some(solution) = session.get_meta_solution(*i) {
                     return eval_nbe(env, globals, global_offset, &solution, session);
                 }
             }
             Value::VNeutral(Neutral::NMeta(*i))
         }
         Term::TBy(_) => panic!("TBy should be resolved before NbE"),
-        Term::TDelay(a) => Value::VDelay(Box::new(eval_nbe(env, globals, global_offset, a, session))),
+        Term::TDelay(a) => {
+            Value::VDelay(Box::new(eval_nbe(env, globals, global_offset, a, session)))
+        }
         Term::TNext(a) => Value::VNext(Box::new(eval_nbe(env, globals, global_offset, a, session))),
         Term::TForce(a) => do_force(
             eval_nbe(env, globals, global_offset, a, session),
             globals,
             global_offset,
-        session),
+            session,
+        ),
     }
 }
 
-pub fn do_force(v: Value, globals: &Globals, global_offset: usize,
-    session: &mut Session) -> Value {
+pub fn do_force(v: Value, globals: &Globals, global_offset: usize, session: &mut Session) -> Value {
     match v {
         Value::VNext(inner) => {
             record_step(
@@ -996,8 +1027,13 @@ pub fn do_force(v: Value, globals: &Globals, global_offset: usize,
     }
 }
 
-pub fn do_apply(globals: &Globals, global_offset: usize, f: Value, a: Value,
-    session: &mut Session) -> Value {
+pub fn do_apply(
+    globals: &Globals,
+    global_offset: usize,
+    f: Value,
+    a: Value,
+    session: &mut Session,
+) -> Value {
     match f {
         Value::VLam(ref x, ref clos) => {
             let result = clos.apply(a, session);
@@ -1039,7 +1075,8 @@ fn reduce_con_at_endpoint(
     con: &Name,
     args: &[Value],
     endpoint: &I,
-session: &mut Session) -> Option<Value> {
+    session: &mut Session,
+) -> Option<Value> {
     let dts = session.current_dts();
     let dt = dts.iter().find(|dt| &dt.name == data)?;
     let arity = args.len();
@@ -1084,11 +1121,17 @@ session: &mut Session) -> Option<Value> {
         &Rc::new(RefCell::new(Vec::new())),
         0,
         &face_inst,
-    session))
+        session,
+    ))
 }
 
-pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
-    session: &mut Session) -> Value {
+pub fn do_papp(
+    globals: &Globals,
+    global_offset: usize,
+    p: Value,
+    r: Value,
+    session: &mut Session,
+) -> Value {
     if let Some(i) = value_to_endpoint(&r)
         && let Value::VPLam(_, clos) = p
     {
@@ -1151,7 +1194,8 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
                                 global_offset,
                                 first_tube.clone(),
                                 Value::VInterval(I::I1),
-                            session);
+                                session,
+                            );
                             record_step(
                                 "hcomp-papp-1".into(),
                                 "hcomp _ _ _ @ 1".into(),
@@ -1183,7 +1227,8 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
                         *base
                     }
                     I::I1 => {
-                        let result = do_comp(globals, global_offset, *a, sys.clone(), *base, session);
+                        let result =
+                            do_comp(globals, global_offset, *a, sys.clone(), *base, session);
                         record_step(
                             "fill-papp-1".into(),
                             "fill _ _ _ @ 1".into(),
@@ -1211,7 +1256,8 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
                         *base
                     }
                     I::I1 => {
-                        let result = do_hcomp(globals, global_offset, *a, sys.clone(), *base, session);
+                        let result =
+                            do_hcomp(globals, global_offset, *a, sys.clone(), *base, session);
                         record_step(
                             "hfill-papp-1".into(),
                             "hfill _ _ _ @ 1".into(),
@@ -1254,7 +1300,8 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
                         face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
                     }
                     let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
-                    let face_val = eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst, session);
+                    let face_val =
+                        eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst, session);
                     record_step(
                         "sqcon-boundary".into(),
                         format!(
@@ -1348,7 +1395,8 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
                         face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
                     }
                     let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
-                    let mut face_val = eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst, session);
+                    let mut face_val =
+                        eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst, session);
                     record_step(
                         "cellcon-boundary".into(),
                         format!(
@@ -1395,8 +1443,15 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
         // applications stay neutral.
         Value::VPCon(ref data, ref con, ref args, ref _r) => {
             if let Some(endpoint) = value_to_endpoint(&r)
-                && let Some(face_val) =
-                    reduce_con_at_endpoint(globals, global_offset, data, con, args, &endpoint, session)
+                && let Some(face_val) = reduce_con_at_endpoint(
+                    globals,
+                    global_offset,
+                    data,
+                    con,
+                    args,
+                    &endpoint,
+                    session,
+                )
             {
                 record_step(
                     "pcon-boundary".into(),
@@ -1429,8 +1484,15 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
         // `faces[2n-2]`, an (n-1)-cell), all applied via a plain PApp.
         Value::VCon(ref data, ref con, ref args) => {
             if let Some(endpoint) = value_to_endpoint(&r)
-                && let Some(face_val) =
-                    reduce_con_at_endpoint(globals, global_offset, data, con, args, &endpoint, session)
+                && let Some(face_val) = reduce_con_at_endpoint(
+                    globals,
+                    global_offset,
+                    data,
+                    con,
+                    args,
+                    &endpoint,
+                    session,
+                )
             {
                 record_step(
                     "con-boundary".into(),
@@ -1483,8 +1545,7 @@ pub fn do_papp(globals: &Globals, global_offset: usize, p: Value, r: Value,
     }
 }
 
-pub fn do_fst(globals: &Globals, global_offset: usize, p: Value,
-    session: &mut Session) -> Value {
+pub fn do_fst(globals: &Globals, global_offset: usize, p: Value, session: &mut Session) -> Value {
     match p {
         Value::VPair(a, _) => {
             record_step(
@@ -1499,8 +1560,7 @@ pub fn do_fst(globals: &Globals, global_offset: usize, p: Value,
     }
 }
 
-pub fn do_snd(globals: &Globals, global_offset: usize, p: Value,
-    session: &mut Session) -> Value {
+pub fn do_snd(globals: &Globals, global_offset: usize, p: Value, session: &mut Session) -> Value {
     match p {
         Value::VPair(_, b) => {
             record_step(
@@ -1515,8 +1575,7 @@ pub fn do_snd(globals: &Globals, global_offset: usize, p: Value,
     }
 }
 
-pub fn do_proj(field: &str, r: Value,
-    session: &mut Session) -> Value {
+pub fn do_proj(field: &str, r: Value, session: &mut Session) -> Value {
     match r {
         // Desugar record update on projection: (r { x = v }).y → r.y when field != x
         Value::VRecordUpdate(r_inner, ref updates) => {
@@ -1571,7 +1630,8 @@ pub fn do_elim(
     env: &Scope,
     globals: &Globals,
     global_offset: usize,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     match scrut {
         Value::VCon(ref data, ref con, ref args) => {
             match cases.iter().find(|case| case.con == *con) {
@@ -1732,7 +1792,8 @@ pub fn do_transport(
     global_offset: usize,
     p: Value,
     x: Value,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     match p {
         Value::VUa(e) => {
             let result = do_equiv_fwd(globals, global_offset, *e, x, session);
@@ -1791,8 +1852,16 @@ session: &mut Session) -> Value {
 
                 // Pi transport (non-dependent codomain only)
                 (Value::VPi(arg_name, _, _), Value::VPi(_, _, _)) => {
-                    let result =
-                        transport_pi(env, globals, global_offset, i_name, clos, arg_name, x, session);
+                    let result = transport_pi(
+                        env,
+                        globals,
+                        global_offset,
+                        i_name,
+                        clos,
+                        arg_name,
+                        x,
+                        session,
+                    );
                     record_step(
                         "transport-pi".into(),
                         "transport (λi. Π _ _) _".into(),
@@ -1803,7 +1872,8 @@ session: &mut Session) -> Value {
 
                 // Path transport
                 (Value::VPath(_, _, _), Value::VPath(_, _, _)) => {
-                    let result = transport_path(env, globals, global_offset, i_name, clos, x, session);
+                    let result =
+                        transport_path(env, globals, global_offset, i_name, clos, x, session);
                     record_step(
                         "transport-path".into(),
                         "transport (λi. Path _ _ _) _".into(),
@@ -1815,8 +1885,16 @@ session: &mut Session) -> Value {
                 // Sigma transport (pair only)
                 (Value::VSigma(_, _, _), Value::VSigma(_, _, _)) => match x {
                     Value::VPair(ref a, ref b) => {
-                        let result =
-                            transport_sigma_pair(env, globals, global_offset, i_name, clos, a, b, session);
+                        let result = transport_sigma_pair(
+                            env,
+                            globals,
+                            global_offset,
+                            i_name,
+                            clos,
+                            a,
+                            b,
+                            session,
+                        );
                         record_step(
                             "transport-sigma".into(),
                             "transport (λi. Σ _ _) (_, _)".into(),
@@ -1832,7 +1910,16 @@ session: &mut Session) -> Value {
 
                 // Glue transport (phi=bot or phi=top)
                 (Value::VGlue(_, phi0, _), Value::VGlue(_, _, _)) => {
-                    let r = transport_glue(env, globals, global_offset, i_name, clos, phi0, &x, session);
+                    let r = transport_glue(
+                        env,
+                        globals,
+                        global_offset,
+                        i_name,
+                        clos,
+                        phi0,
+                        &x,
+                        session,
+                    );
                     r.unwrap_or_else(|| {
                         Value::VTransport(
                             Box::new(Value::VPLam("_".to_string(), clos.clone())),
@@ -1854,7 +1941,8 @@ session: &mut Session) -> Value {
                             clos,
                             con,
                             args,
-                        session);
+                            session,
+                        );
                         record_step(
                             "transport-data".into(),
                             format!("transport (λi. {}) ({} ...)", d, con),
@@ -1872,7 +1960,8 @@ session: &mut Session) -> Value {
                             con,
                             args,
                             r,
-                        session);
+                            session,
+                        );
                         record_step(
                             "transport-data-pcon".into(),
                             format!("transport (λi. {}) ({} ...)", d, con),
@@ -1891,7 +1980,8 @@ session: &mut Session) -> Value {
                             args,
                             r,
                             s,
-                        session);
+                            session,
+                        );
                         record_step(
                             "transport-data-sqcon".into(),
                             format!("transport (λi. {}) ({} ...)", d, con),
@@ -1909,7 +1999,8 @@ session: &mut Session) -> Value {
                             con,
                             args,
                             ivars,
-                        session);
+                            session,
+                        );
                         record_step(
                             "transport-data-cellcon".into(),
                             format!("transport (λi. {}) ({} ...)", d, con),
@@ -1940,7 +2031,8 @@ fn eval_body_at_formal_interval(
     globals: &Globals,
     global_offset: usize,
     clos: &IClosure,
-session: &mut Session) -> (Scope, Value) {
+    session: &mut Session,
+) -> (Scope, Value) {
     let body_with_var = beta(&shift(1, 0, &clos.body), &Term::TVar(0));
     let formal_env = env.extend(Value::VIntervalVar(env.len()));
     let evaluated = eval_nbe(&formal_env, globals, global_offset, &body_with_var, session);
@@ -1948,8 +2040,7 @@ session: &mut Session) -> (Scope, Value) {
 }
 
 /// Apply a Closure with a dummy argument (for non-dependent extraction).
-fn apply_non_dep(clos: &Closure,
-    session: &mut Session) -> Value {
+fn apply_non_dep(clos: &Closure, session: &mut Session) -> Value {
     clos.apply(Value::VInterval(I::I0), session)
 }
 
@@ -2078,8 +2169,10 @@ fn transport_pi(
     clos: &IClosure,
     arg_name: &str,
     x: Value,
-session: &mut Session) -> Value {
-    let (formal_env, pi_at_var) = eval_body_at_formal_interval(env, globals, global_offset, clos, session);
+    session: &mut Session,
+) -> Value {
+    let (formal_env, pi_at_var) =
+        eval_body_at_formal_interval(env, globals, global_offset, clos, session);
     let cod_clos = match &pi_at_var {
         Value::VPi(_, _, cod_clos) => cod_clos,
         _ => {
@@ -2116,7 +2209,8 @@ session: &mut Session) -> Value {
             globals,
             global_offset,
             Value::VPLam(i_name.to_string(), clos.clone()),
-        session);
+            session,
+        );
         let x_term = quote(env.len(), globals, global_offset, x.clone(), session);
         let reduced = transport_term_fallback(p_term, x_term, session);
         match reduced {
@@ -2137,8 +2231,10 @@ fn transport_path(
     i_name: &str,
     clos: &IClosure,
     x: Value,
-session: &mut Session) -> Value {
-    let (formal_env, path_at_var) = eval_body_at_formal_interval(env, globals, global_offset, clos, session);
+    session: &mut Session,
+) -> Value {
+    let (formal_env, path_at_var) =
+        eval_body_at_formal_interval(env, globals, global_offset, clos, session);
     let a_val = match &path_at_var {
         Value::VPath(a, _, _) => *a.clone(),
         _ => {
@@ -2178,7 +2274,8 @@ fn transport_sigma_pair(
     clos: &IClosure,
     a: &Value,
     b: &Value,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     let (formal_env, sigma_at_var) =
         eval_body_at_formal_interval(env, globals, global_offset, clos, session);
     let a_val = match &sigma_at_var {
@@ -2200,7 +2297,8 @@ session: &mut Session) -> Value {
             Box::new(a_fam.clone()),
             Box::new(quote(env.len(), globals, global_offset, a.clone(), session)),
         ),
-    session);
+        session,
+    );
 
     let b_val = match &sigma_at_var {
         Value::VSigma(_, _, cod_clos) => apply_non_dep(cod_clos, session),
@@ -2221,7 +2319,8 @@ session: &mut Session) -> Value {
             Box::new(b_fam),
             Box::new(quote(env.len(), globals, global_offset, b.clone(), session)),
         ),
-    session);
+        session,
+    );
 
     Value::VPair(Box::new(a_prime), Box::new(b_prime))
 }
@@ -2242,7 +2341,8 @@ fn transport_data_con(
     clos: &IClosure,
     con_name: &str,
     args: &[Value],
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     let dts = session.current_dts();
     let d_name = match clos.apply_i(I::I0, session) {
         Value::VData(name, _) => name,
@@ -2295,7 +2395,13 @@ session: &mut Session) -> Value {
         }
         // Replace bound vars (0..k) with already-transported args as terms
         for j in 0..k {
-            let arg_term = quote(env.len(), globals, global_offset, result_args[j].clone(), session);
+            let arg_term = quote(
+                env.len(),
+                globals,
+                global_offset,
+                result_args[j].clone(),
+                session,
+            );
             ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
         }
         // ty_shifted now has: outermost binder for interval i, then variable 0 is arg k
@@ -2307,9 +2413,16 @@ session: &mut Session) -> Value {
             global_offset,
             &Term::TTransport(
                 Box::new(ty_fam),
-                Box::new(quote(env.len(), globals, global_offset, args[k].clone(), session)),
+                Box::new(quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    args[k].clone(),
+                    session,
+                )),
             ),
-        session);
+            session,
+        );
         result_args.push(transported);
     }
 
@@ -2327,7 +2440,8 @@ fn transport_data_pcon(
     con_name: &str,
     args: &[Value],
     r: &Value,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     let dts = session.current_dts();
     let d_name = match clos.apply_i(I::I0, session) {
         Value::VData(name, _) => name,
@@ -2387,7 +2501,13 @@ session: &mut Session) -> Value {
             ty_shifted = shift(1, j as i32, &ty_shifted);
         }
         for j in 0..k {
-            let arg_term = quote(env.len(), globals, global_offset, result_args[j].clone(), session);
+            let arg_term = quote(
+                env.len(),
+                globals,
+                global_offset,
+                result_args[j].clone(),
+                session,
+            );
             ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
         }
         let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
@@ -2397,9 +2517,16 @@ session: &mut Session) -> Value {
             global_offset,
             &Term::TTransport(
                 Box::new(ty_fam),
-                Box::new(quote(env.len(), globals, global_offset, args[k].clone(), session)),
+                Box::new(quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    args[k].clone(),
+                    session,
+                )),
             ),
-        session);
+            session,
+        );
         result_args.push(transported);
     }
 
@@ -2422,7 +2549,8 @@ fn transport_data_sqcon(
     args: &[Value],
     r: &Value,
     s: &Value,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     let dts = session.current_dts();
     let d_name = match clos.apply_i(I::I0, session) {
         Value::VData(name, _) => name,
@@ -2491,7 +2619,13 @@ session: &mut Session) -> Value {
             ty_shifted = shift(1, j as i32, &ty_shifted);
         }
         for j in 0..k {
-            let arg_term = quote(env.len(), globals, global_offset, result_args[j].clone(), session);
+            let arg_term = quote(
+                env.len(),
+                globals,
+                global_offset,
+                result_args[j].clone(),
+                session,
+            );
             ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
         }
         let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
@@ -2501,9 +2635,16 @@ session: &mut Session) -> Value {
             global_offset,
             &Term::TTransport(
                 Box::new(ty_fam),
-                Box::new(quote(env.len(), globals, global_offset, args[k].clone(), session)),
+                Box::new(quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    args[k].clone(),
+                    session,
+                )),
             ),
-        session);
+            session,
+        );
         result_args.push(transported);
     }
 
@@ -2527,7 +2668,8 @@ fn transport_data_cellcon(
     con_name: &str,
     args: &[Value],
     ivars: &[Value],
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     let dts = session.current_dts();
     let d_name = match clos.apply_i(I::I0, session) {
         Value::VData(name, _) => name,
@@ -2587,7 +2729,13 @@ session: &mut Session) -> Value {
             ty_shifted = shift(1, j as i32, &ty_shifted);
         }
         for j in 0..k {
-            let arg_term = quote(env.len(), globals, global_offset, result_args[j].clone(), session);
+            let arg_term = quote(
+                env.len(),
+                globals,
+                global_offset,
+                result_args[j].clone(),
+                session,
+            );
             ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
         }
         let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
@@ -2597,9 +2745,16 @@ session: &mut Session) -> Value {
             global_offset,
             &Term::TTransport(
                 Box::new(ty_fam),
-                Box::new(quote(env.len(), globals, global_offset, args[k].clone(), session)),
+                Box::new(quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    args[k].clone(),
+                    session,
+                )),
             ),
-        session);
+            session,
+        );
         result_args.push(transported);
     }
 
@@ -2615,7 +2770,8 @@ fn transport_glue(
     clos: &IClosure,
     phi0: &DNF,
     x: &Value,
-session: &mut Session) -> Option<Value> {
+    session: &mut Session,
+) -> Option<Value> {
     if *phi0 == dnf_bot() {
         let (formal_env, glue_at_var) =
             eval_body_at_formal_interval(env, globals, global_offset, clos, session);
@@ -2637,7 +2793,8 @@ session: &mut Session) -> Option<Value> {
                 Box::new(a_fam),
                 Box::new(quote(env.len(), globals, global_offset, x.clone(), session)),
             ),
-        session))
+            session,
+        ))
     } else if *phi0 == dnf_top() {
         let (formal_env, glue_at_var) =
             eval_body_at_formal_interval(env, globals, global_offset, clos, session);
@@ -2646,7 +2803,11 @@ session: &mut Session) -> Option<Value> {
             _ => return None,
         };
         let dom = equiv_dom_value(te_val);
-        let dom_body = shift(1, 1, &quote(formal_env.len(), globals, global_offset, dom, session));
+        let dom_body = shift(
+            1,
+            1,
+            &quote(formal_env.len(), globals, global_offset, dom, session),
+        );
         let dom_fam = Term::PLam(i_name.to_string(), Box::new(dom_body));
         Some(eval_nbe(
             env,
@@ -2656,7 +2817,8 @@ session: &mut Session) -> Option<Value> {
                 Box::new(dom_fam),
                 Box::new(quote(env.len(), globals, global_offset, x.clone(), session)),
             ),
-        session))
+            session,
+        ))
     } else {
         // Non-trivial face: decompose glue elements using the cubical Glue transport rule.
         // transp (λi. Glue A [φ] te) (glue [φ] t a)
@@ -2673,7 +2835,11 @@ session: &mut Session) -> Option<Value> {
                 };
 
                 // tube = λi. t  (constant tube in hcomp)
-                let t_body = shift(1, 0, &quote(env.len(), globals, global_offset, *t.clone(), session));
+                let t_body = shift(
+                    1,
+                    0,
+                    &quote(env.len(), globals, global_offset, *t.clone(), session),
+                );
                 let tube = Term::PLam(i_name.to_string(), Box::new(t_body));
                 let tube_val = eval_nbe(env, globals, global_offset, &tube, session);
 
@@ -2693,8 +2859,7 @@ session: &mut Session) -> Option<Value> {
 }
 
 /// Term-level transport reduction.
-pub fn transport_term_fallback(p_: Term, x_: Term,
-    session: &mut Session) -> Term {
+pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Term {
     match p_ {
         Term::TUa(ref e) => nbe_eval(&Term::TEquivFwd(e.clone(), Box::new(x_)), session),
 
@@ -2716,36 +2881,39 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
                     if a0_eval == a1_eval {
                         let b_fam = Term::PLam(
                             i_name.clone(),
-                            Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                                Term::TPi(_, _, b_i) => {
-                                    let max_idx = max_var(&b_i);
-                                    let temp = max_idx + 1;
-                                    let tmp_var = Term::TVar(temp);
-                                    let step1 = subst(0, &tmp_var, &b_i);
-                                    let step2 = subst(1, &Term::TVar(0), &step1);
-                                    subst(temp, &Term::TVar(1), &step2)
-                                }
-                                _ => {
-                                    let b0_body = match &b0 {
-                                        Term::TPi(_, _, b) => (**b).clone(),
-                                        _ => b0.clone(),
-                                    };
-                                    shift(1, 0, &b0_body)
-                                }
-                            }),
+                            Box::new(
+                                match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
+                                    Term::TPi(_, _, b_i) => {
+                                        let max_idx = max_var(&b_i);
+                                        let temp = max_idx + 1;
+                                        let tmp_var = Term::TVar(temp);
+                                        let step1 = subst(0, &tmp_var, &b_i);
+                                        let step2 = subst(1, &Term::TVar(0), &step1);
+                                        subst(temp, &Term::TVar(1), &step2)
+                                    }
+                                    _ => {
+                                        let b0_body = match &b0 {
+                                            Term::TPi(_, _, b) => (**b).clone(),
+                                            _ => b0.clone(),
+                                        };
+                                        shift(1, 0, &b0_body)
+                                    }
+                                },
+                            ),
                         );
                         let x_shifted = shift(1, 0, &x_);
                         Term::TAbs(
                             arg_name,
-                            Box::new(nbe_eval(&Term::TTransport(
-                                Box::new(b_fam),
-                                Box::new(nbe_eval(&Term::TApp(
-                                    Box::new(x_shifted),
-                                    Box::new(Term::TVar(0)),
+                            Box::new(nbe_eval(
+                                &Term::TTransport(
+                                    Box::new(b_fam),
+                                    Box::new(nbe_eval(
+                                        &Term::TApp(Box::new(x_shifted), Box::new(Term::TVar(0))),
+                                        session,
+                                    )),
                                 ),
-                                session)),
-                            ),
-                            session)),
+                                session,
+                            )),
                         )
                     } else {
                         let b_non_dep = match &b0 {
@@ -2762,7 +2930,10 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
                             let b_fam = Term::PLam(
                                 i_name.clone(),
                                 Box::new(
-                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
+                                    match nbe_eval(
+                                        &beta(&shift(1, 0, body), &Term::TVar(0)),
+                                        session,
+                                    ) {
                                         Term::TPi(_, _, b_i) => *b_i,
                                         _ => shift(1, 0, &b0_body),
                                     },
@@ -2771,21 +2942,26 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
                             let x_shifted = shift(1, 0, &x_);
                             Term::TAbs(
                                 arg_name,
-                                Box::new(nbe_eval(&Term::TTransport(
-                                    Box::new(b_fam),
-                                    Box::new(nbe_eval(&Term::TApp(
-                                        Box::new(x_shifted),
-                                        Box::new(Term::TVar(0)),
+                                Box::new(nbe_eval(
+                                    &Term::TTransport(
+                                        Box::new(b_fam),
+                                        Box::new(nbe_eval(
+                                            &Term::TApp(
+                                                Box::new(x_shifted),
+                                                Box::new(Term::TVar(0)),
+                                            ),
+                                            session,
+                                        )),
                                     ),
-                                    session)),
-                                ),
-                                session)),
+                                    session,
+                                )),
                             )
                         } else {
                             let arg_name = arg_name.clone();
                             let i_name = i_name.clone();
 
-                            let pi_at_var = nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session);
+                            let pi_at_var =
+                                nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session);
                             let a_i = match &pi_at_var {
                                 Term::TPi(_, a, _) => (**a).clone(),
                                 _ => shift(1, 0, a0),
@@ -2824,21 +3000,25 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
                                     let b_i_swapped = subst(temp, &Term::TVar(1), &step2);
 
                                     let y0_shifted = shift(1, 0, &y0_term);
-                                    let fill_at_i = nbe_eval(&Term::TTransport(
-                                        Box::new(Term::PLam(
-                                            "j".to_string(),
-                                            Box::new(nbe_eval(&Term::PApp(
-                                                Box::new(shift(2, 0, &a_fam)),
-                                                Box::new(Term::TInterval(I::Meet(
-                                                    Box::new(I::Var(1)),
-                                                    Box::new(I::Var(0)),
-                                                ))),
-                                            ),
-                                            session)),
-                                        )),
-                                        Box::new(y0_shifted),
-                                    ),
-                                    session);
+                                    let fill_at_i = nbe_eval(
+                                        &Term::TTransport(
+                                            Box::new(Term::PLam(
+                                                "j".to_string(),
+                                                Box::new(nbe_eval(
+                                                    &Term::PApp(
+                                                        Box::new(shift(2, 0, &a_fam)),
+                                                        Box::new(Term::TInterval(I::Meet(
+                                                            Box::new(I::Var(1)),
+                                                            Box::new(I::Var(0)),
+                                                        ))),
+                                                    ),
+                                                    session,
+                                                )),
+                                            )),
+                                            Box::new(y0_shifted),
+                                        ),
+                                        session,
+                                    );
                                     nbe_eval(&subst(1, &fill_at_i, &b_i_swapped), session)
                                 }),
                             );
@@ -2846,15 +3026,16 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
                             let x_shifted = shift(1, 0, &x_);
                             Term::TAbs(
                                 arg_name,
-                                Box::new(nbe_eval(&Term::TTransport(
-                                    Box::new(b_fam),
-                                    Box::new(nbe_eval(&Term::TApp(
-                                        Box::new(x_shifted),
-                                        Box::new(y0_term),
+                                Box::new(nbe_eval(
+                                    &Term::TTransport(
+                                        Box::new(b_fam),
+                                        Box::new(nbe_eval(
+                                            &Term::TApp(Box::new(x_shifted), Box::new(y0_term)),
+                                            session,
+                                        )),
                                     ),
-                                    session)),
-                                ),
-                                session)),
+                                    session,
+                                )),
                             )
                         }
                     }
@@ -2866,21 +3047,25 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
 
                     let a_fam = Term::PLam(
                         i_name.clone(),
-                        Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                            Term::TPath(a, _, _) => *a,
-                            _ => shift(1, 0, &ty_a0),
-                        }),
+                        Box::new(
+                            match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
+                                Term::TPath(a, _, _) => *a,
+                                _ => shift(1, 0, &ty_a0),
+                            },
+                        ),
                     );
 
                     let a_fam_s = shift(1, 0, &a_fam);
                     let x_shifted = shift(1, 0, &x_);
                     Term::PLam(
                         "j".to_string(),
-                        Box::new(nbe_eval(&Term::TTransport(
-                            Box::new(a_fam_s),
-                            Box::new(Term::PApp(Box::new(x_shifted), Box::new(Term::TVar(0)))),
-                        ),
-                        session)),
+                        Box::new(nbe_eval(
+                            &Term::TTransport(
+                                Box::new(a_fam_s),
+                                Box::new(Term::PApp(Box::new(x_shifted), Box::new(Term::TVar(0)))),
+                            ),
+                            session,
+                        )),
                     )
                 }
 
@@ -2899,42 +3084,53 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
 
                         let a_fam = Term::PLam(
                             i_name.clone(),
-                            Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                                Term::TSigma(_, a_i, _) => *a_i,
-                                _ => shift(1, 0, &b0_a),
-                            }),
+                            Box::new(
+                                match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
+                                    Term::TSigma(_, a_i, _) => *a_i,
+                                    _ => shift(1, 0, &b0_a),
+                                },
+                            ),
                         );
 
-                        let a_prime =
-                            nbe_eval(&Term::TTransport(Box::new(a_fam.clone()), a.clone()), session);
+                        let a_prime = nbe_eval(
+                            &Term::TTransport(Box::new(a_fam.clone()), a.clone()),
+                            session,
+                        );
 
                         let a_clone = (**a).clone();
                         let b_fam = Term::PLam(
                             i_name.clone(),
-                            Box::new(match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                                Term::TSigma(_, _, b_i) => {
-                                    let fill_at_i = nbe_eval(&Term::TTransport(
-                                        Box::new(Term::PLam(
-                                            "j".to_string(),
-                                            Box::new(nbe_eval(&Term::PApp(
-                                                Box::new(shift(2, 0, &a_fam)),
-                                                Box::new(Term::TInterval(I::Meet(
-                                                    Box::new(I::Var(1)),
-                                                    Box::new(I::Var(0)),
-                                                ))),
+                            Box::new(
+                                match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
+                                    Term::TSigma(_, _, b_i) => {
+                                        let fill_at_i = nbe_eval(
+                                            &Term::TTransport(
+                                                Box::new(Term::PLam(
+                                                    "j".to_string(),
+                                                    Box::new(nbe_eval(
+                                                        &Term::PApp(
+                                                            Box::new(shift(2, 0, &a_fam)),
+                                                            Box::new(Term::TInterval(I::Meet(
+                                                                Box::new(I::Var(1)),
+                                                                Box::new(I::Var(0)),
+                                                            ))),
+                                                        ),
+                                                        session,
+                                                    )),
+                                                )),
+                                                Box::new(shift(1, 0, &a_clone)),
                                             ),
-                                            session)),
-                                        )),
-                                        Box::new(shift(1, 0, &a_clone)),
-                                    ),
-                                    session);
-                                    nbe_eval(&beta(&b_i, &fill_at_i), session)
-                                }
-                                _ => shift(1, 0, &b0_b),
-                            }),
+                                            session,
+                                        );
+                                        nbe_eval(&beta(&b_i, &fill_at_i), session)
+                                    }
+                                    _ => shift(1, 0, &b0_b),
+                                },
+                            ),
                         );
 
-                        let b_prime = nbe_eval(&Term::TTransport(Box::new(b_fam), b.clone()), session);
+                        let b_prime =
+                            nbe_eval(&Term::TTransport(Box::new(b_fam), b.clone()), session);
                         Term::TPair(Box::new(a_prime), Box::new(b_prime))
                     }
                     _ => Term::TTransport(
@@ -2946,41 +3142,55 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
                 (Term::TGlue(_, phi0, _), Term::TGlue(_, _, _)) => {
                     let i_name = i_name.clone();
                     if is_bot_dnf(&nbe_eval(phi0, session)) {
-                        nbe_eval(&Term::TTransport(
-                            Box::new(Term::PLam(
-                                i_name.clone(),
-                                Box::new(
-                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                                        Term::TGlue(a, _, _) => *a,
-                                        other => other,
-                                    },
-                                ),
-                            )),
-                            Box::new(x_),
-                        ),
-                        session)
+                        nbe_eval(
+                            &Term::TTransport(
+                                Box::new(Term::PLam(
+                                    i_name.clone(),
+                                    Box::new(
+                                        match nbe_eval(
+                                            &beta(&shift(1, 0, body), &Term::TVar(0)),
+                                            session,
+                                        ) {
+                                            Term::TGlue(a, _, _) => *a,
+                                            other => other,
+                                        },
+                                    ),
+                                )),
+                                Box::new(x_),
+                            ),
+                            session,
+                        )
                     } else if is_top_dnf(&nbe_eval(phi0, session)) {
-                        nbe_eval(&Term::TTransport(
-                            Box::new(Term::PLam(
-                                i_name.clone(),
-                                Box::new(
-                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                                        Term::TGlue(_, _, te) => equiv_dom(&nbe_eval(&te, session)),
-                                        other => other,
-                                    },
-                                ),
-                            )),
-                            Box::new(x_),
-                        ),
-                        session)
+                        nbe_eval(
+                            &Term::TTransport(
+                                Box::new(Term::PLam(
+                                    i_name.clone(),
+                                    Box::new(
+                                        match nbe_eval(
+                                            &beta(&shift(1, 0, body), &Term::TVar(0)),
+                                            session,
+                                        ) {
+                                            Term::TGlue(_, _, te) => {
+                                                equiv_dom(&nbe_eval(&te, session))
+                                            }
+                                            other => other,
+                                        },
+                                    ),
+                                )),
+                                Box::new(x_),
+                            ),
+                            session,
+                        )
                     } else {
                         // Non-trivial face: if x_ is a GlueElem with matching face, decompose.
                         match &x_ {
                             Term::TGlueElem(phi_elem, t, a)
                                 if nbe_eval(phi0, session) == nbe_eval(phi_elem, session) =>
                             {
-                                let a_ty = match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session)
-                                {
+                                let a_ty = match nbe_eval(
+                                    &beta(&shift(1, 0, body), &Term::TVar(0)),
+                                    session,
+                                ) {
                                     Term::TGlue(a, _, _) => *a,
                                     other => other,
                                 };
@@ -3012,7 +3222,10 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
                             let a_fam = Term::PLam(
                                 i_name.clone(),
                                 Box::new(
-                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
+                                    match nbe_eval(
+                                        &beta(&shift(1, 0, body), &Term::TVar(0)),
+                                        session,
+                                    ) {
                                         Term::TLift(a, _) => *a,
                                         other => other,
                                     },
@@ -3036,7 +3249,10 @@ pub fn transport_term_fallback(p_: Term, x_: Term,
                             let a_fam = Term::PLam(
                                 i_name.clone(),
                                 Box::new(
-                                    match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
+                                    match nbe_eval(
+                                        &beta(&shift(1, 0, body), &Term::TVar(0)),
+                                        session,
+                                    ) {
                                         Term::TLower(a) => *a,
                                         other => other,
                                     },
@@ -3088,7 +3304,6 @@ fn match_ctor_args<'a>(
     }
 }
 
-
 /// Check if all tubes in the system are constant (tube @ I0 ≡ tube @ I1)
 /// AND coherent with base (tube @ I0 ≡ base). When this holds, the Kan
 /// operations degenerate: hcomp/comp → base, fill/hfill → constant path.
@@ -3097,7 +3312,8 @@ fn all_tubes_constant_and_coherent(
     global_offset: usize,
     sys: &DNFSystem,
     base: &Value,
-session: &mut Session) -> bool {
+    session: &mut Session,
+) -> bool {
     // Guard against re-entrancy. The tube check quotes the base/tubes and
     // compares them with `definitionally_equal`, which re-normalizes via
     // `nbe_eval_ctx` → `quote`. When the quoted body is itself a PLam/VLam
@@ -3121,7 +3337,8 @@ fn all_tubes_constant_and_coherent_inner(
     global_offset: usize,
     sys: &DNFSystem,
     base: &Value,
-session: &mut Session) -> bool {
+    session: &mut Session,
+) -> bool {
     let base_term = quote(0, globals, global_offset, base.clone(), session);
     for (_phi, tube) in sys {
         let t0 = do_papp(
@@ -3129,21 +3346,23 @@ session: &mut Session) -> bool {
             global_offset,
             tube.clone(),
             Value::VInterval(I::I0),
-        session);
+            session,
+        );
         let t1 = do_papp(
             globals,
             global_offset,
             tube.clone(),
             Value::VInterval(I::I1),
-        session);
+            session,
+        );
         let t0_term = quote(0, globals, global_offset, t0, session);
         let t1_term = quote(0, globals, global_offset, t1, session);
         // Tube must be constant: t @ I0 ≡ t @ I1
-        if !definitionally_equal(&t0_term, &t1_term) {
+        if !definitionally_equal(&t0_term, &t1_term, session) {
             return false;
         }
         // Tube must be coherent with base: t @ I0 ≡ base
-        if !definitionally_equal(&t0_term, &base_term) {
+        if !definitionally_equal(&t0_term, &base_term, session) {
             return false;
         }
     }
@@ -3156,7 +3375,8 @@ pub fn do_hcomp(
     a_ty: Value,
     sys: DNFSystem,
     base: Value,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     // Filter out ⊥ faces
     let sys: DNFSystem = sys
         .into_iter()
@@ -3181,7 +3401,8 @@ session: &mut Session) -> Value {
                 global_offset,
                 tube.clone(),
                 Value::VInterval(I::I1),
-            session);
+                session,
+            );
             record_step(
                 "hcomp-top-face".into(),
                 "hcomp A [⊤ ↦ t, ...] base".into(),
@@ -3229,16 +3450,35 @@ session: &mut Session) -> Value {
                             Value::VPLam(_, iclos) => {
                                 let formal_i = Value::VIntervalVar(0);
                                 let tube_at_i = iclos.apply_interval_value(formal_i, session);
-                                do_apply(globals, global_offset, tube_at_i, arg_var.clone(), session)
+                                do_apply(
+                                    globals,
+                                    global_offset,
+                                    tube_at_i,
+                                    arg_var.clone(),
+                                    session,
+                                )
                             }
-                            _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone(), session),
+                            _ => do_apply(
+                                globals,
+                                global_offset,
+                                tube.clone(),
+                                arg_var.clone(),
+                                session,
+                            ),
                         };
                         (phi.clone(), tube_at_arg)
                     })
                     .collect();
                 let base_at_arg = base_clos.apply(arg_var.clone(), session);
                 let cod_at_arg = cod_clos.apply(arg_var, session);
-                let inner = do_hcomp(globals, global_offset, cod_at_arg, inner_sys, base_at_arg, session);
+                let inner = do_hcomp(
+                    globals,
+                    global_offset,
+                    cod_at_arg,
+                    inner_sys,
+                    base_at_arg,
+                    session,
+                );
                 let result = Value::VLam(
                     arg_name.clone(),
                     Closure {
@@ -3290,7 +3530,8 @@ session: &mut Session) -> Value {
                     *fst_ty.clone(),
                     fst_sys,
                     (**fst_base).clone(),
-                session);
+                    session,
+                );
 
                 let snd_sys: DNFSystem = sys
                     .iter()
@@ -3321,7 +3562,8 @@ session: &mut Session) -> Value {
                     snd_clos.apply((**fst_base).clone(), session),
                     snd_sys,
                     (**snd_base).clone(),
-                session);
+                    session,
+                );
 
                 let result = Value::VPair(Box::new(fst_result), Box::new(snd_result));
                 record_step(
@@ -3391,7 +3633,13 @@ session: &mut Session) -> Value {
                                         env: Scope::empty(),
                                         globals: globals.clone(),
                                         global_offset,
-                                        body: quote(1, globals, global_offset, (*tube_arg).clone(), session),
+                                        body: quote(
+                                            1,
+                                            globals,
+                                            global_offset,
+                                            (*tube_arg).clone(),
+                                            session,
+                                        ),
                                     },
                                 );
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
@@ -3411,17 +3659,25 @@ session: &mut Session) -> Value {
                         ty_shifted = shift(1, j as i32, &ty_shifted);
                     }
                     for j in 0..k {
-                        let arg_term = quote(0, globals, global_offset, result_args[j].clone(), session);
+                        let arg_term =
+                            quote(0, globals, global_offset, result_args[j].clone(), session);
                         ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
                     }
-                    let arg_ty = eval_nbe(&Scope::empty(), globals, global_offset, &ty_shifted, session);
+                    let arg_ty = eval_nbe(
+                        &Scope::empty(),
+                        globals,
+                        global_offset,
+                        &ty_shifted,
+                        session,
+                    );
                     let arg_result = do_hcomp(
                         globals,
                         global_offset,
                         arg_ty,
                         per_arg_tubes[k].clone(),
                         base_args[k].clone(),
-                    session);
+                        session,
+                    );
                     result_args.push(arg_result);
                 }
 
@@ -3461,7 +3717,8 @@ pub fn do_comp(
     a_fam: Value,
     sys: DNFSystem,
     base: Value,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     // Filter out ⊥ faces
     let sys: DNFSystem = sys
         .into_iter()
@@ -3486,7 +3743,8 @@ session: &mut Session) -> Value {
                 global_offset,
                 tube.clone(),
                 Value::VInterval(I::I1),
-            session);
+                session,
+            );
             record_step(
                 "comp-top-face".into(),
                 "comp _ [⊤ ↦ t, ...] base".into(),
@@ -3518,16 +3776,35 @@ session: &mut Session) -> Value {
                             Value::VPLam(_, iclos) => {
                                 let formal_i = Value::VIntervalVar(0);
                                 let tube_at_i = iclos.apply_interval_value(formal_i, session);
-                                do_apply(globals, global_offset, tube_at_i, arg_var.clone(), session)
+                                do_apply(
+                                    globals,
+                                    global_offset,
+                                    tube_at_i,
+                                    arg_var.clone(),
+                                    session,
+                                )
                             }
-                            _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone(), session),
+                            _ => do_apply(
+                                globals,
+                                global_offset,
+                                tube.clone(),
+                                arg_var.clone(),
+                                session,
+                            ),
                         };
                         (phi.clone(), tube_at_arg)
                     })
                     .collect();
                 let base_at_arg = base_clos.apply(arg_var.clone(), session);
                 let cod_at_arg = cod_clos.apply(arg_var, session);
-                let inner = do_comp(globals, global_offset, cod_at_arg, inner_sys, base_at_arg, session);
+                let inner = do_comp(
+                    globals,
+                    global_offset,
+                    cod_at_arg,
+                    inner_sys,
+                    base_at_arg,
+                    session,
+                );
                 let result = Value::VLam(
                     arg_name.clone(),
                     Closure {
@@ -3579,7 +3856,8 @@ session: &mut Session) -> Value {
                     *fst_ty.clone(),
                     fst_sys,
                     (**fst_base).clone(),
-                session);
+                    session,
+                );
 
                 let snd_sys: DNFSystem = sys
                     .iter()
@@ -3610,7 +3888,8 @@ session: &mut Session) -> Value {
                     snd_clos.apply((**fst_base).clone(), session),
                     snd_sys,
                     (**snd_base).clone(),
-                session);
+                    session,
+                );
 
                 let result = Value::VPair(Box::new(fst_result), Box::new(snd_result));
                 record_step(
@@ -3704,7 +3983,13 @@ session: &mut Session) -> Value {
                                         env: Scope::empty(),
                                         globals: globals.clone(),
                                         global_offset,
-                                        body: quote(1, globals, global_offset, (*tube_arg).clone(), session),
+                                        body: quote(
+                                            1,
+                                            globals,
+                                            global_offset,
+                                            (*tube_arg).clone(),
+                                            session,
+                                        ),
                                     },
                                 );
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
@@ -3736,17 +4021,25 @@ session: &mut Session) -> Value {
                         ty_shifted = shift(1, j as i32, &ty_shifted);
                     }
                     for j in 0..k {
-                        let arg_term = quote(0, globals, global_offset, result_args[j].clone(), session);
+                        let arg_term =
+                            quote(0, globals, global_offset, result_args[j].clone(), session);
                         ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
                     }
-                    let arg_ty = eval_nbe(&Scope::empty(), globals, global_offset, &ty_shifted, session);
+                    let arg_ty = eval_nbe(
+                        &Scope::empty(),
+                        globals,
+                        global_offset,
+                        &ty_shifted,
+                        session,
+                    );
                     let arg_result = do_comp(
                         globals,
                         global_offset,
                         arg_ty,
                         per_arg_tubes[k].clone(),
                         base_args[k].clone(),
-                    session);
+                        session,
+                    );
                     result_args.push(arg_result);
                 }
 
@@ -3799,7 +4092,8 @@ pub fn do_fill(
     a_fam: Value,
     sys: DNFSystem,
     base: Value,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     // Filter out ⊥ faces
     let sys: DNFSystem = sys
         .into_iter()
@@ -3873,16 +4167,35 @@ session: &mut Session) -> Value {
                             Value::VPLam(_, iclos) => {
                                 let formal_i = Value::VIntervalVar(0);
                                 let tube_at_i = iclos.apply_interval_value(formal_i, session);
-                                do_apply(globals, global_offset, tube_at_i, arg_var.clone(), session)
+                                do_apply(
+                                    globals,
+                                    global_offset,
+                                    tube_at_i,
+                                    arg_var.clone(),
+                                    session,
+                                )
                             }
-                            _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone(), session),
+                            _ => do_apply(
+                                globals,
+                                global_offset,
+                                tube.clone(),
+                                arg_var.clone(),
+                                session,
+                            ),
                         };
                         (phi.clone(), tube_at_arg)
                     })
                     .collect();
                 let base_at_arg = base_clos.apply(arg_var.clone(), session);
                 let cod_at_arg = cod_clos.apply(arg_var, session);
-                let inner = do_fill(globals, global_offset, cod_at_arg, inner_sys, base_at_arg, session);
+                let inner = do_fill(
+                    globals,
+                    global_offset,
+                    cod_at_arg,
+                    inner_sys,
+                    base_at_arg,
+                    session,
+                );
                 let inner_term = quote(1, globals, global_offset, inner, session);
                 let result = Value::VPLam(
                     "j".to_string(),
@@ -3936,7 +4249,8 @@ session: &mut Session) -> Value {
                     *fst_ty.clone(),
                     fst_sys,
                     (**fst_base).clone(),
-                session);
+                    session,
+                );
 
                 let snd_sys: DNFSystem = sys
                     .iter()
@@ -3967,7 +4281,8 @@ session: &mut Session) -> Value {
                     snd_clos.apply((**fst_base).clone(), session),
                     snd_sys,
                     (**snd_base).clone(),
-                session);
+                    session,
+                );
 
                 let fst_fill_term = quote(1, globals, global_offset, fst_fill, session);
                 let snd_fill_term = quote(1, globals, global_offset, snd_fill, session);
@@ -4089,7 +4404,13 @@ session: &mut Session) -> Value {
                                         env: Scope::empty(),
                                         globals: globals.clone(),
                                         global_offset,
-                                        body: quote(1, globals, global_offset, (*tube_arg).clone(), session),
+                                        body: quote(
+                                            1,
+                                            globals,
+                                            global_offset,
+                                            (*tube_arg).clone(),
+                                            session,
+                                        ),
                                     },
                                 );
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
@@ -4121,17 +4442,25 @@ session: &mut Session) -> Value {
                         ty_shifted = shift(1, j as i32, &ty_shifted);
                     }
                     for j in 0..k {
-                        let arg_term = quote(0, globals, global_offset, base_args[j].clone(), session);
+                        let arg_term =
+                            quote(0, globals, global_offset, base_args[j].clone(), session);
                         ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
                     }
-                    let arg_ty = eval_nbe(&Scope::empty(), globals, global_offset, &ty_shifted, session);
+                    let arg_ty = eval_nbe(
+                        &Scope::empty(),
+                        globals,
+                        global_offset,
+                        &ty_shifted,
+                        session,
+                    );
                     let arg_fill = do_fill(
                         globals,
                         global_offset,
                         arg_ty,
                         per_arg_tubes[k].clone(),
                         base_args[k].clone(),
-                    session);
+                        session,
+                    );
                     let arg_fill_term = quote(1, globals, global_offset, arg_fill, session);
                     result_arg_terms
                         .push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
@@ -4145,14 +4474,32 @@ session: &mut Session) -> Value {
                         d_name.clone(),
                         base_con.clone(),
                         result_arg_terms,
-                        Box::new(quote(1, globals, global_offset, base_ivars[0].clone(), session)),
+                        Box::new(quote(
+                            1,
+                            globals,
+                            global_offset,
+                            base_ivars[0].clone(),
+                            session,
+                        )),
                     ),
                     Value::VSqCon(_, _, _, _, _) => Term::TSqCon(
                         d_name.clone(),
                         base_con.clone(),
                         result_arg_terms,
-                        Box::new(quote(1, globals, global_offset, base_ivars[0].clone(), session)),
-                        Box::new(quote(1, globals, global_offset, base_ivars[1].clone(), session)),
+                        Box::new(quote(
+                            1,
+                            globals,
+                            global_offset,
+                            base_ivars[0].clone(),
+                            session,
+                        )),
+                        Box::new(quote(
+                            1,
+                            globals,
+                            global_offset,
+                            base_ivars[1].clone(),
+                            session,
+                        )),
                     ),
                     Value::VCellCon(_, _, _, _) => {
                         let ivar_terms: Vec<Term> = base_ivars
@@ -4206,7 +4553,8 @@ pub fn do_hfill(
     a_ty: Value,
     sys: DNFSystem,
     base: Value,
-session: &mut Session) -> Value {
+    session: &mut Session,
+) -> Value {
     // Filter out ⊥ faces
     let sys: DNFSystem = sys
         .into_iter()
@@ -4279,16 +4627,35 @@ session: &mut Session) -> Value {
                             Value::VPLam(_, iclos) => {
                                 let formal_i = Value::VIntervalVar(0);
                                 let tube_at_i = iclos.apply_interval_value(formal_i, session);
-                                do_apply(globals, global_offset, tube_at_i, arg_var.clone(), session)
+                                do_apply(
+                                    globals,
+                                    global_offset,
+                                    tube_at_i,
+                                    arg_var.clone(),
+                                    session,
+                                )
                             }
-                            _ => do_apply(globals, global_offset, tube.clone(), arg_var.clone(), session),
+                            _ => do_apply(
+                                globals,
+                                global_offset,
+                                tube.clone(),
+                                arg_var.clone(),
+                                session,
+                            ),
                         };
                         (phi.clone(), tube_at_arg)
                     })
                     .collect();
                 let base_at_arg = base_clos.apply(arg_var.clone(), session);
                 let cod_at_arg = cod_clos.apply(arg_var, session);
-                let inner = do_hfill(globals, global_offset, cod_at_arg, inner_sys, base_at_arg, session);
+                let inner = do_hfill(
+                    globals,
+                    global_offset,
+                    cod_at_arg,
+                    inner_sys,
+                    base_at_arg,
+                    session,
+                );
                 let inner_term = quote(1, globals, global_offset, inner, session);
                 let result = Value::VPLam(
                     "j".to_string(),
@@ -4342,7 +4709,8 @@ session: &mut Session) -> Value {
                     *fst_ty.clone(),
                     fst_sys,
                     (**fst_base).clone(),
-                session);
+                    session,
+                );
 
                 let snd_sys: DNFSystem = sys
                     .iter()
@@ -4373,7 +4741,8 @@ session: &mut Session) -> Value {
                     snd_clos.apply((**fst_base).clone(), session),
                     snd_sys,
                     (**snd_base).clone(),
-                session);
+                    session,
+                );
 
                 let fst_fill_term = quote(1, globals, global_offset, fst_fill, session);
                 let snd_fill_term = quote(1, globals, global_offset, snd_fill, session);
@@ -4494,7 +4863,13 @@ session: &mut Session) -> Value {
                                         env: Scope::empty(),
                                         globals: globals.clone(),
                                         global_offset,
-                                        body: quote(1, globals, global_offset, (*tube_arg).clone(), session),
+                                        body: quote(
+                                            1,
+                                            globals,
+                                            global_offset,
+                                            (*tube_arg).clone(),
+                                            session,
+                                        ),
                                     },
                                 );
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
@@ -4526,17 +4901,25 @@ session: &mut Session) -> Value {
                         ty_shifted = shift(1, j as i32, &ty_shifted);
                     }
                     for j in 0..k {
-                        let arg_term = quote(0, globals, global_offset, base_args[j].clone(), session);
+                        let arg_term =
+                            quote(0, globals, global_offset, base_args[j].clone(), session);
                         ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
                     }
-                    let arg_ty = eval_nbe(&Scope::empty(), globals, global_offset, &ty_shifted, session);
+                    let arg_ty = eval_nbe(
+                        &Scope::empty(),
+                        globals,
+                        global_offset,
+                        &ty_shifted,
+                        session,
+                    );
                     let arg_fill = do_hfill(
                         globals,
                         global_offset,
                         arg_ty,
                         per_arg_tubes[k].clone(),
                         base_args[k].clone(),
-                    session);
+                        session,
+                    );
                     let arg_fill_term = quote(1, globals, global_offset, arg_fill, session);
                     result_arg_terms
                         .push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
@@ -4550,14 +4933,32 @@ session: &mut Session) -> Value {
                         d_name.clone(),
                         base_con.clone(),
                         result_arg_terms,
-                        Box::new(quote(1, globals, global_offset, base_ivars[0].clone(), session)),
+                        Box::new(quote(
+                            1,
+                            globals,
+                            global_offset,
+                            base_ivars[0].clone(),
+                            session,
+                        )),
                     ),
                     Value::VSqCon(_, _, _, _, _) => Term::TSqCon(
                         d_name.clone(),
                         base_con.clone(),
                         result_arg_terms,
-                        Box::new(quote(1, globals, global_offset, base_ivars[0].clone(), session)),
-                        Box::new(quote(1, globals, global_offset, base_ivars[1].clone(), session)),
+                        Box::new(quote(
+                            1,
+                            globals,
+                            global_offset,
+                            base_ivars[0].clone(),
+                            session,
+                        )),
+                        Box::new(quote(
+                            1,
+                            globals,
+                            global_offset,
+                            base_ivars[1].clone(),
+                            session,
+                        )),
                     ),
                     Value::VCellCon(_, _, _, _) => {
                         let ivar_terms: Vec<Term> = base_ivars
@@ -4605,7 +5006,6 @@ session: &mut Session) -> Value {
     }
 }
 
-
 /// Quoting can also diverge independently of `eval_nbe`: re-quoting a lambda
 /// whose body re-references the same global value grows the quote recursion one
 /// `TAbs` layer per cycle (`quote` -> `Closure::apply` -> `eval_nbe` -> `quote`),
@@ -4617,8 +5017,13 @@ session: &mut Session) -> Value {
 /// the normalizer may run on (test threads default to 2 MiB).
 const QUOTE_MAX_DEPTH: usize = 200;
 
-pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value,
-    session: &mut Session) -> Term {
+pub fn quote(
+    size: usize,
+    globals: &Globals,
+    global_offset: usize,
+    v: Value,
+    session: &mut Session,
+) -> Term {
     let n = session.quote_depth_enter();
     if n >= QUOTE_MAX_DEPTH {
         session.quote_depth_restore(n);
@@ -4629,8 +5034,13 @@ pub fn quote(size: usize, globals: &Globals, global_offset: usize, v: Value,
     r
 }
 
-fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
-    session: &mut Session) -> Term {
+fn quote_inner(
+    size: usize,
+    globals: &Globals,
+    global_offset: usize,
+    v: Value,
+    session: &mut Session,
+) -> Term {
     match v {
         Value::VNeutral(n) => quote_neutral(size, globals, global_offset, n, session),
         Value::VLam(x, clos) => Term::TAbs(
@@ -4640,7 +5050,8 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
                 globals,
                 global_offset,
                 clos.apply(Value::VNeutral(Neutral::NVar(size)), session),
-            session)),
+                session,
+            )),
         ),
         Value::VApp(f, a) => Term::TApp(
             Box::new(quote(size, globals, global_offset, *f, session)),
@@ -4654,7 +5065,8 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
                 globals,
                 global_offset,
                 b.apply(Value::VNeutral(Neutral::NVar(size)), session),
-            session)),
+                session,
+            )),
         ),
         Value::VSigma(x, a, b) => Term::TSigma(
             x,
@@ -4664,7 +5076,8 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
                 globals,
                 global_offset,
                 b.apply(Value::VNeutral(Neutral::NVar(size)), session),
-            session)),
+                session,
+            )),
         ),
         Value::VPair(a, b) => Term::TPair(
             Box::new(quote(size, globals, global_offset, *a, session)),
@@ -4672,14 +5085,20 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
         ),
         Value::VFst(p) => Term::TFst(Box::new(quote(size, globals, global_offset, *p, session))),
         Value::VSnd(p) => Term::TSnd(Box::new(quote(size, globals, global_offset, *p, session))),
-        Value::VProj(field, r) => {
-            Term::TProj(field, Box::new(quote(size, globals, global_offset, *r, session)))
-        }
+        Value::VProj(field, r) => Term::TProj(
+            field,
+            Box::new(quote(size, globals, global_offset, *r, session)),
+        ),
         Value::VRecordUpdate(r, updates) => Term::TRecordUpdate(
             Box::new(quote(size, globals, global_offset, *r, session)),
             updates
                 .iter()
-                .map(|(f, e)| (f.clone(), quote(size, globals, global_offset, e.clone(), session)))
+                .map(|(f, e)| {
+                    (
+                        f.clone(),
+                        quote(size, globals, global_offset, e.clone(), session),
+                    )
+                })
                 .collect(),
         ),
         Value::VPath(a, u, v) => Term::TPath(
@@ -4694,7 +5113,8 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
                 globals,
                 global_offset,
                 clos.apply_i_var(size, session),
-            session)),
+                session,
+            )),
         ),
         Value::VPApp(p, r) => Term::PApp(
             Box::new(quote(size, globals, global_offset, *p, session)),
@@ -4703,8 +5123,13 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
         Value::VUniv(n) => Term::TUniv(n),
         Value::VProp => Term::TProp,
         Value::VSSet => Term::TSSet,
-        Value::VLift(a, lvl) => Term::TLift(Box::new(quote(size, globals, global_offset, *a, session)), lvl),
-        Value::VLower(a) => Term::TLower(Box::new(quote(size, globals, global_offset, *a, session))),
+        Value::VLift(a, lvl) => Term::TLift(
+            Box::new(quote(size, globals, global_offset, *a, session)),
+            lvl,
+        ),
+        Value::VLower(a) => {
+            Term::TLower(Box::new(quote(size, globals, global_offset, *a, session)))
+        }
         Value::VIntervalTy => Term::TIntervalTy,
         Value::VInterval(i) => Term::TInterval(i),
         Value::VIntervalVar(level) => level_to_var(size, level),
@@ -4767,7 +5192,12 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
         ),
         Value::VSystemType(sys) => Term::TSystemType(
             sys.into_iter()
-                .map(|(phi, a)| (Term::TCube(phi), quote(size, globals, global_offset, a, session)))
+                .map(|(phi, a)| {
+                    (
+                        Term::TCube(phi),
+                        quote(size, globals, global_offset, a, session),
+                    )
+                })
                 .collect(),
         ),
         Value::VGlueElem(phi, t, a) => Term::TGlueElem(
@@ -4865,14 +5295,23 @@ fn quote_inner(size: usize, globals: &Globals, global_offset: usize, v: Value,
                 Box::new(quote(size, globals, global_offset, *base, session)),
             )
         }
-        Value::VDelay(a) => Term::TDelay(Box::new(quote(size, globals, global_offset, *a, session))),
+        Value::VDelay(a) => {
+            Term::TDelay(Box::new(quote(size, globals, global_offset, *a, session)))
+        }
         Value::VNext(a) => Term::TNext(Box::new(quote(size, globals, global_offset, *a, session))),
-        Value::VForce(a) => Term::TForce(Box::new(quote(size, globals, global_offset, *a, session))),
+        Value::VForce(a) => {
+            Term::TForce(Box::new(quote(size, globals, global_offset, *a, session)))
+        }
     }
 }
 
-fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutral,
-    session: &mut Session) -> Term {
+fn quote_neutral(
+    size: usize,
+    globals: &Globals,
+    global_offset: usize,
+    n: Neutral,
+    session: &mut Session,
+) -> Term {
     match n {
         Neutral::NVar(level) => level_to_var(size, level),
         Neutral::NApp(f, a) => Term::TApp(
@@ -4902,8 +5341,20 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             }
             result
         }
-        Neutral::NFst(p) => Term::TFst(Box::new(quote_neutral(size, globals, global_offset, *p, session))),
-        Neutral::NSnd(p) => Term::TSnd(Box::new(quote_neutral(size, globals, global_offset, *p, session))),
+        Neutral::NFst(p) => Term::TFst(Box::new(quote_neutral(
+            size,
+            globals,
+            global_offset,
+            *p,
+            session,
+        ))),
+        Neutral::NSnd(p) => Term::TSnd(Box::new(quote_neutral(
+            size,
+            globals,
+            global_offset,
+            *p,
+            session,
+        ))),
         Neutral::NElim(motive, cases, scrut, env, go) => Term::TElim(
             Box::new(quote(size, globals, global_offset, *motive, session)),
             quote_cases(size, globals, global_offset, &env, go, cases, session),
@@ -4978,9 +5429,13 @@ fn quote_neutral(size: usize, globals: &Globals, global_offset: usize, n: Neutra
             )
         }
         Neutral::NMeta(i) => Term::Meta(i),
-        Neutral::NForce(n) => {
-            Term::TForce(Box::new(quote_neutral(size, globals, global_offset, *n, session)))
-        }
+        Neutral::NForce(n) => Term::TForce(Box::new(quote_neutral(
+            size,
+            globals,
+            global_offset,
+            *n,
+            session,
+        ))),
         Neutral::NProj(n, field) => Term::TProj(
             field,
             Box::new(quote_neutral(size, globals, global_offset, *n, session)),
@@ -5007,7 +5462,8 @@ fn quote_case_body(
     env: &Scope,
     go: usize,
     t: &Term,
-session: &mut Session) -> Term {
+    session: &mut Session,
+) -> Term {
     match t {
         Term::TVar(i) => {
             let i = *i as usize;
@@ -5032,7 +5488,8 @@ session: &mut Session) -> Term {
                             &clos.env.extend(Value::VNeutral(Neutral::NVar(size))),
                             clos.global_offset,
                             &clos.body,
-                        session)),
+                            session,
+                        )),
                     ),
                     Value::VPLam(x, clos) => Term::PLam(
                         x.clone(),
@@ -5043,7 +5500,8 @@ session: &mut Session) -> Term {
                             &clos.env.extend(Value::VIntervalVar(size)),
                             clos.global_offset,
                             &clos.body,
-                        session)),
+                            session,
+                        )),
                     ),
                     _ => quote(size, globals, global_offset, v.clone(), session),
                 }
@@ -5052,8 +5510,24 @@ session: &mut Session) -> Term {
             }
         }
         Term::TApp(f, a) => Term::TApp(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, f, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                f,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
         ),
         Term::TAbs(x, b) => Term::TAbs(
             x.clone(),
@@ -5064,13 +5538,22 @@ session: &mut Session) -> Term {
                 &env.extend(Value::VNeutral(Neutral::NVar(size))),
                 go,
                 b,
-            session)),
+                session,
+            )),
         ),
         Term::TUniv(n) => Term::TUniv(*n),
         Term::TProp => Term::TProp,
         Term::TSSet => Term::TSSet,
         Term::TLift(a, lvl) => Term::TLift(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
             *lvl,
         ),
         Term::TLower(a) => Term::TLower(Box::new(quote_case_body(
@@ -5080,11 +5563,20 @@ session: &mut Session) -> Term {
             env,
             go,
             a,
-        session))),
+            session,
+        ))),
         Term::TIntervalTy => Term::TIntervalTy,
         Term::TPi(x, a, b) => Term::TPi(
             x.clone(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
             Box::new(quote_case_body(
                 size + 1,
                 globals,
@@ -5092,14 +5584,39 @@ session: &mut Session) -> Term {
                 &env.extend(Value::VNeutral(Neutral::NVar(size))),
                 go,
                 b,
-            session)),
+                session,
+            )),
         ),
         Term::TInterval(i) => Term::TInterval(i.clone()),
         Term::TCube(c) => Term::TCube(c.clone()),
         Term::TPath(a, u, v) => Term::TPath(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, u, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, v, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                u,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                v,
+                session,
+            )),
         ),
         Term::PLam(x, b) => Term::PLam(
             x.clone(),
@@ -5110,14 +5627,39 @@ session: &mut Session) -> Term {
                 &env.extend(Value::VNeutral(Neutral::NVar(size))),
                 go,
                 b,
-            session)),
+                session,
+            )),
         ),
         Term::PApp(p, r) => Term::PApp(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, p, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, r, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                p,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                r,
+                session,
+            )),
         ),
         Term::THComp(a, sys, u0) => Term::THComp(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
             sys.iter()
                 .map(|(phi, t)| {
                     (
@@ -5126,10 +5668,26 @@ session: &mut Session) -> Term {
                     )
                 })
                 .collect(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, u0, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                u0,
+                session,
+            )),
         ),
         Term::TComp(a, sys, u0) => Term::TComp(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
             sys.iter()
                 .map(|(phi, t)| {
                     (
@@ -5138,10 +5696,26 @@ session: &mut Session) -> Term {
                     )
                 })
                 .collect(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, u0, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                u0,
+                session,
+            )),
         ),
         Term::TFill(a, sys, u0) => Term::TFill(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
             sys.iter()
                 .map(|(phi, t)| {
                     (
@@ -5150,10 +5724,26 @@ session: &mut Session) -> Term {
                     )
                 })
                 .collect(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, u0, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                u0,
+                session,
+            )),
         ),
         Term::THFill(a, sys, u0) => Term::THFill(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
             sys.iter()
                 .map(|(phi, t)| {
                     (
@@ -5162,23 +5752,111 @@ session: &mut Session) -> Term {
                     )
                 })
                 .collect(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, u0, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                u0,
+                session,
+            )),
         ),
         Term::TEquiv(a, b) => Term::TEquiv(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, b, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                b,
+                session,
+            )),
         ),
         Term::TMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, b, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, f, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, g, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, eta, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, eps, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                b,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                f,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                g,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                eta,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                eps,
+                session,
+            )),
         ),
         Term::TEquivFwd(e, x) => Term::TEquivFwd(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, e, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, x, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                e,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                x,
+                session,
+            )),
         ),
         Term::TUa(e) => Term::TUa(Box::new(quote_case_body(
             size,
@@ -5187,29 +5865,134 @@ session: &mut Session) -> Term {
             env,
             go,
             e,
-        session))),
+            session,
+        ))),
         Term::TTransport(p, x) => Term::TTransport(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, p, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, x, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                p,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                x,
+                session,
+            )),
         ),
         Term::TGlue(a, phi, te) => Term::TGlue(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, phi, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, te, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                phi,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                te,
+                session,
+            )),
         ),
         Term::TGlueElem(phi, t, a) => Term::TGlueElem(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, phi, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, t, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                phi,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                t,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
         ),
         Term::TUnglue(phi, te, g) => Term::TUnglue(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, phi, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, te, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, g, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                phi,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                te,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                g,
+                session,
+            )),
         ),
         Term::TPartial(phi, a) => Term::TPartial(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, phi, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                phi,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
         ),
         Term::TSystemType(sys) => Term::TSystemType(
             sys.iter()
@@ -5223,7 +6006,15 @@ session: &mut Session) -> Term {
         ),
         Term::TSigma(x, a, b) => Term::TSigma(
             x.clone(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
             Box::new(quote_case_body(
                 size + 1,
                 globals,
@@ -5231,11 +6022,28 @@ session: &mut Session) -> Term {
                 &env.extend(Value::VNeutral(Neutral::NVar(size))),
                 go,
                 b,
-            session)),
+                session,
+            )),
         ),
         Term::TPair(a, b) => Term::TPair(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, a, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, b, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                b,
+                session,
+            )),
         ),
         Term::TFst(p) => Term::TFst(Box::new(quote_case_body(
             size,
@@ -5244,7 +6052,8 @@ session: &mut Session) -> Term {
             env,
             go,
             p,
-        session))),
+            session,
+        ))),
         Term::TSnd(p) => Term::TSnd(Box::new(quote_case_body(
             size,
             globals,
@@ -5252,7 +6061,8 @@ session: &mut Session) -> Term {
             env,
             go,
             p,
-        session))),
+            session,
+        ))),
         Term::TData(name, params) => Term::TData(
             name.clone(),
             params
@@ -5273,7 +6083,15 @@ session: &mut Session) -> Term {
             args.iter()
                 .map(|a| quote_case_body(size, globals, global_offset, env, go, a, session))
                 .collect(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, r, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                r,
+                session,
+            )),
         ),
         Term::TSqCon(data, con, args, r, s) => Term::TSqCon(
             data.clone(),
@@ -5281,8 +6099,24 @@ session: &mut Session) -> Term {
             args.iter()
                 .map(|a| quote_case_body(size, globals, global_offset, env, go, a, session))
                 .collect(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, r, session)),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, s, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                r,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                s,
+                session,
+            )),
         ),
         Term::TCellCon(data, con, args, ivars) => Term::TCellCon(
             data.clone(),
@@ -5314,7 +6148,8 @@ session: &mut Session) -> Term {
                         &env2,
                         go,
                         &case.body,
-                    session)),
+                        session,
+                    )),
                     as_name: case.as_name.clone(),
                     record_bindings: case.record_bindings.clone(),
                     refinements: case.refinements.clone(),
@@ -5328,7 +6163,8 @@ session: &mut Session) -> Term {
                     env,
                     go,
                     motive,
-                session)),
+                    session,
+                )),
                 new_cases,
                 Box::new(quote_case_body(
                     size,
@@ -5337,7 +6173,8 @@ session: &mut Session) -> Term {
                     env,
                     go,
                     scrut,
-                session)),
+                    session,
+                )),
             )
         }
         Term::Meta(i) => Term::Meta(*i),
@@ -5349,7 +6186,8 @@ session: &mut Session) -> Term {
             env,
             go,
             a,
-        session))),
+            session,
+        ))),
         Term::TNext(a) => Term::TNext(Box::new(quote_case_body(
             size,
             globals,
@@ -5357,7 +6195,8 @@ session: &mut Session) -> Term {
             env,
             go,
             a,
-        session))),
+            session,
+        ))),
         Term::TForce(a) => Term::TForce(Box::new(quote_case_body(
             size,
             globals,
@@ -5365,13 +6204,30 @@ session: &mut Session) -> Term {
             env,
             go,
             a,
-        session))),
+            session,
+        ))),
         Term::TProj(field, r) => Term::TProj(
             field.clone(),
-            Box::new(quote_case_body(size, globals, global_offset, env, go, r, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                r,
+                session,
+            )),
         ),
         Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
-            Box::new(quote_case_body(size, globals, global_offset, env, go, r, session)),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                r,
+                session,
+            )),
             updates
                 .iter()
                 .map(|(f, e)| {
@@ -5392,7 +6248,8 @@ fn quote_cases(
     env: &Scope,
     go: usize,
     cases: Vec<ElimCase>,
-session: &mut Session) -> Vec<ElimCase> {
+    session: &mut Session,
+) -> Vec<ElimCase> {
     cases
         .into_iter()
         .map(|case| {
@@ -5412,7 +6269,8 @@ session: &mut Session) -> Vec<ElimCase> {
                     &env2,
                     go,
                     &case.body,
-                session)),
+                    session,
+                )),
                 as_name: case.as_name,
                 record_bindings: case.record_bindings,
                 refinements: case.refinements.clone(),
@@ -5421,14 +6279,20 @@ session: &mut Session) -> Vec<ElimCase> {
         .collect()
 }
 
-pub fn normalize(env: &Scope, globals: &Globals, global_offset: usize, t: &Term,
-    session: &mut Session) -> Term {
+pub fn normalize(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    t: &Term,
+    session: &mut Session,
+) -> Term {
     quote(
         env.len(),
         globals,
         global_offset,
         eval_nbe(env, globals, global_offset, t, session),
-    session)
+        session,
+    )
 }
 
 /// Evaluate a term-level system into a DNFSystem.
@@ -5437,7 +6301,8 @@ pub fn eval_system(
     globals: &Globals,
     global_offset: usize,
     sys: &System,
-session: &mut Session) -> DNFSystem {
+    session: &mut Session,
+) -> DNFSystem {
     sys.iter()
         .map(|(phi, t)| {
             let phi_val = eval_nbe(env, globals, global_offset, phi, session);
@@ -5449,8 +6314,7 @@ session: &mut Session) -> DNFSystem {
 }
 
 /// Evaluate a closed term without global definitions (original behavior).
-pub fn nbe_eval(t: &Term,
-    session: &mut Session) -> Term {
+pub fn nbe_eval(t: &Term, session: &mut Session) -> Term {
     if !has_meta_in_term(t) {
         let cached = session.eval_cache_get(t);
         if let Some(result) = cached {
@@ -5483,8 +6347,12 @@ pub fn nbe_eval(t: &Term,
 /// `global_offset` is the index into `globals` where the evaluated term's
 /// own definition lives (0 = most recent, the typical case for evaluating
 /// the target expression).
-pub fn nbe_eval_with_globals(t: &Term, globals: &Globals, global_offset: usize,
-    session: &mut Session) -> Term {
+pub fn nbe_eval_with_globals(
+    t: &Term,
+    globals: &Globals,
+    global_offset: usize,
+    session: &mut Session,
+) -> Term {
     // The env starts empty — all TVars resolve to globals.
     // Lambdas push binders onto the env during evaluation via do_apply.
     normalize(&Scope::empty(), globals, global_offset, t, session)
@@ -5495,8 +6363,7 @@ pub fn nbe_eval_with_globals(t: &Term, globals: &Globals, global_offset: usize,
 /// treated as local binders and the remainder as global references, matching
 /// the typechecker convention that global definitions sit at the bottom of the
 /// context. Falls back to `nbe_eval` (no globals) when none are set.
-pub fn nbe_eval_ctx(ctx_len: usize, t: &Term,
-    session: &mut Session) -> Term {
+pub fn nbe_eval_ctx(ctx_len: usize, t: &Term, session: &mut Session) -> Term {
     let Some(globals) = session.get_current_globals() else {
         return nbe_eval(t, session);
     };
@@ -5517,11 +6384,22 @@ pub fn nbe_eval_ctx(ctx_len: usize, t: &Term,
     for level in 0..n_local {
         env = env.extend(Value::VNeutral(Neutral::NVar(level)));
     }
-    quote(n_local, &globals, 0, eval_nbe(&env, &globals, 0, t, session), session)
+    quote(
+        n_local,
+        &globals,
+        0,
+        eval_nbe(&env, &globals, 0, t, session),
+        session,
+    )
 }
 
-fn do_equiv_fwd(globals: &Globals, global_offset: usize, e: Value, x: Value,
-    session: &mut Session) -> Value {
+fn do_equiv_fwd(
+    globals: &Globals,
+    global_offset: usize,
+    e: Value,
+    x: Value,
+    session: &mut Session,
+) -> Value {
     match e {
         Value::VMkEquiv(_, _, f, _, _, _) => {
             let result = do_apply(globals, global_offset, *f, x, session);
@@ -5560,8 +6438,7 @@ fn stuck_elim(
     ))
 }
 
-fn value_to_dnf(v: Value,
-    session: &mut Session) -> DNF {
+fn value_to_dnf(v: Value, session: &mut Session) -> DNF {
     match v {
         Value::VCube(d) => d,
         Value::VInterval(i) => eval_interval(&i),
@@ -5616,29 +6493,7 @@ fn level_to_var(size: usize, level: usize) -> Term {
 // Metavariable store and helpers — delegated to session module
 // ---------------------------------------------------------------------------
 
-pub use session::fresh_meta_id;
-
-/// Register a display name for a hole (from `?name` syntax).
-/// Anonymous holes (`_`, `?`) have no name.
-pub use session::set_meta_name;
-
-pub use session::get_meta_name;
-
-/// Record the expected type of a hole as discovered by `check_dt`.
-/// Only meaningful while the hole is unsolved.
-pub use session::set_meta_expected;
-
-pub use session::get_meta_expected;
-
-pub use session::solve_meta;
-
 pub use session::get_meta_solution;
-
-pub use session::clear_metavars;
-
-pub use session::clear_nbe_cache;
-
-pub use session::clear_all_caches;
 
 pub fn meta_mentions(id: i32, t: &Term) -> bool {
     match t {
@@ -5727,24 +6582,24 @@ pub fn meta_mentions(id: i32, t: &Term) -> bool {
     }
 }
 
-pub fn try_solve_meta(id: i32, rhs: &Term) -> bool {
+pub fn try_solve_meta(id: i32, rhs: &Term, session: &mut Session) -> bool {
     if id < 0 {
         return false;
     }
-    if get_meta_solution(id).is_some() {
+    if session.get_meta_solution(id).is_some() {
         return true;
     }
     if meta_mentions(id, rhs) {
         return false;
     }
-    solve_meta(id, rhs.clone());
+    session.solve_meta(id, rhs.clone());
     true
 }
 
-pub fn zonk(t: &Term) -> Term {
+pub fn zonk(t: &Term, session: &Session) -> Term {
     match t {
         Term::Meta(i) => {
-            if let Some(solution) = get_meta_solution(*i) {
+            if let Some(solution) = session.get_meta_solution(*i) {
                 solution
             } else {
                 t.clone()
@@ -5752,22 +6607,22 @@ pub fn zonk(t: &Term) -> Term {
         }
         _ => {
             let mut cloned = t.clone();
-            fn zonk_sub(term: &mut Term) {
+            fn zonk_sub(term: &mut Term, session: &Session) {
                 match term {
                     Term::Meta(i) => {
-                        if let Some(solution) = get_meta_solution(*i) {
+                        if let Some(solution) = session.get_meta_solution(*i) {
                             *term = solution;
                         }
                     }
                     _ => {
                         let children = term_children_mut(term);
                         for child in children {
-                            zonk_sub(child);
+                            zonk_sub(child, session);
                         }
                     }
                 }
             }
-            zonk_sub(&mut cloned);
+            zonk_sub(&mut cloned, session);
             cloned
         }
     }
@@ -6000,302 +6855,338 @@ mod tests {
     }
 
     #[test]
-    fn identity_function_normalizes_to_itself(session: &mut Session) {
-        let id = Term::TAbs("x".to_string(), b(Term::TVar(0)));
-        assert_eq!(nbe_eval(&id, session), id);
+    fn identity_function_normalizes_to_itself() {
+        crate::cubical::session::with_session_mut(|session| {
+            let id = Term::TAbs("x".to_string(), b(Term::TVar(0)));
+            assert_eq!(nbe_eval(&id, session), id);
+        });
     }
 
     #[test]
-    fn beta_reduces_identity_application(session: &mut Session) {
-        let term = Term::TApp(
-            b(Term::TAbs("x".to_string(), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
-        );
-        assert_eq!(nbe_eval(&term, session), Term::TUniv(0));
-    }
-
-    #[test]
-    fn fst_of_pair_reduces(session: &mut Session) {
-        let term = Term::TFst(b(Term::TPair(b(Term::TUniv(0)), b(Term::TUniv(1)))));
-        assert_eq!(nbe_eval(&term, session), Term::TUniv(0));
-    }
-
-    #[test]
-    fn transport_over_constant_family_is_identity(session: &mut Session) {
-        let family = Term::PLam("i".to_string(), b(Term::TUniv(0)));
-        let term = Term::TTransport(b(family), b(Term::TUniv(1)));
-        assert_eq!(nbe_eval(&term, session), Term::TUniv(1));
-    }
-
-    #[test]
-    fn transport_over_nonconstant_pi_produces_lambda(session: &mut Session) {
-        let body = Term::TPi(
-            "x".to_string(),
-            b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
-        );
-        let fam = Term::PLam("i".to_string(), b(body));
-        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
-        let term = Term::TTransport(b(fam), b(arg));
-        let result = nbe_eval(&term, session);
-        assert!(
-            matches!(&result, Term::TAbs(_, _)),
-            "expected TAbs, got: {}",
-            crate::cubical::syntax::show_term(&[], &result)
-        );
-    }
-
-    #[test]
-    fn deep_transport_fallback_unsticks_pi(session: &mut Session) {
-        let body = Term::TPi(
-            "x".to_string(),
-            b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
-        );
-        let fam = Term::PLam("i".to_string(), b(body));
-        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
-        let term = Term::TTransport(b(fam), b(arg));
-        let result = nbe_eval(&term, session);
-        assert!(
-            !matches!(result, Term::TTransport(_, _)),
-            "transport should not be stuck: {}",
-            crate::cubical::syntax::show_term(&[], &result)
-        );
-    }
-
-    #[test]
-    fn sigma_transport_on_pair_reduces(session: &mut Session) {
-        let sigma = Term::TSigma("x".to_string(), b(Term::TUniv(0)), b(Term::TUniv(1)));
-        let fam = Term::PLam("i".to_string(), b(sigma));
-        let pair = Term::TPair(b(Term::TUniv(0)), b(Term::TUniv(1)));
-        let term = Term::TTransport(b(fam), b(pair.clone()));
-        let result = nbe_eval(&term, session);
-        assert_eq!(result, pair);
-    }
-
-    #[test]
-    fn path_transport_produces_plam(session: &mut Session) {
-        let path = Term::TPath(
-            b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
-            b(Term::TUniv(0)),
-        );
-        let fam = Term::PLam("i".to_string(), b(path));
-        let arg = Term::PLam("j".to_string(), b(Term::TUniv(0)));
-        let term = Term::TTransport(b(fam), b(arg));
-        let result = nbe_eval(&term, session);
-        assert!(
-            matches!(&result, Term::PLam(_, _)),
-            "expected PLam, got: {}",
-            crate::cubical::syntax::show_term(&[], &result)
-        );
-    }
-
-    #[test]
-    fn native_pi_transport_no_deep_fallback(session: &mut Session) {
-        let body = Term::TPi(
-            "x".to_string(),
-            b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
-        );
-        let fam = Term::PLam("i".to_string(), b(body));
-        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
-        let term = Term::TTransport(b(fam), b(arg));
-        let result = nbe_eval(&term, session);
-        assert!(
-            matches!(&result, Term::TAbs(_, _)),
-            "expected TAbs (native Pi transport), got: {}",
-            crate::cubical::syntax::show_term(&[], &result)
-        );
-    }
-
-    #[test]
-    fn dependent_codomain_pi_transport_reduces(session: &mut Session) {
-        // Family: λi. (x : i x) → (y : U) → x
-        // The codomain (y:U) → x depends on x (the Pi argument), so this
-        // exercises the dependent Pi transport code path.
-        let body = Term::TPi(
-            "x".to_string(),
-            b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TPi(
-                "y".to_string(),
+    fn beta_reduces_identity_application() {
+        crate::cubical::session::with_session_mut(|session| {
+            let term = Term::TApp(
+                b(Term::TAbs("x".to_string(), b(Term::TVar(0)))),
                 b(Term::TUniv(0)),
-                b(Term::TVar(1)),
-            )),
-        );
-        let fam = Term::PLam("i".to_string(), b(body));
-        let arg = Term::TAbs(
-            "x".to_string(),
-            b(Term::TAbs("y".to_string(), b(Term::TVar(1)))),
-        );
-        let term = Term::TTransport(b(fam), b(arg));
-        let result = nbe_eval(&term, session);
-        assert!(
-            !matches!(&result, Term::TTransport(_, _)),
-            "dependent Pi transport should reduce, got stuck: {}",
-            crate::cubical::syntax::show_term(&[], &result)
-        );
-        assert!(
-            matches!(&result, Term::TAbs(_, _)),
-            "expected TAbs, got: {}",
-            crate::cubical::syntax::show_term(&[], &result)
-        );
-    }
-
-    #[test]
-    fn hcomp_papp_at_zero_reduces_to_base(session: &mut Session) {
-        // hcomp A [(i0, tube)] base @ 0 should reduce to base
-        // (non-trivial face keeps hcomp stuck until papp)
-        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
-        let hcomp = Term::THComp(
-            b(Term::TUniv(0)),
-            vec![(Term::TInterval(I::Var(0)), tube)],
-            b(Term::TUniv(1)),
-        );
-        let term = Term::PApp(b(hcomp), b(Term::TInterval(I::I0)));
-        let result = nbe_eval(&term, session);
-        assert_eq!(result, Term::TUniv(1));
-    }
-
-    #[test]
-    fn hcomp_papp_at_one_reduces_to_tube_at_one(session: &mut Session) {
-        // hcomp A [(i0, tube)] base @ 1 should reduce to tube @ 1
-        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
-        let hcomp = Term::THComp(
-            b(Term::TUniv(0)),
-            vec![(Term::TInterval(I::Var(0)), tube)],
-            b(Term::TUniv(1)),
-        );
-        let term = Term::PApp(b(hcomp), b(Term::TInterval(I::I1)));
-        let result = nbe_eval(&term, session);
-        assert_eq!(result, Term::TUniv(0));
-    }
-
-    #[test]
-    fn hcomp_const_tube_coherent_reduces_to_base(session: &mut Session) {
-        // hcomp U [i1 => λj. U0] U0 should reduce to U0 (constant-tube shortcut)
-        // Tube PLam("j", U0) is constant (U0 at both I0 and I1) and equals base U0.
-        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
-        let hcomp = Term::THComp(
-            b(Term::TUniv(0)),
-            vec![(Term::TInterval(I::I1), tube)],
-            b(Term::TUniv(0)),
-        );
-        let result = nbe_eval(&hcomp, session);
-        assert_eq!(
-            result,
-            Term::TUniv(0),
-            "constant-tube hcomp should reduce to base"
-        );
-    }
-
-    #[test]
-    fn fill_const_tube_coherent_reduces_to_const_path(session: &mut Session) {
-        // fill U [i1 => λj. U0] U0 should reduce to λj. U0 (constant-tube shortcut)
-        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
-        let fill = Term::TFill(
-            b(Term::TUniv(0)),
-            vec![(Term::TInterval(I::I1), tube)],
-            b(Term::TUniv(0)),
-        );
-        let result = nbe_eval(&fill, session);
-        assert!(
-            matches!(&result, Term::PLam(_, _)),
-            "constant-tube fill should reduce to VPLam (constant path), got: {}",
-            crate::cubical::syntax::show_term(&[], &result)
-        );
-    }
-
-    #[test]
-    fn glue_transport_on_glue_elem_decomposes(session: &mut Session) {
-        // transport (λi. Glue (TVar(i)) [phi] te) (glue [phi] cap base)
-        // where phi is non-trivial constant (Pos(1) — different from transport var)
-        // A = TVar(0) varies with i (VInterval(I::I0) at i=0, VInterval(I::I1) at i=1)
-        // so the family is non-constant and transport_glue is reached.
-        //
-        // Result: glue [phi] cap (hcomp A_type [phi] (λi. cap) base)
-        let non_trivial_phi = Term::TCube(DNF {
-            cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
+            );
+            assert_eq!(nbe_eval(&term, session), Term::TUniv(0));
         });
-        let glue_ty = Term::TGlue(
-            b(Term::TVar(0)), // A varies with i → makes family non-constant
-            b(non_trivial_phi.clone()),
-            b(Term::TUniv(0)), // te
-        );
-        let fam = Term::PLam("i".to_string(), b(glue_ty));
-        let cap = Term::TUniv(1);
-        let base = Term::TUniv(2);
-        let glue_elem = Term::TGlueElem(b(non_trivial_phi.clone()), b(cap), b(base));
-        let transport = Term::TTransport(b(fam), b(glue_elem));
-        let globals: Globals = Rc::new(RefCell::new(Vec::new()));
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
-        let phi_dnf = DNF {
-            cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
-        };
-        match result {
-            Value::VGlueElem(phi, t, a) => {
-                assert_eq!(phi, phi_dnf, "face should be the non-trivial phi");
-                match *t {
-                    Value::VUniv(n) => assert_eq!(n, 1, "cap should be U1"),
-                    other => panic!("expected VUniv(1) for cap, got: {:?}", other),
-                }
-                match *a {
-                    Value::VHComp(_, h_sys, h_base) => {
-                        // Single-entry system with the expected face
-                        assert_eq!(h_sys.len(), 1, "hcomp system should have 1 entry");
-                        assert_eq!(h_sys[0].0, phi_dnf, "hcomp face should match");
-                        match *h_base {
-                            Value::VUniv(n) => assert_eq!(n, 2, "hcomp base should be U2"),
-                            other => panic!("expected VUniv(2) for hcomp base, got: {:?}", other),
-                        }
+    }
+
+    #[test]
+    fn fst_of_pair_reduces() {
+        crate::cubical::session::with_session_mut(|session| {
+            let term = Term::TFst(b(Term::TPair(b(Term::TUniv(0)), b(Term::TUniv(1)))));
+            assert_eq!(nbe_eval(&term, session), Term::TUniv(0));
+        });
+    }
+
+    #[test]
+    fn transport_over_constant_family_is_identity() {
+        crate::cubical::session::with_session_mut(|session| {
+            let family = Term::PLam("i".to_string(), b(Term::TUniv(0)));
+            let term = Term::TTransport(b(family), b(Term::TUniv(1)));
+            assert_eq!(nbe_eval(&term, session), Term::TUniv(1));
+        });
+    }
+
+    #[test]
+    fn transport_over_nonconstant_pi_produces_lambda() {
+        crate::cubical::session::with_session_mut(|session| {
+            let body = Term::TPi(
+                "x".to_string(),
+                b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
+                b(Term::TUniv(0)),
+            );
+            let fam = Term::PLam("i".to_string(), b(body));
+            let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
+            let term = Term::TTransport(b(fam), b(arg));
+            let result = nbe_eval(&term, session);
+            assert!(
+                matches!(&result, Term::TAbs(_, _)),
+                "expected TAbs, got: {}",
+                crate::cubical::syntax::show_term(&[], &result)
+            );
+        });
+    }
+
+    #[test]
+    fn deep_transport_fallback_unsticks_pi() {
+        crate::cubical::session::with_session_mut(|session| {
+            let body = Term::TPi(
+                "x".to_string(),
+                b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
+                b(Term::TUniv(0)),
+            );
+            let fam = Term::PLam("i".to_string(), b(body));
+            let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
+            let term = Term::TTransport(b(fam), b(arg));
+            let result = nbe_eval(&term, session);
+            assert!(
+                !matches!(result, Term::TTransport(_, _)),
+                "transport should not be stuck: {}",
+                crate::cubical::syntax::show_term(&[], &result)
+            );
+        });
+    }
+
+    #[test]
+    fn sigma_transport_on_pair_reduces() {
+        crate::cubical::session::with_session_mut(|session| {
+            let sigma = Term::TSigma("x".to_string(), b(Term::TUniv(0)), b(Term::TUniv(1)));
+            let fam = Term::PLam("i".to_string(), b(sigma));
+            let pair = Term::TPair(b(Term::TUniv(0)), b(Term::TUniv(1)));
+            let term = Term::TTransport(b(fam), b(pair.clone()));
+            let result = nbe_eval(&term, session);
+            assert_eq!(result, pair);
+        });
+    }
+
+    #[test]
+    fn path_transport_produces_plam() {
+        crate::cubical::session::with_session_mut(|session| {
+            let path = Term::TPath(
+                b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
+                b(Term::TUniv(0)),
+                b(Term::TUniv(0)),
+            );
+            let fam = Term::PLam("i".to_string(), b(path));
+            let arg = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+            let term = Term::TTransport(b(fam), b(arg));
+            let result = nbe_eval(&term, session);
+            assert!(
+                matches!(&result, Term::PLam(_, _)),
+                "expected PLam, got: {}",
+                crate::cubical::syntax::show_term(&[], &result)
+            );
+        });
+    }
+
+    #[test]
+    fn native_pi_transport_no_deep_fallback() {
+        crate::cubical::session::with_session_mut(|session| {
+            let body = Term::TPi(
+                "x".to_string(),
+                b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
+                b(Term::TUniv(0)),
+            );
+            let fam = Term::PLam("i".to_string(), b(body));
+            let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
+            let term = Term::TTransport(b(fam), b(arg));
+            let result = nbe_eval(&term, session);
+            assert!(
+                matches!(&result, Term::TAbs(_, _)),
+                "expected TAbs (native Pi transport), got: {}",
+                crate::cubical::syntax::show_term(&[], &result)
+            );
+        });
+    }
+
+    #[test]
+    fn dependent_codomain_pi_transport_reduces() {
+        crate::cubical::session::with_session_mut(|session| {
+            // Family: λi. (x : i x) → (y : U) → x
+            // The codomain (y:U) → x depends on x (the Pi argument), so this
+            // exercises the dependent Pi transport code path.
+            let body = Term::TPi(
+                "x".to_string(),
+                b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
+                b(Term::TPi(
+                    "y".to_string(),
+                    b(Term::TUniv(0)),
+                    b(Term::TVar(1)),
+                )),
+            );
+            let fam = Term::PLam("i".to_string(), b(body));
+            let arg = Term::TAbs(
+                "x".to_string(),
+                b(Term::TAbs("y".to_string(), b(Term::TVar(1)))),
+            );
+            let term = Term::TTransport(b(fam), b(arg));
+            let result = nbe_eval(&term, session);
+            assert!(
+                !matches!(&result, Term::TTransport(_, _)),
+                "dependent Pi transport should reduce, got stuck: {}",
+                crate::cubical::syntax::show_term(&[], &result)
+            );
+            assert!(
+                matches!(&result, Term::TAbs(_, _)),
+                "expected TAbs, got: {}",
+                crate::cubical::syntax::show_term(&[], &result)
+            );
+        });
+    }
+
+    #[test]
+    fn hcomp_papp_at_zero_reduces_to_base() {
+        crate::cubical::session::with_session_mut(|session| {
+            // hcomp A [(i0, tube)] base @ 0 should reduce to base
+            // (non-trivial face keeps hcomp stuck until papp)
+            let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+            let hcomp = Term::THComp(
+                b(Term::TUniv(0)),
+                vec![(Term::TInterval(I::Var(0)), tube)],
+                b(Term::TUniv(1)),
+            );
+            let term = Term::PApp(b(hcomp), b(Term::TInterval(I::I0)));
+            let result = nbe_eval(&term, session);
+            assert_eq!(result, Term::TUniv(1));
+        });
+    }
+
+    #[test]
+    fn hcomp_papp_at_one_reduces_to_tube_at_one() {
+        crate::cubical::session::with_session_mut(|session| {
+            // hcomp A [(i0, tube)] base @ 1 should reduce to tube @ 1
+            let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+            let hcomp = Term::THComp(
+                b(Term::TUniv(0)),
+                vec![(Term::TInterval(I::Var(0)), tube)],
+                b(Term::TUniv(1)),
+            );
+            let term = Term::PApp(b(hcomp), b(Term::TInterval(I::I1)));
+            let result = nbe_eval(&term, session);
+            assert_eq!(result, Term::TUniv(0));
+        });
+    }
+
+    #[test]
+    fn hcomp_const_tube_coherent_reduces_to_base() {
+        crate::cubical::session::with_session_mut(|session| {
+            // hcomp U [i1 => λj. U0] U0 should reduce to U0 (constant-tube shortcut)
+            // Tube PLam("j", U0) is constant (U0 at both I0 and I1) and equals base U0.
+            let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+            let hcomp = Term::THComp(
+                b(Term::TUniv(0)),
+                vec![(Term::TInterval(I::I1), tube)],
+                b(Term::TUniv(0)),
+            );
+            let result = nbe_eval(&hcomp, session);
+            assert_eq!(
+                result,
+                Term::TUniv(0),
+                "constant-tube hcomp should reduce to base"
+            );
+        });
+    }
+
+    #[test]
+    fn fill_const_tube_coherent_reduces_to_const_path() {
+        crate::cubical::session::with_session_mut(|session| {
+            // fill U [i1 => λj. U0] U0 should reduce to λj. U0 (constant-tube shortcut)
+            let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+            let fill = Term::TFill(
+                b(Term::TUniv(0)),
+                vec![(Term::TInterval(I::I1), tube)],
+                b(Term::TUniv(0)),
+            );
+            let result = nbe_eval(&fill, session);
+            assert!(
+                matches!(&result, Term::PLam(_, _)),
+                "constant-tube fill should reduce to VPLam (constant path), got: {}",
+                crate::cubical::syntax::show_term(&[], &result)
+            );
+        });
+    }
+
+    #[test]
+    fn glue_transport_on_glue_elem_decomposes() {
+        crate::cubical::session::with_session_mut(|session| {
+            // transport (λi. Glue (TVar(i)) [phi] te) (glue [phi] cap base)
+            // where phi is non-trivial constant (Pos(1) — different from transport var)
+            // A = TVar(0) varies with i (VInterval(I::I0) at i=0, VInterval(I::I1) at i=1)
+            // so the family is non-constant and transport_glue is reached.
+            //
+            // Result: glue [phi] cap (hcomp A_type [phi] (λi. cap) base)
+            let non_trivial_phi = Term::TCube(DNF {
+                cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
+            });
+            let glue_ty = Term::TGlue(
+                b(Term::TVar(0)), // A varies with i → makes family non-constant
+                b(non_trivial_phi.clone()),
+                b(Term::TUniv(0)), // te
+            );
+            let fam = Term::PLam("i".to_string(), b(glue_ty));
+            let cap = Term::TUniv(1);
+            let base = Term::TUniv(2);
+            let glue_elem = Term::TGlueElem(b(non_trivial_phi.clone()), b(cap), b(base));
+            let transport = Term::TTransport(b(fam), b(glue_elem));
+            let globals: Globals = Rc::new(RefCell::new(Vec::new()));
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
+            let phi_dnf = DNF {
+                cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
+            };
+            match result {
+                Value::VGlueElem(phi, t, a) => {
+                    assert_eq!(phi, phi_dnf, "face should be the non-trivial phi");
+                    match *t {
+                        Value::VUniv(n) => assert_eq!(n, 1, "cap should be U1"),
+                        other => panic!("expected VUniv(1) for cap, got: {:?}", other),
                     }
-                    other => panic!("expected VHComp, got: {:?}", other),
+                    match *a {
+                        Value::VHComp(_, h_sys, h_base) => {
+                            // Single-entry system with the expected face
+                            assert_eq!(h_sys.len(), 1, "hcomp system should have 1 entry");
+                            assert_eq!(h_sys[0].0, phi_dnf, "hcomp face should match");
+                            match *h_base {
+                                Value::VUniv(n) => assert_eq!(n, 2, "hcomp base should be U2"),
+                                other => {
+                                    panic!("expected VUniv(2) for hcomp base, got: {:?}", other)
+                                }
+                            }
+                        }
+                        other => panic!("expected VHComp, got: {:?}", other),
+                    }
                 }
+                other => panic!("expected VGlueElem, got: {:?}", other),
             }
-            other => panic!("expected VGlueElem, got: {:?}", other),
-        }
+        });
     }
 
     #[test]
-    fn glue_transport_on_non_glue_elem_stays_stuck(session: &mut Session) {
-        // transport (λi. Glue (TVar(i)) [phi] te) U0
-        // A varies → family non-constant, but input is not GlueElem → stuck
-        let non_trivial_phi = Term::TCube(DNF {
-            cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
+    fn glue_transport_on_non_glue_elem_stays_stuck() {
+        crate::cubical::session::with_session_mut(|session| {
+            // transport (λi. Glue (TVar(i)) [phi] te) U0
+            // A varies → family non-constant, but input is not GlueElem → stuck
+            let non_trivial_phi = Term::TCube(DNF {
+                cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
+            });
+            let glue_ty = Term::TGlue(b(Term::TVar(0)), b(non_trivial_phi), b(Term::TUniv(0)));
+            let fam = Term::PLam("i".to_string(), b(glue_ty));
+            let transport = Term::TTransport(b(fam), b(Term::TUniv(0)));
+            let globals: Globals = Rc::new(RefCell::new(Vec::new()));
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
+            match result {
+                Value::VTransport(_, _) => {}
+                other => panic!("expected stuck VTransport, got: {:?}", other),
+            }
         });
-        let glue_ty = Term::TGlue(b(Term::TVar(0)), b(non_trivial_phi), b(Term::TUniv(0)));
-        let fam = Term::PLam("i".to_string(), b(glue_ty));
-        let transport = Term::TTransport(b(fam), b(Term::TUniv(0)));
-        let globals: Globals = Rc::new(RefCell::new(Vec::new()));
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
-        match result {
-            Value::VTransport(_, _) => {}
-            other => panic!("expected stuck VTransport, got: {:?}", other),
-        }
     }
 
     #[test]
-    fn glue_transport_face_mismatch_stays_stuck(session: &mut Session) {
-        // transport (λi. Glue (TVar(i)) [phi1] te) (glue [phi2] cap base)
-        // phi1 != phi2 → decomposition fails → stuck
-        let phi1 = Term::TCube(DNF {
-            cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
+    fn glue_transport_face_mismatch_stays_stuck() {
+        crate::cubical::session::with_session_mut(|session| {
+            // transport (λi. Glue (TVar(i)) [phi1] te) (glue [phi2] cap base)
+            // phi1 != phi2 → decomposition fails → stuck
+            let phi1 = Term::TCube(DNF {
+                cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
+            });
+            let phi2 = Term::TCube(DNF {
+                cubes: BTreeSet::from([BTreeSet::from([Literal::NegVar(1)])]),
+            });
+            let glue_ty = Term::TGlue(b(Term::TVar(0)), b(phi1), b(Term::TUniv(0)));
+            let fam = Term::PLam("i".to_string(), b(glue_ty));
+            let glue_elem = Term::TGlueElem(b(phi2), b(Term::TUniv(1)), b(Term::TUniv(2)));
+            let transport = Term::TTransport(b(fam), b(glue_elem));
+            let globals: Globals = Rc::new(RefCell::new(Vec::new()));
+            let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
+            match result {
+                Value::VTransport(_, _) => {}
+                other => panic!(
+                    "expected stuck VTransport on face mismatch, got: {:?}",
+                    other
+                ),
+            }
         });
-        let phi2 = Term::TCube(DNF {
-            cubes: BTreeSet::from([BTreeSet::from([Literal::NegVar(1)])]),
-        });
-        let glue_ty = Term::TGlue(b(Term::TVar(0)), b(phi1), b(Term::TUniv(0)));
-        let fam = Term::PLam("i".to_string(), b(glue_ty));
-        let glue_elem = Term::TGlueElem(b(phi2), b(Term::TUniv(1)), b(Term::TUniv(2)));
-        let transport = Term::TTransport(b(fam), b(glue_elem));
-        let globals: Globals = Rc::new(RefCell::new(Vec::new()));
-        let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
-        match result {
-            Value::VTransport(_, _) => {}
-            other => panic!(
-                "expected stuck VTransport on face mismatch, got: {:?}",
-                other
-            ),
-        }
     }
 }

@@ -4,28 +4,29 @@
 //! is made on a structurally smaller argument — one of the case binders
 //! introduced by the pattern match. This ensures termination.
 
+use crate::cubical::session::Session;
 use crate::cubical::syntax::{ElimCase, Term};
 
 /// Check if the guard check should be skipped (well-founded recursion mode).
-pub fn should_skip_guard() -> bool {
-    crate::cubical::session::should_skip_guard()
+pub fn should_skip_guard(session: &Session) -> bool {
+    session.should_skip_guard()
 }
 
 /// Set or clear the skip-guard flag.
-pub fn set_skip_guard(skip: bool) {
-    crate::cubical::session::set_skip_guard(skip)
+pub fn set_skip_guard(skip: bool, session: &mut Session) {
+    session.set_skip_guard(skip)
 }
 
 /// The name of the definition whose body is currently being guard-checked,
 /// if any.
-pub fn current_def() -> Option<String> {
-    crate::cubical::session::current_def()
+pub fn current_def(session: &Session) -> Option<String> {
+    session.current_def()
 }
 
 /// Set the name of the definition being guard-checked; returns the previous
 /// value so callers can restore it.
-pub fn set_current_def(name: Option<String>) -> Option<String> {
-    crate::cubical::session::set_current_def(name)
+pub fn set_current_def(name: Option<String>, session: &mut Session) -> Option<String> {
+    session.set_current_def(name)
 }
 
 /// Result of checking a single case body for structural recursion.
