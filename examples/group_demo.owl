@@ -1,0 +1,71 @@
+-- `by group with G` — the abstract group word-problem solver.
+--
+-- Binds an abstract `Group` record `G` and proves word identities over its
+-- operations using `by group with G`.  The record bundles the operations as
+-- *parameters* (`A`, `mul`, `inv`, `one`) and the law/glue lemmas as fields;
+-- the solver recognizes operation heads from the record type and reduces both
+-- sides of the goal to freely-reduced words.  The kernel re-checks every
+-- generated proof tree.
+
+record Group (A : Type) (mul : A -> A -> A) (inv : A -> A) (one : A) where
+  field trans : forall (a : A), forall (b : A), forall (c : A), Path A a b -> Path A b c -> Path A a c
+  field sym : forall (a : A), forall (b : A), Path A a b -> Path A b a
+  field cong_mul_l : forall (a : A), forall (b : A), forall (n : A), Path A a b -> Path A (mul a n) (mul b n)
+  field cong_mul_r : forall (a : A), forall (b : A), forall (m : A), Path A a b -> Path A (mul m a) (mul m b)
+  field cong_inv : forall (a : A), forall (b : A), Path A a b -> Path A (inv a) (inv b)
+  field mul_assoc : forall (a : A), forall (b : A), forall (c : A), Path A (mul (mul a b) c) (mul a (mul b c))
+  field one_mul : forall (a : A), Path A (mul one a) a
+  field mul_one : forall (a : A), Path A (mul a one) a
+  field inv_l : forall (a : A), Path A (mul (inv a) a) one
+  field inv_r : forall (a : A), Path A (mul a (inv a)) one
+  field inv_one : Path A (inv one) one
+  field inv_inv : forall (a : A), Path A (inv (inv a)) a
+  field inv_mul : forall (a : A), forall (b : A), Path A (inv (mul a b)) (mul (inv b) (inv a))
+
+-- Right cancellation: a · b · b⁻¹ = a.
+def group_demo_cancel_r :
+  forall (A : Type), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (one : A),
+  forall (G : Group A mul inv one), forall (a : A), forall (b : A),
+  Path A (mul (mul a b) (inv b)) a :=
+  by intro A mul inv one G a b; group with G
+
+-- Inner cancellation through associativity: (a · b⁻¹) · b = a.
+def group_demo_cancel_inner :
+  forall (A : Type), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (one : A),
+  forall (G : Group A mul inv one), forall (a : A), forall (b : A),
+  Path A (mul (mul a (inv b)) b) a :=
+  by intro A mul inv one G a b; group with G
+
+-- Inversion distributes (swapping): inv(a·b) = inv(b) · inv(a).
+def group_demo_inv_dist :
+  forall (A : Type), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (one : A),
+  forall (G : Group A mul inv one), forall (a : A), forall (b : A),
+  Path A (inv (mul a b)) (mul (inv b) (inv a)) :=
+  by intro A mul inv one G a b; group with G
+
+-- Double inverse.
+def group_demo_inv_inv :
+  forall (A : Type), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (one : A),
+  forall (G : Group A mul inv one), forall (a : A),
+  Path A (inv (inv a)) a :=
+  by intro A mul inv one G a; group with G
+
+-- Cancellation in a longer word: (a · b · b⁻¹) · c = a · c.
+def group_demo_mid_cancel :
+  forall (A : Type), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (one : A),
+  forall (G : Group A mul inv one), forall (a : A), forall (b : A), forall (c : A),
+  Path A (mul (mul (mul a b) (inv b)) c) (mul a c) :=
+  by intro A mul inv one G a b c; group with G
+
+-- Unit laws fold in: one · (a · one) = a.
+def group_demo_units :
+  forall (A : Type), forall (mul : A -> A -> A), forall (inv : A -> A),
+  forall (one : A),
+  forall (G : Group A mul inv one), forall (a : A),
+  Path A (mul one (mul a one)) a :=
+  by intro A mul inv one G a; group with G

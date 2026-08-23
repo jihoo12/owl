@@ -4,6 +4,40 @@
 
 ## Completed (implementation log)
 
+- [x] **Section B closed — group solver (`by group with G`) and equality chaining (`by eq`).**
+  **Group solver** (`src/cubical/group.rs`, ~700 lines): proves word identities over an
+  abstract `Group A mul inv one` record. Both goal sides are classified into a structure
+  tree (every node carries its *own source term* — an earlier draft reused child endpoints,
+  which misanchored generated proofs) and reduced to signed-generator words via free
+  reduction (stack cancellation of adjacent opposite letters with definitionally-equal
+  atoms). Proof generation: `gen` emits right-associated-rendering proofs; products compose
+  children congruences with a front-peeling `concat_pf` whose junction cancellations surface
+  when the peeled prefix is a single letter (plus a trailing `mul l one → l` repair when the
+  suffix reduces to empty); inversion uses `finisher_inv` — distribution swaps factors, so
+  the inverted word reads *left*-associated, and `conv_lr` bridges back to canonical right-
+  association by iterated associativity + a grow-from-the-back bridge. Two subtleties cost
+  real debugging: (1) ring_laws/field_laws name their congruence lemmas by the *varying*
+  side (`cong_mul_l : Path (a·n) (b·n)`), so the fixed-context wrappers are crossed; (2)
+  `TPath`'s first field is the carrier — the trans-shape matcher originally compared it as
+  an endpoint. Law set is deliberately pragmatic (mirroring Field): `inv_one`, `inv_inv`,
+  and swapping `inv_mul` are primitive fields. Instance search included (`Group` record by
+  carrier match); non-identities rejected with a word-mismatch error.
+  **Equality chaining** (`src/cubical/eq.rs`): closes `Path A u v` goals by reflexivity,
+  direct hypothesis in either orientation (backward = inline `<i> p @ ~i`), or BFS over all
+  path-typed context hypotheses (endpoints matched up to normalization, monomorphic use)
+  composed through a **context-provided** transitivity lemma named `_owl_trans`/`trans`,
+  found by shape-matching the normalized type (`... Path x y -> Path y z -> Path x z`) with
+  endpoint comparison done at a common binder depth (captures lifted out of their Pi frames).
+  Hand-rolling the hcomp composition was tried and abandoned: hypothesis-path applications
+  do not reduce under endpoint coherence the way lambda-bound ones do. Chaining without a
+  lemma fails with guidance to import lib/ring_laws.owl.
+  Verified: parser keyword/parse coverage; driver tests `group_demo_example_checks`
+  (64 MiB stack), `group_solver_rejects_non_identity`, `eq_tactic_refl_sym_chain`
+  (refl/direct/2-hop/3-hop), `eq_tactic_needs_trans_lemma_for_chains`;
+  `examples/group_demo.owl` added to the sweep (6 identities incl. inner/mid-word
+  cancellation, double-inverse, inv-distribution, unit folding); full `cargo test`
+  **231 green**; docs/reference.md tactic sections updated.
+
 - [x] **Module instantiation — `module N = M (e1) ... (en)`.** Parser (`parse_module_decl`):
   after the name, an `=` switches to the instantiation form — source module name resolved
   to its full dotted path by `resolve_module_source` (innermost-qualified candidates first,
@@ -225,9 +259,19 @@ discharge routine algebraic/arithmetic goals in one line instead of writing them
 
 - [x] **Omega / Linear arithmetic** — decision procedure for linear arithmetic over Nat/Int. *(🔴 — most general-purpose payoff; underlies many other proofs.)* Implemented in `src/cubical/omega.rs`: `by omega` proves `Path Nat u v` goals by (1) definitional reflexivity (normalization unfolds `add`/etc. on constructor-headed arguments) and (2) direct application of a previously verified global lemma to the context's variables, both re-checked by the kernel. Worked example in `examples/omega_demo.owl`. *Remaining: on-demand induction synthesis (structural recursion via the current definition) and `Int` support.*
 - [x] **Ring solver** — decision procedure for ring identities (normalize + compare polynomial forms). *(🔴 — classic high-value tactic, e.g. Coq/Agda's `ring`.)* Implemented in `src/cubical/ring.rs`: `by ring` proves `Path Nat u v` goals by normalizing both sides to polynomial normal form over the commutative semiring over `Nat` (`add`/`mul`/`zero`/`one`, recognized by the shape of the normal forms their eliminators unfold to) and, when the normal forms agree, building a proof tree by applying ring laws resolved from the context. `lib/ring_laws.owl` supplies the required law names (`add_comm`, `add_assoc`, `add_0_l/r`, `mul_comm`, `mul_assoc`, `mul_1_l/r`, `mul_0_l/r`, `mul_add_l/r`) and the structural lemmas (`trans`, `sym`, `cong_add_l/r`, `cong_mul_l/r`); `examples/ring_demo.owl` exercises it. The generated proof is a raw law-application tree that the kernel re-checks; the structural-recursion guard is skipped for ring output because law bodies unfold to elims on compound neutral scrutinees in the normal form. The final blocker was an ill-typed `trans` in `expand_single` — its proof chain already landed on `sum_term(products)`, but a trailing `sum_concat` step re-wrapped the LHS with an extra `add _ zero`, so the emitted `trans` mismatched the chain's actual endpoint and the kernel re-check normalize-and-retry loop overflowed the stack; dropping the redundant step fixed all three demos. *Remaining: `Int`/additive-group support (neg/sub).* Abstract-ring support (`by ring with C`) landed as part of the H1 work — see §H.1.
-- [ ] **Group solver** — decision procedure for group identities (associativity, identity, inverses). *(🟡 — narrower scope than ring, useful once ring solver exists.)*
-- [ ] **Field solver** — decision procedure for field identities (ring + division/inverse reasoning). *(🟡 — natural follow-on to ring solver; depends on it.)*
-- [ ] **Decision procedure for propositional equality** — automate reflexivity/symmetry/transitivity chains. *(🟡)*
+- [x] **Group solver** — decision procedure for group identities (associativity, identity,
+  inverses). *(🟡)* Landed as `by group with G` over an abstract `Group A mul inv one`
+  record (free-reduction word decision + kernel-checked law-application trees); see the
+  section-B log entry at the top of this file and `docs/reference.md`. This also lands the
+  group-solver half of H3.
+- [x] **Field solver** — decision procedure for field identities (ring + division/inverse
+  reasoning). *(🟡)* Landed as part of H2 (`by field with F`, lib/field_laws.owl,
+  examples/field_demo.owl) — see §H.2; recorded here so section B reflects reality.
+- [x] **Decision procedure for propositional equality** — automate
+  reflexivity/symmetry/transitivity chains. *(🟡)* Landed as `by eq`: reflexivity closure,
+  single-hypothesis use in either orientation (inline symmetry), and BFS chaining through
+  context hypotheses composed via a context-provided `trans`/`_owl_trans` lemma; see the
+  section-B log entry at the top of this file and `docs/reference.md`.
 
 ### C. Pattern Matching 🟡
 
@@ -336,6 +380,8 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   - *Part 4 — demo/tests*: `examples/field_demo.owl` proves `(a/b)·(c/d) = (ac)/(bd)`, `(a/b)+(c/d) = (ad+bc)/(bd)`, `(a/b)/(c/d) = (ad)/(bc)`, `inv (inv a) = a`, `inv (a·b) = inv a · inv b`, `a·inv a = one` (each with per-atom `≠ 0` hypotheses); `field_demo_example_checks` + `field_laws_lib_checks` in the driver on 64 MiB stacks. The demo re-check is slow in debug builds (~1 min for the biggest theorem per kernel pass, ~5 min total for the demo).
   - *Remaining: `neg`/`sub` (additive group) support is folded into H3.*
 - [ ] **H3. Int `by omega` + group solver** *(🟡 — omega-Int for valuation/residue computations; group solver is the base of the field ladder.)*
+  The group-solver half has landed (see §B.3 / the section-B log entry); remaining here is
+  the Int side of `by omega` (also noted as the remaining scope of §B.1/§B.2's `neg`/`sub`).
 - [ ] **H4. Bundled algebra records + lightweight instance search** *(🔴 — without typeclasses, every theorem must thread `CommRing R` explicitly. Minimal implicit-argument + instance-search layer, Lean/Coq-style, on top of the existing record system.)*
 - [ ] **H5. Commutative algebra library** *(🔴)*: `CommRing`/`Field`/`Module`/`Ideal` structures; quotient rings `R/I` and localization `S⁻¹R` via the existing HIT quotients; polynomial rings `R[X]`; prime/maximal ideals; finite fields `F_p`.
 - [ ] **H6. Set-level foundation polish** *(🟡)*: quotient elimination ergonomics, proof irrelevance for Prop, `isSet` stability — AG objects are all sets.
@@ -349,9 +395,9 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
 ## Suggested Order of Attack
 
 1. 🔴 **Cumulativity for Σ/Π and records** — closes soundness gaps in an already-partial feature; cheap relative to payoff.
-2. 🔴 **Omega (linear arithmetic)** — `by omega` landed (see §B.1); **Ring solver** landed (see §B.2, `by ring` over `Nat`) with the generic abstract-ring form `by ring with C` landed under H1 — Group/Field solvers are the remaining automation ladder.
+2. 🔴 **Omega (linear arithmetic)** — `by omega` landed (see §B.1); **Ring solver** landed (see §B.2, `by ring` over `Nat`) with the generic abstract-ring form `by ring with C` landed under H1 — the Group and Field solvers have since landed (§B.3, §B.4/H2); the remaining automation-ladder item is the Int side (§H3).
 3. 🟡 **Module system basics** (`module M where`) + **qualified imports** — needed before the standard library work in §G can scale.
 4. 🟡 **Nested constructor patterns** — moderate-cost ergonomics fix, independent of everything else.
 5. 🟡 **Interactive REPL proof sessions** — biggest remaining UX win, builds on existing hole/tactic machinery.
-6. 🟢 Remaining items (Group/Field solver, reflection API, custom tactics, incremental normalization, stdlib, docs) — valuable but can proceed in parallel/opportunistically once the above land.
+6. 🟢 Remaining items (reflection API, custom tactics, incremental normalization, stdlib, docs) — valuable but can proceed in parallel/opportunistically once the above land.
 7. 🔴 **Algebraic geometry** — follow §H in order: H1 (generic `by ring`) has landed (see §H.1 / §B.2); proceed with H4 (instance search) → H2 (`by field`) → H5 (comm algebra) → H7 (categories/sheaves) → H8 (schemes). H6/H10 unlock as library size grows.

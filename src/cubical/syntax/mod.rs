@@ -271,6 +271,19 @@ pub enum Tactic {
     /// structurally against `nz_one`/`nz_mul` and context hypotheses.
     /// See `src/cubical/field.rs`.
     Field(Option<Term>),
+    /// `group` — group word problems over an abstract `Group` record bundled
+    /// as `group with G`.
+    ///
+    /// Both sides of the goal `Path A u v` are parsed into signed-generator
+    /// words and decided by free reduction; on agreement a proof tree is
+    /// assembled from the record's law fields (assoc/unit/cancellation plus
+    /// `inv_one`/`inv_inv`/`inv_mul`).  The kernel re-checks the proof.
+    /// See `src/cubical/group.rs`.
+    Group(Option<Term>),
+    /// `eq` — close a path goal by reflexivity or by composing context path
+    /// hypotheses into a chain (BFS over endpoints matched up to
+    /// normalization).  See `src/cubical/eq.rs`.
+    Eq,
 }
 
 // ---------------------------------------------------------------------------
@@ -582,6 +595,8 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
         Tactic::Apply(t) => Tactic::Apply(shift(d, c, t)),
         Tactic::Ring(t) => Tactic::Ring(t.as_ref().map(|t| shift(d, c, t))),
         Tactic::Field(t) => Tactic::Field(t.as_ref().map(|t| shift(d, c, t))),
+        Tactic::Group(t) => Tactic::Group(t.as_ref().map(|t| shift(d, c, t))),
+        Tactic::Eq => Tactic::Eq,
         Tactic::Reflexivity
         | Tactic::Symmetry
         | Tactic::Split
@@ -768,6 +783,8 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
         Tactic::Apply(t) => Tactic::Apply(subst(j, s, t)),
         Tactic::Ring(t) => Tactic::Ring(t.as_ref().map(|t| subst(j, s, t))),
         Tactic::Field(t) => Tactic::Field(t.as_ref().map(|t| subst(j, s, t))),
+        Tactic::Group(t) => Tactic::Group(t.as_ref().map(|t| subst(j, s, t))),
+        Tactic::Eq => Tactic::Eq,
         Tactic::Reflexivity
         | Tactic::Symmetry
         | Tactic::Split

@@ -738,7 +738,17 @@ impl Parser {
             }
             return Ok(Tactic::Field(None));
         }
-        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', 'omega', 'ring', 'field', 'ring with <term>', or 'field with <term>'"))
+        if self.consume_ident("group") {
+            if self.consume_ident("with") {
+                let term = self.parse_term()?;
+                return Ok(Tactic::Group(Some(term)));
+            }
+            return Ok(Tactic::Group(None));
+        }
+        if self.consume_ident("eq") {
+            return Ok(Tactic::Eq);
+        }
+        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', 'omega', 'ring', 'field', 'group', 'ring with <term>', 'field with <term>', or 'group with <term>'"))
     }
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {
@@ -2875,6 +2885,8 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "omega"
             | "ring"
             | "field"
+            | "group"
+            | "eq"
             | "def"
             | "inductive"
             | "record"

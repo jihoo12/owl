@@ -1536,6 +1536,107 @@ def main : Nat := v\n";
     }
 
     #[test]
+    fn group_demo_example_checks() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/group_demo.owl");
+        // Deep proof trees from the generated law-application chains exceed
+        // the default 2 MiB test-thread stack in debug builds.
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .unwrap();
+        handle
+            .join()
+            .unwrap()
+            .expect("group_demo.owl should typecheck");
+    }
+
+    #[test]
+    fn eq_tactic_refl_sym_chain() {
+        // `by eq` closes reflexive goals, single hypotheses (either
+        // orientation, via inline symmetry), and multi-hop chains through a
+        // context-provided transitivity lemma.
+        let src = "inductive Nat where\n\
+ \x20 | zero : Nat\n\
+ \x20 | suc : Nat -> Nat\n\
+def trans : forall (a : Nat), forall (b : Nat), forall (c : Nat),\n\
+ \x20 Path Nat a b -> Path Nat b c -> Path Nat a c :=\n\
+ \x20 fun a b c p q => <i> hcomp Nat [~i => <j> a, i => q] (p @ i)\n\
+def t_refl : forall (a : Nat), Path Nat a a := by intro a; eq\n\
+def t_direct : forall (a : Nat), forall (b : Nat),\n\
+ \x20 Path Nat a b -> Path Nat b a := by intro a b p; eq\n\
+def t_chain : forall (a : Nat), forall (b : Nat), forall (c : Nat),\n\
+ \x20 Path Nat a b -> Path Nat b c -> Path Nat a c :=\n\
+ \x20 by intro a b c p q; eq\n\
+def t_long : forall (a : Nat), forall (b : Nat), forall (c : Nat), forall (d : Nat),\n\
+ \x20 Path Nat a b -> Path Nat b c -> Path Nat c d -> Path Nat a d :=\n\
+ \x20 by intro a b c d p q r; eq\n";
+        let output = run_str(src).expect("by eq programs should check");
+        assert_eq!(output.name, "t_long");
+    }
+
+    #[test]
+    fn eq_tactic_needs_trans_lemma_for_chains() {
+        let src = "inductive Nat where\n\
+ \x20 | zero : Nat\n\
+ \x20 | suc : Nat -> Nat\n\
+def t_chain : forall (a : Nat), forall (b : Nat), forall (c : Nat),\n\
+ \x20 Path Nat a b -> Path Nat b c -> Path Nat a c :=\n\
+ \x20 by intro a b c p q; eq\n";
+        match run_str(src) {
+            Err(RunError::Type(e)) => {
+                let msg = format!("{}", e);
+                assert!(
+                    msg.contains("transitivity lemma"),
+                    "expected missing-trans error, got: {}",
+                    msg
+                );
+            }
+            other => panic!(
+                "expected missing-trans-lemma rejection, got: {:?}",
+                other.map(|o| o.name)
+            ),
+        }
+    }
+
+    #[test]
+    fn group_solver_rejects_non_identity() {
+        let src = "\
+record Group (A : Type) (mul : A -> A -> A) (inv : A -> A) (one : A) where\n\
+ \x20 field trans : forall (a : A), forall (b : A), forall (c : A), Path A a b -> Path A b c -> Path A a c\n\
+ \x20 field sym : forall (a : A), forall (b : A), Path A a b -> Path A b a\n\
+ \x20 field cong_mul_l : forall (a : A), forall (b : A), forall (n : A), Path A a b -> Path A (mul a n) (mul b n)\n\
+ \x20 field cong_mul_r : forall (a : A), forall (b : A), forall (m : A), Path A a b -> Path A (mul m a) (mul m b)\n\
+ \x20 field cong_inv : forall (a : A), forall (b : A), Path A a b -> Path A (inv a) (inv b)\n\
+ \x20 field mul_assoc : forall (a : A), forall (b : A), forall (c : A), Path A (mul (mul a b) c) (mul a (mul b c))\n\
+ \x20 field one_mul : forall (a : A), Path A (mul one a) a\n\
+ \x20 field mul_one : forall (a : A), Path A (mul a one) a\n\
+ \x20 field inv_l : forall (a : A), Path A (mul (inv a) a) one\n\
+ \x20 field inv_r : forall (a : A), Path A (mul a (inv a)) one\n\
+ \x20 field inv_one : Path A (inv one) one\n\
+ \x20 field inv_inv : forall (a : A), Path A (inv (inv a)) a\n\
+ \x20 field inv_mul : forall (a : A), forall (b : A), Path A (inv (mul a b)) (mul (inv b) (inv a))\n\
+def bad :\n\
+ \x20 forall (A : Type), forall (mul : A -> A -> A), forall (inv : A -> A),\n\
+ \x20 forall (one : A),\n\
+ \x20 forall (G : Group A mul inv one), forall (a : A), forall (b : A),\n\
+ \x20 Path A (mul a b) (mul b a) :=\n\
+ \x20 by intro A mul inv one G a b; group with G\n";
+        match run_str(src) {
+            Err(RunError::Type(e)) => {
+                assert!(
+                    format!("{}", e).contains("words do not match"),
+                    "expected word-mismatch error, got: {}",
+                    e
+                );
+            }
+            other => panic!(
+                "expected word-mismatch rejection, got: {:?}",
+                other.map(|o| o.name)
+            ),
+        }
+    }
+
+    #[test]
     fn run_plus_on_nat() {
         let src = "inductive Nat where | zero : Nat | suc : Nat -> Nat\n\
                    def plus : Nat -> Nat -> Nat := fun m n => match m return Nat with \

@@ -2057,6 +2057,57 @@ fires when the explicit form is absent and the concrete `Nat` solver does not
 apply. If no instance matches the carrier, the tactic reports an error and
 asks for `ring with C`. See `examples/instance_search.owl`.
 
+#### `by group with G` — group word problems
+
+`by group with G` proves word identities over an abstract group
+`G : Group A mul inv one`. Both sides of the goal are parsed into
+signed-generator words, decided by free reduction (adjacent inverse
+cancellation, unit removal), and — when the reduced words agree — a proof
+tree is assembled from the record's law fields. The kernel re-checks every
+generated proof.
+
+The `Group` record bundles the operations as parameters (`A`, `mul`, `inv`,
+`one`) and the following laws as fields: `mul_assoc`, `one_mul`, `mul_one`,
+`inv_l`, `inv_r`, plus the pragmatic extras `inv_one`, `inv_inv`, and the
+swapping distributivity `inv (mul a b) = mul (inv b) (inv a)`, together with
+the structural glue (`trans`, `sym`, `cong_mul_l/r`, `cong_inv`). As with
+`Field`, the inverse laws are taken as primitive fields rather than derived.
+Instance search applies here too: bare `group` scans the context for a
+`Group A mul inv one` record matching the goal's carrier.
+
+```
+def cancel_r : forall (A : Type), forall (mul : A -> A -> A),
+    forall (inv : A -> A), forall (one : A),
+    forall (G : Group A mul inv one), forall (a : A), forall (b : A),
+    Path A (mul (mul a b) (inv b)) a :=
+  by intro A mul inv one G a b; group with G
+```
+
+Non-identities (`a·b = b·a`, false in a non-abelian group) are rejected with
+a word-mismatch error. See `examples/group_demo.owl`.
+
+#### `by eq` — propositional equality chaining
+
+`by eq` closes path goals `Path A u v` by reflexivity or by composing context
+path hypotheses into a chain:
+
+- if `u` and `v` are definitionally equal, the proof is `<i> u`;
+- a single hypothesis in either orientation is used directly (backward use
+  wraps it in an inline symmetry `<i> p @ ~i`);
+- multi-hop chains run a breadth-first search over all context hypotheses of
+  path type (endpoints matched up to normalization, no quantifier
+  instantiation) and compose through a **context-provided transitivity
+  lemma** named `trans` or `_owl_trans` whose type has the shape
+  `... -> Path A x y -> Path A y z -> Path A x z` — import
+  `lib/ring_laws.owl` or bundle one; chaining fails with a clear error
+  otherwise.
+
+```
+def t_chain : forall (a : Nat), forall (b : Nat), forall (c : Nat),
+    Path Nat a b -> Path Nat b c -> Path Nat a c :=
+  by intro a b c p q; eq
+```
+
 ### Example: Multi-Step Tactic Proof
 
 ```

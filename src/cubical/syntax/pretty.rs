@@ -281,6 +281,11 @@ pub fn show_tactic(env: &[Name], t: &Tactic) -> String {
             Some(t) => format!("field with {}", t),
             None => "field".to_string(),
         },
+        Tactic::Group(gp) => match gp {
+            Some(t) => format!("group with {}", t),
+            None => "group".to_string(),
+        },
+        Tactic::Eq => "eq".to_string(),
     }
 }
 
