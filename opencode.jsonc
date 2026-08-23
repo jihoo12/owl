@@ -34,26 +34,6 @@
       "description": "Reconcile TODO.md with the actual state of the work",
       "template": "Reconcile TODO.md with the actual state of the work:\n1. Inspect `git status`, `git log --oneline -10`, and the diff of uncommitted changes.\n2. Mark any completed items `[ ]` → `[x]` and move each to the top of the `## Completed (implementation log)` section as a dated paragraph in the existing style: what changed, why, how it was verified (test names / examples / commands), and any invariants the fix relies on.\n3. If an item is in progress, annotate it so the file reflects reality.\n4. Never fabricate completions — only mark an item done when the verification protocol (AGENTS.md §6) actually passed.\nReport exactly what you changed in TODO.md."
     }
-  },
-
-  // Automation rules. Broad catch-all first, narrow rules last (last match wins).
-  "permission": {
-    "bash": {
-      "*": "ask",
-      "cargo": "allow",
-      "cargo *": "allow",
-      "rustfmt": "allow",
-      "git": "allow",
-      "git *": "allow",
-      "uv": "allow",
-      "uv *": "allow",
-      "uvx": "allow",
-      "uvx *": "allow",
-      ".venv/bin/*": "allow",
-      "scripts/*": "allow",
-      "bash scripts/*": "allow",
-      "curl -s https://opencode.ai/config.json*": "allow",
-      "sqlite3 rust_code.db*": "allow"
-    }
+  
   }
 }
