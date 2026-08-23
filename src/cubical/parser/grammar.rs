@@ -22,6 +22,11 @@ pub(super) struct Parser {
     /// While non-empty, names defined here are qualified as `A.B.<name>` and
     /// unqualified references prefer the innermost module's qualified name.
     pub(super) module_stack: Vec<Name>,
+    /// Parameter binder lists parallel to `module_stack` (entry `i` holds the
+    /// parameters of `module_stack[i]`; empty for plain modules). v1 supports
+    /// at most one non-empty layer: defs inside a parameterized module are
+    /// closed over its parameters into Pi/lambda form.
+    pub(super) module_params: Vec<Vec<(Name, Term)>>,
     /// `(name, source position, is_introduction)` for every variable name
     /// observed while parsing the current top-level declaration, in source
     /// order. The driver installs this into the typechecker's thread-local
@@ -56,6 +61,7 @@ impl Parser {
             global_env: Vec::new(),
             datatypes: Vec::new(),
             module_stack: Vec::new(),
+            module_params: Vec::new(),
             decl_positions: Vec::new(),
             stop_at_with: false,
             stop_at_in: false,
@@ -81,7 +87,36 @@ impl Parser {
         } else {
             None
         };
-        Ok(Decl::Import { path, alias })
+        // `only [x, M.y]` selects which of the imported file's top-level names
+        // stay visible; entries are dotted paths relative to the imported
+        // file's top level (its own module prefixes, not the import alias).
+        let only = if self.consume_ident("only") {
+            Some(self.parse_only_list()?)
+        } else {
+            None
+        };
+        Ok(Decl::Import { path, alias, only })
+    }
+
+    /// Parse the `[name, ...]` list after `only`: comma-separated dotted
+    /// names in brackets. An empty list is allowed but hides everything;
+    /// a trailing comma is accepted.
+    fn parse_only_list(&mut self) -> Result<Vec<Name>, ParseError> {
+        self.expect(TokenKind::LBracket, "expected '[' after 'only'")?;
+        let mut items: Vec<Name> = Vec::new();
+        while !self.at(&TokenKind::RBracket) {
+            items.push(self.expect_ident("expected name in 'only' list")?);
+            while self.consume(&TokenKind::Dot) {
+                let seg = self.expect_ident("expected name after '.'")?;
+                let last = items.last_mut().expect("just pushed an item");
+                *last = format!("{}.{}", last, seg);
+            }
+            if !self.consume(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::RBracket, "expected ']' after 'only' list")?;
+        Ok(items)
     }
 
     pub(super) fn parse_def(&mut self) -> Result<Decl, ParseError> {
@@ -102,6 +137,9 @@ impl Parser {
         // Allow the definition body to refer to itself (and later globals).
         self.global_env.insert(0, name.clone());
         let val = self.parse_term()?;
+        // Inside a parameterized module the definition is closed over the
+        // module parameters (Pi on the type, lambdas on the value).
+        let (ty, val) = self.wrap_with_module_params(ty, val);
         Ok(Decl::Def {
             name,
             ty,
@@ -1997,6 +2035,106 @@ impl Parser {
         }
     }
 
+    /// Parse an optional module-parameter binder list: `(A : Type) (B : Nat)`.
+    /// Binders are inserted front-first into `term_env` exactly like record
+    /// parameters (last binder at index 0). Each parsed parameter type is
+    /// immediately weakened by one slot (`shift(-1)`): it was parsed in the
+    /// layout that already contains its own binder, but the final Pi-chain
+    /// places it before that binder.
+    pub(super) fn parse_module_binders(&mut self) -> Result<Vec<(Name, Term)>, ParseError> {
+        let mut params: Vec<(Name, Term)> = Vec::new();
+        while self.at(&TokenKind::LParen) && self.peek_ahead_is_binder() {
+            self.expect(TokenKind::LParen, "expected '(' for parameter binder")?;
+            let pname = self.expect_ident("expected parameter name")?;
+            self.expect(
+                TokenKind::Colon,
+                format!("expected ':' after parameter name '{}'", pname),
+            )?;
+            let pty = self.parse_term()?;
+            self.expect(TokenKind::RParen, "expected ')' after parameter type")?;
+            self.term_env.insert(0, pname.clone());
+            params.push((pname, shift(-1, 0, &pty)));
+        }
+        Ok(params)
+    }
+
+    /// The single active parameterized-module layer, if any: its full dotted
+    /// path and its parameter list. v1 rejects nested parameterized modules,
+    /// so at most one layer exists.
+    fn active_param_module(&self) -> Option<(String, &Vec<(Name, Term)>)> {
+        let idx = self.module_params.iter().position(|ps| !ps.is_empty())?;
+        Some((
+            self.module_stack[..=idx].join("."),
+            &self.module_params[idx],
+        ))
+    }
+
+    /// True when any enclosing module carries parameters. Datatypes, records,
+    /// imports and further parameterized modules are rejected inside (v1).
+    pub(super) fn inside_parameterized_module(&self) -> bool {
+        self.module_params.iter().any(|ps| !ps.is_empty())
+    }
+
+    /// Reject a declaration kind that v1 does not support inside a
+    /// parameterized module.
+    pub(super) fn reject_inside_parameterized_module(&self, what: &str) -> Result<(), ParseError> {
+        if self.inside_parameterized_module() {
+            Err(self.error_here(format!(
+                "{}s inside a parameterized module are not supported",
+                what
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Close a definition's type and value over the enclosing parameterized
+    /// module's parameters: `ty` becomes `Pi p1 => ... => Pi pn => ty` and
+    /// `val` becomes `fun p1 => ... => fun pn => val`.
+    ///
+    /// The parsed body already references parameters through their
+    /// `term_env` slots (last parameter at index 0), which is exactly the de
+    /// Bruijn layout under the added leading binders, so no shifting is
+    /// needed there. Parameter types were weakened at parse time (see
+    /// [`Self::parse_module_binders`]).
+    fn wrap_with_module_params(&self, ty: Term, val: Term) -> (Term, Term) {
+        match self.active_param_module() {
+            Some((_, params)) => {
+                let mut ty_w = ty;
+                let mut val_w = val;
+                // Innermost parameter binds closest, so wrap in reverse.
+                for (pname, pty) in params.iter().rev() {
+                    ty_w = Term::TPi(pname.clone(), Box::new(pty.clone()), Box::new(ty_w));
+                    val_w = Term::TAbs(pname.clone(), Box::new(val_w));
+                }
+                (ty_w, val_w)
+            }
+            None => (ty, val),
+        }
+    }
+
+    /// Wrap a resolved global reference into applications of the enclosing
+    /// parameterized module's parameters (outermost parameter applied first).
+    ///
+    /// Only members OF the parameterized module — candidates whose dotted name
+    /// starts with the module's path — are parameterized; unrelated globals
+    /// stay unapplied. Parameter variables occupy the bottom `n` slots of
+    /// `term_env`, front-inserted so the LAST declared parameter is innermost
+    /// (`[p_n, ..., p_1]`); references may also occur under additional local
+    /// binders (e.g. inside a lambda), so the i-th declared parameter's index
+    /// is computed relative to the *current* environment depth as `L-1-i`.
+    fn apply_module_params(&self, candidate: &str, global_ref: Term) -> Term {
+        match self.active_param_module() {
+            Some((prefix, params)) if candidate.starts_with(&format!("{prefix}.")) => {
+                let l = self.term_env.len() as i32;
+                params.iter().enumerate().fold(global_ref, |acc, (i, _)| {
+                    Term::TApp(Box::new(acc), Box::new(Term::TVar(l - 1 - i as i32)))
+                })
+            }
+            _ => global_ref,
+        }
+    }
+
     /// Module path prefixes innermost-first for candidate lookup, e.g. the
     /// stack `["A", "B"]` yields `["A.B", "A"]`.
     fn module_path_prefixes(&self) -> Vec<String> {
@@ -2034,6 +2172,20 @@ impl Parser {
             || self.datatypes.iter().any(|dt| dt.name.starts_with(&dot))
     }
 
+    /// Resolve the source module of an instantiation `module N = M (...)` to
+    /// its full dotted path: innermost-qualified candidates first, then the
+    /// bare name, accepting the first candidate that actually prefixes known
+    /// globals.
+    pub(super) fn resolve_module_source(&self, raw: &Name) -> Result<Name, ParseError> {
+        for cand in self.qualified_candidates(raw) {
+            let dot = format!("{cand}.");
+            if self.global_env.iter().any(|n| n.starts_with(&dot)) {
+                return Ok(cand);
+            }
+        }
+        Err(self.error_here(format!("unknown module '{raw}' in module instantiation")))
+    }
+
     /// Resolve a dotted, module-qualified reference `M.name`, `M.Nat`, or
     /// `M.Nat.zero` (also datatype-qualified constructors like `Nat.zero`).
     /// Both the absolute path (`Outer.Inner.T`) and the current-module-relative
@@ -2050,7 +2202,8 @@ impl Parser {
         for cand in &candidates {
             if let Some(idx) = self.global_env.iter().position(|n| n == cand) {
                 self.record_name_pos(cand, line, col, false);
-                return Ok(Term::TVar((self.term_env.len() + idx) as i32));
+                let gref = Term::TVar((self.term_env.len() + idx) as i32);
+                return Ok(self.apply_module_params(cand, gref));
             }
         }
         for cand in &candidates {
@@ -2097,10 +2250,12 @@ impl Parser {
 
     /// Global definition index for an unqualified name, preferring the current
     /// module's qualified names (innermost first), then the top-level name.
-    fn find_global_candidate(&self, name: &Name) -> Option<usize> {
+    /// Also returns the qualified candidate that matched — needed to decide
+    /// module-parameter application.
+    fn find_global_candidate_with_name(&self, name: &Name) -> Option<(usize, Name)> {
         for cand in self.qualified_candidates(name) {
             if let Some(idx) = self.global_env.iter().position(|n| n == &cand) {
-                return Some(idx);
+                return Some((idx, cand));
             }
         }
         None
@@ -2194,10 +2349,12 @@ impl Parser {
             return Ok(Term::TVar(idx as i32));
         }
         // Globals: prefer the current module's qualified names, then the
-        // top-level name.
-        if let Some(idx) = self.find_global_candidate(&name) {
+        // top-level name. Members of an enclosing parameterized module are
+        // automatically applied to that module's parameters.
+        if let Some((idx, candidate)) = self.find_global_candidate_with_name(&name) {
             self.record_name_pos(&name, line, col, false);
-            return Ok(Term::TVar((self.term_env.len() + idx) as i32));
+            let gref = Term::TVar((self.term_env.len() + idx) as i32);
+            return Ok(self.apply_module_params(&candidate, gref));
         }
         if let Some(idx) = self.ivar_env.iter().position(|n| n == &name) {
             self.record_name_pos(&name, line, col, false);
@@ -2444,7 +2601,7 @@ impl Parser {
         }
     }
 
-    fn consume(&mut self, expected: &TokenKind) -> bool {
+    pub(super) fn consume(&mut self, expected: &TokenKind) -> bool {
         if self.at(expected) {
             self.pos += 1;
             true

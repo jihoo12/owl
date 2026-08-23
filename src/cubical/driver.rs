@@ -1,6 +1,6 @@
 //! File I/O pipeline: read, parse, typecheck, and evaluate cubical source files.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -123,7 +123,11 @@ fn run_source(
         &mut env,
         &mut loaded,
         &mut HashSet::new(),
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+        None,
         &mut last_def,
+        None,
         None,
         session,
     )?;
@@ -168,7 +172,11 @@ fn check_source(root_path: &Path, source: &str, session: &mut Session) -> Result
         &mut env,
         &mut loaded,
         &mut HashSet::new(),
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+        None,
         &mut last_def,
+        None,
         None,
         session,
     )
@@ -191,10 +199,14 @@ fn process_file_source(
     source: &str,
     import_base: &Path,
     env: &mut Env,
-    loaded: &mut HashSet<(PathBuf, String)>,
-    loading: &mut HashSet<(PathBuf, String)>,
+    loaded: &mut HashSet<LoadedKey>,
+    loading: &mut HashSet<PathBuf>,
+    def_sources: &mut HashMap<Name, PathBuf>,
+    dt_sources: &mut HashMap<Name, PathBuf>,
+    origin: Option<&Path>,
     last_def: &mut Option<RunOutput>,
     forced_prefix: Option<&str>,
+    only: Option<&[Name]>,
     session: &mut Session,
 ) -> Result<(), RunError> {
     let mut parser = ProgramParser::new_with_prefix(source, forced_prefix, session)?;
@@ -208,13 +220,20 @@ fn process_file_source(
         session.set_decl_name_positions(decl_positions.clone());
         let result: Result<(), RunError> = (|| {
             match decl {
-                Decl::Import { path, alias } => {
+                Decl::Import {
+                    path,
+                    alias,
+                    only: nested_only,
+                } => {
                     load_import(
                         &path,
                         &alias,
+                        &nested_only,
                         env,
                         loaded,
                         loading,
+                        def_sources,
+                        dt_sources,
                         import_base,
                         last_def,
                         session,
@@ -224,14 +243,39 @@ fn process_file_source(
                 Decl::Module { .. } | Decl::ModuleEnd => {
                     // The parser already updated its module scope.
                 }
+                Decl::ModuleInst { name, source, args } => {
+                    instantiate_module(&name, &source, &args, env, session)?;
+                    // Instantiated members must resolve in later declarations.
+                    parser.sync_from_env(env);
+                }
                 Decl::Data(dt) => {
                     process_data(&dt, env, session)?;
+                    if import_selection_active(&dt.name, only, forced_prefix) {
+                        if let Some(p) = origin {
+                            note_imported_dt(&dt.name, p, dt_sources)?;
+                        }
+                    }
+                    prune_datatypes(env, only, forced_prefix, 1);
                 }
                 Decl::DataMutual(dts) => {
                     process_data_mutual(&dts, env, session)?;
+                    for dt in &dts {
+                        if import_selection_active(&dt.name, only, forced_prefix) {
+                            if let Some(p) = origin {
+                                note_imported_dt(&dt.name, p, dt_sources)?;
+                            }
+                        }
+                    }
+                    prune_datatypes(env, only, forced_prefix, dts.len());
                 }
                 Decl::Record(dt) => {
                     process_data(&dt, env, session)?;
+                    if import_selection_active(&dt.name, only, forced_prefix) {
+                        if let Some(p) = origin {
+                            note_imported_dt(&dt.name, p, dt_sources)?;
+                        }
+                    }
+                    prune_datatypes(env, only, forced_prefix, 1);
                 }
                 Decl::DataWithFunc {
                     dt,
@@ -240,6 +284,19 @@ fn process_file_source(
                     func_val,
                 } => {
                     process_data_with_func(&dt, &func_name, &func_ty, &func_val, env, session)?;
+                    if import_selection_active(&func_name, only, forced_prefix) {
+                        if let Some(p) = origin {
+                            note_imported_def(&func_name, p, def_sources)?;
+                        }
+                    } else {
+                        hide_front_def(env);
+                    }
+                    if import_selection_active(&dt.name, only, forced_prefix) {
+                        if let Some(p) = origin {
+                            note_imported_dt(&dt.name, p, dt_sources)?;
+                        }
+                    }
+                    prune_datatypes(env, only, forced_prefix, 1);
                 }
                 Decl::Def {
                     name,
@@ -248,6 +305,13 @@ fn process_file_source(
                     by_wf,
                 } => {
                     *last_def = Some(process_def(&name, &ty, &val, env, by_wf, session)?);
+                    if import_selection_active(&name, only, forced_prefix) {
+                        if let Some(p) = origin {
+                            note_imported_def(&name, p, def_sources)?;
+                        }
+                    } else {
+                        hide_front_def(env);
+                    }
                 }
             }
             Ok(())
@@ -263,35 +327,36 @@ fn process_file_source(
 /// module prefix (an aliased file may be imported under several aliases, in
 /// which case each alias is a distinct namespace).
 type LoadedKey = (PathBuf, String);
-
 fn load_import(
     path: &str,
     alias: &Option<String>,
+    only: &Option<Vec<Name>>,
     env: &mut Env,
     loaded: &mut HashSet<LoadedKey>,
-    loading: &mut HashSet<LoadedKey>,
+    loading: &mut HashSet<PathBuf>,
+    def_sources: &mut HashMap<Name, PathBuf>,
+    dt_sources: &mut HashMap<Name, PathBuf>,
     import_base: &Path,
     last_def: &mut Option<RunOutput>,
     session: &mut Session,
 ) -> Result<(), RunError> {
     let resolved = resolve_import_path(import_base, path);
     let canonical = canonical_import_path(&resolved);
-    let key: LoadedKey = (canonical.clone(), alias.clone().unwrap_or_default());
-
+    let key: LoadedKey = (canonical.clone(), loaded_tag(alias, only));
     if loaded.contains(&key) {
         return Ok(());
     }
-    if !loading.insert(key.clone()) {
+    // Cycle detection is per canonical path: loading a file twice in a cycle
+    // recurses forever regardless of alias or selection.
+    if !loading.insert(canonical.clone()) {
         return Err(RunError::Import(format!(
             "circular import involving '{}'",
             resolved.display()
         )));
     }
-
     let source = std::fs::read_to_string(&resolved).map_err(|err| {
         RunError::Import(format!("cannot read '{}': {}", resolved.display(), err))
     })?;
-
     let nested_base = resolved.parent().unwrap_or(import_base);
     process_file_source(
         &source,
@@ -299,14 +364,203 @@ fn load_import(
         env,
         loaded,
         loading,
+        def_sources,
+        dt_sources,
+        Some(&canonical),
         last_def,
         alias.as_deref(),
+        only.as_deref(),
         session,
     )?;
-
-    loading.remove(&key);
+    loading.remove(&canonical);
     loaded.insert(key);
     Ok(())
+}
+
+/// Namespace tag for the dedup key: the forced alias, then the sorted,
+/// deduplicated `only` entries so `only [x, y]` and `only [y, x]` share one
+/// load. No selection contributes nothing.
+fn loaded_tag(alias: &Option<String>, only: &Option<Vec<Name>>) -> String {
+    let mut tag = alias.clone().unwrap_or_default();
+    if let Some(items) = only {
+        tag.push('\u{1}');
+        let mut sorted: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
+        sorted.sort();
+        sorted.dedup();
+        tag.push_str(&sorted.join(","));
+    }
+    tag
+}
+/// Register an imported definition, rejecting collisions with definitions
+/// from a different import.
+fn note_imported_def(
+    name: &Name,
+    origin: &Path,
+    def_sources: &mut HashMap<Name, PathBuf>,
+) -> Result<(), RunError> {
+    if let Some(prev) = def_sources.get(name) {
+        if prev != origin {
+            return Err(RunError::Import(format!(
+                "conflicting definitions for '{}': imported from '{}' and '{}'; \
+                 disambiguate with 'import ... as <alias>' or 'only [...]' selections",
+                name,
+                prev.display(),
+                origin.display()
+            )));
+        }
+    }
+    def_sources.insert(name.clone(), origin.to_path_buf());
+    Ok(())
+}
+/// Register an imported datatype, rejecting cross-file collisions (datatype
+/// lookup is by name, so two different declarations under one name would make
+/// eliminators ambiguous).
+fn note_imported_dt(
+    name: &Name,
+    origin: &Path,
+    dt_sources: &mut HashMap<Name, PathBuf>,
+) -> Result<(), RunError> {
+    if let Some(prev) = dt_sources.get(name) {
+        if prev != origin {
+            return Err(RunError::Import(format!(
+                "conflicting datatype '{}': imported from '{}' and '{}'; \
+                 disambiguate with 'import ... as <alias>' or 'only [...]' selections",
+                name,
+                prev.display(),
+                origin.display()
+            )));
+        }
+    }
+    dt_sources.insert(name.clone(), origin.to_path_buf());
+    Ok(())
+}
+/// Whether a declaration survives the active `only [...]` clause at all
+/// (no clause = everything is selected).
+fn import_selection_active(name: &str, only: Option<&[Name]>, forced_prefix: Option<&str>) -> bool {
+    match only {
+        None => true,
+        Some(list) => import_selection_selected(name, list, forced_prefix),
+    }
+}
+/// Expand a module instantiation `module N = M (e1) ... (en)` into ordinary
+/// definitions: every def `M.x` of the source module becomes a fresh global
+/// `N.x : M.x e1 ... en := M.x e1 ... en`, fed through the standard
+/// `process_def` path so the kernel re-checks each expansion.
+///
+/// The annotation instantiates the member's stored Pi-type through NbE
+/// (term-level application cannot apply to an embedded Pi term); the value
+/// is an application spine over a *global reference* to the member (never
+/// over its unfolded lambda — that redex cannot be inferred). The reference
+/// index is resolved immediately before definition as `idx + 1`: this very
+/// member is front-inserted before its body check, shifting the source down.
+/// Members expand oldest-first; nested members (`M.N.x`) are rejected in v1.
+fn instantiate_module(
+    name: &Name,
+    source: &Name,
+    args: &[Term],
+    env: &mut Env,
+    session: &mut Session,
+) -> Result<(), RunError> {
+    let src_prefix = format!("{source}.");
+    let mut members: Vec<Name> = Vec::new();
+    for (n, _, _) in env.defs.iter() {
+        if let Some(rest) = n.strip_prefix(&src_prefix) {
+            if rest.contains('.') {
+                return Err(RunError::Type(Box::new(TypeError::Other(format!(
+                    "module instantiation of '{source}' with nested members is not supported \
+                     (found '{}')",
+                    n
+                )))));
+            }
+            members.push(rest.to_string());
+        }
+    }
+    for m in members.into_iter().rev() {
+        let src_full = format!("{source}.{m}");
+        let dst_full = format!("{name}.{m}");
+        let idx = env
+            .defs
+            .iter()
+            .position(|(n, _, _)| *n == src_full)
+            .ok_or_else(|| {
+                RunError::Type(Box::new(TypeError::Other(format!(
+                    "unknown module member '{}' during instantiation",
+                    src_full
+                ))))
+            })?;
+        // Annotation: instantiate the source member's stored Pi-type by
+        // asking the typechecker to INFER the applied spine (pre-insert
+        // layout). Inference both validates every argument against the
+        // corresponding domain and returns the concrete instantiated type,
+        // which is a proper type expression and therefore passes
+        // `process_def`'s universe check. Term-level application cannot
+        // express this instantiation directly, and NbE cannot either —
+        // `do_apply` intentionally blocks on `VPi`.
+        //
+        // Value: the same application spine but over a reference anchored at
+        // `idx + 1`, because `process_def` inserts this very member at the
+        // front before checking its body, shifting the source member down.
+        // The syntactic spine only needs to be valid for that immediate
+        // check; afterwards the member lives as an evaluated value.
+        let gref_now = Term::TVar(idx as i32);
+        let probe = args.iter().fold(gref_now, |acc, a| {
+            Term::TApp(Box::new(acc), Box::new(a.clone()))
+        });
+        let ann = zonk(&infer_with_full_env(env, &probe, session)?, session);
+        let gref = Term::TVar((idx + 1) as i32);
+        let spine = args.iter().fold(gref, |acc, a| {
+            Term::TApp(Box::new(acc), Box::new(a.clone()))
+        });
+        process_def(&dst_full, &ann, &spine, env, false, session)?;
+    }
+    Ok(())
+}
+
+/// Selection test for an `import ... only [...]` clause. A declaration whose
+/// fully qualified name (forced import alias included) is `name` stays
+/// visible iff, after stripping the alias prefix, some selection entry equals
+/// it or is a module-path prefix of it — selecting `M` keeps everything
+/// inside module `M`.
+fn import_selection_selected(name: &str, only: &[Name], forced_prefix: Option<&str>) -> bool {
+    let stripped = match forced_prefix {
+        Some(prefix) => name.strip_prefix(&format!("{prefix}.")).unwrap_or(name),
+        None => name,
+    };
+    only.iter()
+        .any(|entry| stripped == entry.as_str() || stripped.starts_with(&format!("{entry}.")))
+}
+/// Hide the definition most recently added at the front of `env.defs`.
+///
+/// Hiding is rename-only on purpose: de Bruijn indices were assigned from
+/// declaration order at parse time, so removing the entry would corrupt every
+/// later reference into the file; names are cosmetic labels and safe to
+/// rewrite. The replacement name starts with NUL so it can never appear in
+/// source text and never matches a resolution candidate.
+fn hide_front_def(env: &mut Env) {
+    if let Some((name, _, _)) = env.defs.first_mut() {
+        *name = format!("\u{0}hidden::{}", name);
+    }
+}
+/// Drop the last `count` registered datatypes that are not selected by an
+/// active `only` clause (`None` keeps everything). Datatype lookup is by name
+/// rather than position, so removal cannot corrupt references; a kept
+/// declaration that mentions a dropped one fails loudly at its point of use.
+/// That is the documented semantics of selective imports: list what you use.
+fn prune_datatypes(
+    env: &mut Env,
+    only: Option<&[Name]>,
+    forced_prefix: Option<&str>,
+    count: usize,
+) {
+    let Some(only) = only else { return };
+    let start = env.datatypes.len().saturating_sub(count);
+    let kept: Vec<crate::cubical::syntax::Datatype> = env.datatypes[start..]
+        .iter()
+        .filter(|dt| import_selection_selected(&dt.name, only, forced_prefix))
+        .cloned()
+        .collect();
+    env.datatypes.truncate(start);
+    env.datatypes.extend(kept);
 }
 
 fn process_data(
@@ -846,6 +1100,439 @@ mod tests {
         assert_eq!(aliased.name, "w");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_selective_import_keeps_selected_names() {
+        let dir = std::env::temp_dir().join(format!("cubical_only_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let arith_path = dir.join("arith.owl");
+        let main_path = dir.join("main.owl");
+
+        fs::write(
+            &arith_path,
+            "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n\
+             def add : Nat -> Nat -> Nat := fun m n => match m return Nat with\n\
+             \x20 | zero => n\n  | suc m' => suc (add m' n)\n\
+             def sub : Nat -> Nat -> Nat := fun m n => m\n",
+        )
+        .unwrap();
+        // `Nat` and `add` are listed (dependencies included); `sub` is not
+        // selected and must be invisible afterwards.
+        fs::write(
+            &main_path,
+            "import \"arith.owl\" only [Nat, add]\n\
+             def two : Nat := add (suc zero) (suc zero)\n",
+        )
+        .unwrap();
+
+        let output = run(&main_path).expect("selective import should run");
+        assert_eq!(output.name, "two");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_selective_import_hides_unselected_names() {
+        let dir =
+            std::env::temp_dir().join(format!("cubical_only_hide_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let arith_path = dir.join("arith.owl");
+        let main_path = dir.join("main.owl");
+
+        fs::write(
+            &arith_path,
+            "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n\
+             def add : Nat -> Nat -> Nat := fun m n => match m return Nat with\n\
+             \x20 | zero => n\n  | suc m' => suc (add m' n)\n",
+        )
+        .unwrap();
+        // `zero`/`suc` are not in the selection, so referencing them must fail.
+        fs::write(
+            &main_path,
+            "import \"arith.owl\" only [add]\n\
+             def bad : U0 := zero\n",
+        )
+        .unwrap();
+
+        assert!(
+            run(&main_path).is_err(),
+            "unselected imported name should not resolve"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_selective_import_module_member_selection() {
+        let dir =
+            std::env::temp_dir().join(format!("cubical_only_module_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let lib_path = dir.join("lib.owl");
+        let member_path = dir.join("member.owl");
+        let module_path = dir.join("module_sel.owl");
+
+        fs::write(
+            &lib_path,
+            "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n\
+             module M where\n\
+             \x20 def one : Nat := suc zero\n\
+             end\n",
+        )
+        .unwrap();
+        // Selecting a dotted member path keeps just that declaration.
+        fs::write(
+            &member_path,
+            "import \"lib.owl\" only [Nat, M.one]\n\
+             def v : Nat := M.one\n",
+        )
+        .unwrap();
+        // Selecting the whole module keeps everything inside it.
+        fs::write(
+            &module_path,
+            "import \"lib.owl\" only [Nat, M]\n\
+             def v : Nat := M.one\n",
+        )
+        .unwrap();
+
+        let out1 = run(&member_path).expect("dotted member selection should run");
+        assert_eq!(out1.name, "v");
+        let out2 = run(&module_path).expect("whole-module selection should run");
+        assert_eq!(out2.name, "v");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_selective_import_avoids_name_collisions() {
+        let dir = std::env::temp_dir().join(format!(
+            "cubical_only_collision_test_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+
+        // Two libraries exposing a same-named `helper`; selective imports pull
+        // disjoint members from each so both coexist.
+        let a_path = dir.join("liba.owl");
+        let b_path = dir.join("libb.owl");
+        let main_path = dir.join("main.owl");
+
+        fs::write(
+            &a_path,
+            "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n\
+             def helper : Nat -> Nat := fun n => suc n\n\
+             def from_a : Nat -> Nat := fun n => helper n\n",
+        )
+        .unwrap();
+        fs::write(
+            &b_path,
+            "inductive Bool where | true : Bool | false : Bool\n\
+             def helper : Bool -> Bool := fun b => b\n\
+             def from_b : Bool -> Bool := fun b => helper b\n",
+        )
+        .unwrap();
+        fs::write(
+            &main_path,
+            "import \"liba.owl\" only [Nat, suc, zero, from_a]\n\
+             import \"libb.owl\" only [Bool, false, from_b]\n\
+             def va : Nat := from_a (suc zero)\n\
+             def vb : Bool := from_b false\n",
+        )
+        .unwrap();
+
+        // The collision-prone `helper` names are never both exposed: each
+        // import only merges its selected (visible) members.
+        let output = run(&main_path).expect("disjoint selective imports should run");
+        assert_eq!(output.name, "vb");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_same_name_imports_from_different_files_rejected() {
+        // Even byte-identical content conflicts when two different files
+        // claim the same name: provenance is the disambiguation criterion,
+        // not content. Re-merges of the SAME file (diamond imports) are
+        // tolerated because origins track the defining file.
+        let dir = std::env::temp_dir().join(format!("cubical_dup_ok_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let shared_body = "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n\
+                           def add : Nat -> Nat -> Nat := fun m n => match m return Nat with\n\
+                           \x20 | zero => n\n  | suc m' => suc (add m' n)\n";
+        let shared_path = dir.join("shared.owl");
+        let a_path = dir.join("dupa.owl");
+        let b_path = dir.join("dupb.owl");
+        let main_path = dir.join("main.owl");
+
+        fs::write(&shared_path, shared_body).unwrap();
+        // dupa and dupb each pull Nat/add from shared.owl (single origin) but
+        // both declare their own `double`, so it exists under two defining
+        // files — a genuine conflict even though the texts are identical.
+        let double_def = "def double : Nat -> Nat := fun n => add n n\n";
+        fs::write(&a_path, format!("import \"shared.owl\"\n{double_def}")).unwrap();
+        fs::write(&b_path, format!("import \"shared.owl\"\n{double_def}")).unwrap();
+        fs::write(
+            &main_path,
+            "import \"dupa.owl\"\n\
+             import \"dupb.owl\"\n\
+             def main : U0 -> U0 := fun A => A\n",
+        )
+        .unwrap();
+
+        match run(&main_path) {
+            Err(RunError::Import(msg)) => {
+                assert!(
+                    msg.contains("double"),
+                    "error should name the conflicting symbol, got: {}",
+                    msg
+                );
+            }
+            other => panic!(
+                "expected import conflict error, got: {:?}",
+                other.map(|o| o.name)
+            ),
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_diamond_import_of_same_file_tolerated() {
+        // main imports da.owl and db.owl; both import shared.owl. shared's
+        // names arrive twice but from the same defining file, so no conflict.
+        let dir = std::env::temp_dir().join(format!("cubical_diamond_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let shared_path = dir.join("shared.owl");
+        let a_path = dir.join("da.owl");
+        let b_path = dir.join("db.owl");
+        let main_path = dir.join("main.owl");
+
+        fs::write(&shared_path, "def idty : U0 -> U0 := fun A => A\n").unwrap();
+        fs::write(
+            &a_path,
+            "import \"shared.owl\"\ndef a_v : U0 -> U0 := idty\n",
+        )
+        .unwrap();
+        fs::write(
+            &b_path,
+            "import \"shared.owl\"\ndef b_v : U0 -> U0 := idty\n",
+        )
+        .unwrap();
+        fs::write(
+            &main_path,
+            "import \"da.owl\"\n\
+             import \"db.owl\"\n\
+             def main : U0 -> U0 := idty\n",
+        )
+        .unwrap();
+
+        let output = run(&main_path).expect("diamond import of same file should unify");
+        assert_eq!(output.name, "main");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_conflicting_imported_definitions_rejected() {
+        let dir = std::env::temp_dir().join(format!("cubical_dup_bad_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let nat_decl = "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n";
+        let a_path = dir.join("confa.owl");
+        let b_path = dir.join("confb.owl");
+        let main_path = dir.join("main.owl");
+
+        fs::write(
+            &a_path,
+            format!("{nat_decl}def helper : Nat -> Nat := fun n => suc n\n"),
+        )
+        .unwrap();
+        fs::write(
+            &b_path,
+            // confa's declarations arrive transitively (same origin, no
+            // conflict); confb's own `helper` genuinely differs.
+            "import \"confa.owl\"\ndef helper : Nat -> Nat := fun n => suc (suc n)\n",
+        )
+        .unwrap();
+        fs::write(
+            &main_path,
+            "import \"confa.owl\"\n\
+             import \"confb.owl\"\n\
+             def main : U0 -> U0 := fun A => A\n",
+        )
+        .unwrap();
+
+        match run(&main_path) {
+            Err(RunError::Import(msg)) => {
+                assert!(
+                    msg.contains("helper"),
+                    "error should name the conflicting symbol, got: {}",
+                    msg
+                );
+            }
+            other => panic!(
+                "expected import conflict error, got: {:?}",
+                other.map(|o| o.name)
+            ),
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_conflicting_imported_datatypes_rejected() {
+        let dir = std::env::temp_dir().join(format!("cubical_dup_dt_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let a_path = dir.join("dta.owl");
+        let b_path = dir.join("dtb.owl");
+        let main_path = dir.join("main.owl");
+
+        fs::write(&a_path, "inductive Mode where | on : Mode | off : Mode\n").unwrap();
+        fs::write(
+            &b_path,
+            "inductive Mode where | on : Mode | flip : Mode -> Mode\n",
+        )
+        .unwrap();
+        fs::write(
+            &main_path,
+            "import \"dta.owl\"\n\
+             import \"dtb.owl\"\n\
+             def main : U0 -> U0 := fun A => A\n",
+        )
+        .unwrap();
+
+        match run(&main_path) {
+            Err(RunError::Import(msg)) => {
+                assert!(
+                    msg.contains("'Mode'"),
+                    "error should name the conflicting datatype, got: {}",
+                    msg
+                );
+            }
+            other => panic!(
+                "expected import conflict error, got: {:?}",
+                other.map(|o| o.name)
+            ),
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_parameterized_module_defs_typecheck_and_compute() {
+        // Defs inside `module M (A : Type) where` become globals closed over
+        // the parameter; sibling references apply it automatically; consumers
+        // instantiate explicitly.
+        let src = "\
+inductive Nat where\n\
+ \x20 | zero : Nat\n\
+ \x20 | suc : Nat -> Nat\n\
+def one : Nat := suc zero\n\
+module Semi (A : Type) where\n\
+ \x20 def idty : A -> A := fun x => x\n\
+ \x20 def twice_id : A -> A := fun x => idty (idty x)\n\
+end\n\
+def v : Nat := ((Semi.twice_id Nat) one)\n\
+def main : Nat := v\n";
+
+        let output = run_str(src).expect("parameterized module program should run");
+        assert_eq!(output.name, "main");
+    }
+
+    #[test]
+    fn run_parameterized_module_rejects_datatype_inside() {
+        let src = "\
+module M (A : Type) where\n\
+ \x20 inductive T where | mk : T\n\
+end\n";
+        assert!(
+            run_str(src).is_err(),
+            "datatype in parameterized module must be rejected"
+        );
+    }
+
+    #[test]
+    fn run_aliased_import_folds_parameterized_module_member() {
+        let dir =
+            std::env::temp_dir().join(format!("cubical_param_alias_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let lib_path = dir.join("plib.owl");
+        let plain_path = dir.join("plain.owl");
+        let aliased_path = dir.join("aliased.owl");
+
+        fs::write(
+            &lib_path,
+            "inductive Nat where\n  | zero : Nat\n  | suc : Nat -> Nat\n\
+             module Semi (A : Type) where\n\
+             \x20 def idty : A -> A := fun x => x\n\
+             end\n",
+        )
+        .unwrap();
+        // Plain import keeps the module path: Semi.idty.
+        fs::write(
+            &plain_path,
+            "import \"plib.owl\"\n\
+             def v : Nat := ((Semi.idty Nat) (suc zero))\n",
+        )
+        .unwrap();
+        // Aliased import folds the file's own modules: P.idty.
+        fs::write(
+            &aliased_path,
+            "import \"plib.owl\" as P\n\
+             def v : P.Nat := ((P.idty P.Nat) (P.suc P.zero))\n",
+        )
+        .unwrap();
+
+        let out1 = run(&plain_path).expect("plain import of param-module lib should run");
+        assert_eq!(out1.name, "v");
+        let out2 = run(&aliased_path).expect("aliased folding of param module should run");
+        assert_eq!(out2.name, "v");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_module_instantiation_typechecks_and_computes() {
+        // Parameterized instantiation: N.x behaves like the source member at
+        // the given arguments, without explicit parameter application.
+        let src = "\
+inductive Nat where\n\
+ \x20 | zero : Nat\n\
+ \x20 | suc : Nat -> Nat\n\
+def one : Nat := suc zero\n\
+module Semi (A : Type) where\n\
+ \x20 def idty : A -> A := fun x => x\n\
+end\n\
+module NatSemi = Semi (Nat)\n\
+def v : Nat := (NatSemi.idty one)\n\
+def main : Nat := v\n";
+
+        let output = run_str(src).expect("instantiated module program should run");
+        assert_eq!(output.name, "main");
+    }
+
+    #[test]
+    fn run_module_instantiation_of_plain_module() {
+        let src = "\
+inductive Nat where\n\
+ \x20 | zero : Nat\n\
+ \x20 | suc : Nat -> Nat\n\
+module Plain where\n\
+ \x20 def two : Nat := suc (suc zero)\n\
+end\n\
+module N2 = Plain\n\
+def v : Nat := N2.two\n\
+def main : Nat := v\n";
+
+        let output = run_str(src).expect("plain module instantiation should run");
+        assert_eq!(output.name, "main");
     }
 
     #[test]

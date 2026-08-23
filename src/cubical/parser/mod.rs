@@ -70,12 +70,31 @@ pub enum Decl {
         /// the `X.` prefix (forced module), overriding the file's own `module`
         /// declarations. `None` keeps the file's own names.
         alias: Option<Name>,
+        /// `import "f.owl" only [x, M.y]` — selective import. Entries are
+        /// dotted paths relative to the imported file's top level; a name
+        /// stays visible iff some entry equals it or prefixes its module path.
+        /// `None` exposes everything.
+        only: Option<Vec<Name>>,
     },
-    /// `module M where ...` — starts a namespace; following declarations get
-    /// the `M.` prefix. The parser already updated its scope, the driver just
-    /// sees this for bookkeeping.
+    /// `module M where ...` / `module M (A : Type) where ...` — starts a
+    /// namespace; following declarations get the `M.` prefix. With
+    /// parameters, every def inside is closed over them into Pi/lambda form
+    /// (`M.x : Pi params. T`). The parser already updated its scope, the
+    /// driver just sees this for bookkeeping.
     Module {
         name: Name,
+        /// Parameter binders in declaration order; empty for plain modules.
+        #[allow(dead_code)]
+        params: Vec<(Name, Term)>,
+    },
+    /// `module N = M (e1) (e2)` — instantiation: every def of module `M`
+    /// (`source`, resolved to its full dotted path by the parser) is redefined
+    /// as `N.<member> := M.<member> e1 ... en`. The driver expands this into
+    /// ordinary definitions, so the kernel re-checks everything.
+    ModuleInst {
+        name: Name,
+        source: Name,
+        args: Vec<Term>,
     },
     /// `end` — closes the innermost `module ... where` block.
     ModuleEnd,
@@ -150,19 +169,34 @@ impl ProgramParser {
             self.parse_module_decl()?
         } else if self.parser.consume_ident("end") {
             if self.forced_prefix.is_some() {
-                // Aliased import: the file's `end` is folded into the alias.
+                // Aliased import: drop a folded parameter scope opened by a
+                // skipped `module` header, if one is open.
+                if self.parser.module_params.len() > self.parser.module_stack.len() {
+                    let params = self.parser.module_params.pop().unwrap_or_default();
+                    for _ in &params {
+                        self.parser.term_env.remove(0);
+                    }
+                }
                 Decl::ModuleEnd
             } else if self.parser.module_stack.pop().is_some() {
+                // Leave the module's parameter scope together with its name.
+                let params = self.parser.module_params.pop().unwrap_or_default();
+                for _ in &params {
+                    self.parser.term_env.remove(0);
+                }
                 Decl::ModuleEnd
             } else {
                 return Err(self.parser.error_here("'end' without a matching 'module'"));
             }
         } else if self.parser.consume_ident("inductive") {
+            self.parser.reject_inside_parameterized_module("datatype")?;
             self.parser.parse_data_decl()?
         } else if self.parser.consume_ident("record") {
+            self.parser.reject_inside_parameterized_module("record")?;
             let dt = self.parser.parse_record_decl()?;
             Decl::Record(dt)
         } else if self.parser.consume_ident("import") {
+            self.parser.reject_inside_parameterized_module("import")?;
             self.parser.parse_import()?
         } else {
             return Err(self.parser.error_here("expected top-level declaration"));
@@ -170,6 +204,7 @@ impl ProgramParser {
         match &decl {
             Decl::Def { .. } => {}
             Decl::Module { .. } | Decl::ModuleEnd => {}
+            Decl::ModuleInst { .. } => {}
             Decl::Data(dt) => self.parser.datatypes.push(dt.clone()),
             Decl::DataMutual(dts) => {
                 for dt in dts {
@@ -187,13 +222,46 @@ impl ProgramParser {
         Ok(Some(decl))
     }
 
-    /// Parse `module M where`: pushes the (qualified) module name onto the
-    /// parser's module stack. Under an aliased import the declaration is
-    /// ignored — the alias is the namespace.
+    /// Parse `module M where` / `module M (A : Type) where`: pushes the
+    /// (qualified) module name onto the parser's module stack together with
+    /// its parameter list. Parameter binders always enter `term_env` because
+    /// the block's definitions are parsed either way; under an aliased import
+    /// only the name-stack push is skipped (the alias folds the namespace),
+    /// and the matching parameter scope is dropped at the folded `end`.
     fn parse_module_decl(&mut self) -> Result<Decl, ParseError> {
         let raw = self
             .parser
             .expect_ident("expected module name after 'module'")?;
+        // Instantiation: `module N = M (e1) (e2)` — args are parenthesized so
+        // the declaration is self-delimiting.
+        if self.parser.consume(&TokenKind::Equals) {
+            if self.forced_prefix.is_some() {
+                return Err(self
+                    .parser
+                    .error_here("module instantiation inside an aliased import is not supported"));
+            }
+            if self.parser.inside_parameterized_module() {
+                return Err(self.parser.error_here(
+                    "module instantiation inside a parameterized module is not supported",
+                ));
+            }
+            let source_raw = self
+                .parser
+                .expect_ident("expected source module name after '='")?;
+            let mut args = Vec::new();
+            while self.parser.at(&TokenKind::LParen) {
+                self.parser.expect(TokenKind::LParen, "expected '('")?;
+                let arg = self.parser.parse_term()?;
+                self.parser
+                    .expect(TokenKind::RParen, "expected ')' after argument")?;
+                args.push(arg);
+            }
+            let name = self.parser.qualify(&raw);
+            let source = self.parser.resolve_module_source(&source_raw)?;
+            return Ok(Decl::ModuleInst { name, source, args });
+        }
+        // Optional parameter binders: `module M (A : Type) where`.
+        let params = self.parser.parse_module_binders()?;
         self.parser
             .expect_ident("expected 'where' after module name")
             .and_then(|keyword| {
@@ -203,7 +271,16 @@ impl ProgramParser {
                     Err(self.parser.error_here("expected 'where' after module name"))
                 }
             })?;
+        if !params.is_empty() && self.parser.inside_parameterized_module() {
+            return Err(self
+                .parser
+                .error_here("nested parameterized modules are not supported"));
+        }
         if self.forced_prefix.is_some() {
+            // Aliased import: the namespace is folded into the alias, so no
+            // name-stack entry — but the binder scope stays open until the
+            // block's `end`, exactly as for plain modules.
+            self.parser.module_params.push(params);
             return Ok(Decl::ModuleEnd);
         }
         // Qualify before pushing so the new segment isn't included.
@@ -211,7 +288,8 @@ impl ProgramParser {
         // The stack stores raw segments so `qualify` can join the full path
         // (`module Inner where` inside `module Outer where` → `Outer.Inner`).
         self.parser.module_stack.push(raw);
-        Ok(Decl::Module { name })
+        self.parser.module_params.push(params.clone());
+        Ok(Decl::Module { name, params })
     }
 
     /// Collect the name-position table accumulated while parsing the most
@@ -264,6 +342,7 @@ pub fn typecheck_program(
                 return Err("import requires a file path; use cubical::run instead".to_string());
             }
             Decl::Module { .. } | Decl::ModuleEnd => {}
+            Decl::ModuleInst { .. } => {}
             Decl::Data(dt) => {
                 // Check positivity before making the datatype available.
                 crate::cubical::syntax::check_datatype_positivity(&dt)

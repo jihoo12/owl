@@ -1,0 +1,24 @@
+-- Parameterized modules (defs-only): every def in the module is closed over
+-- the parameters, and sibling references inside apply them automatically.
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def one : Nat := suc zero
+
+module Semi (A : Type) where
+  def idty : A -> A := fun x => x
+  -- bare sibling reference `idty` means `(idty A)` here:
+  def twice_id : A -> A := fun x => idty (idty x)
+  -- unrelated globals (like `one`) stay unapplied:
+  def tag : A -> Nat := fun x => one
+end
+
+def two : Nat := suc one
+
+-- Instantiation: members of `NatSemi` are `Semi`'s defs at `A := Nat`,
+-- usable without re-applying the parameter.
+module NatSemi = Semi (Nat)
+
+def three : Nat := suc two
+def main : Nat := (NatSemi.twice_id three)

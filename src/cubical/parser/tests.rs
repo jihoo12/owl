@@ -100,9 +100,10 @@ fn parses_import_declaration() {
         let decls = parse_program("import \"foo.owl\"", session).unwrap();
         assert_eq!(decls.len(), 1);
         match &decls[0] {
-            Decl::Import { path, alias } => {
+            Decl::Import { path, alias, only } => {
                 assert_eq!(path, "foo.owl");
                 assert_eq!(alias, &None);
+                assert_eq!(only, &None);
             }
             _ => panic!("expected import declaration"),
         }
@@ -115,12 +116,60 @@ fn parses_aliased_import_declaration() {
         let decls = parse_program("import \"foo.owl\" as Foo", session).unwrap();
         assert_eq!(decls.len(), 1);
         match &decls[0] {
-            Decl::Import { path, alias } => {
+            Decl::Import { path, alias, only } => {
                 assert_eq!(path, "foo.owl");
                 assert_eq!(alias, &Some("Foo".to_string()));
+                assert_eq!(only, &None);
             }
             _ => panic!("expected import declaration"),
         }
+    });
+}
+
+#[test]
+fn parses_selective_import_declaration() {
+    with_session(|session| {
+        let decls = parse_program("import \"foo.owl\" only [add, M.Nat, zero,]", session).unwrap();
+        assert_eq!(decls.len(), 1);
+        match &decls[0] {
+            Decl::Import { path, alias, only } => {
+                assert_eq!(path, "foo.owl");
+                assert_eq!(alias, &None);
+                assert_eq!(
+                    only,
+                    &Some(vec![
+                        "add".to_string(),
+                        "M.Nat".to_string(),
+                        "zero".to_string()
+                    ])
+                );
+            }
+            _ => panic!("expected import declaration"),
+        }
+    });
+}
+
+#[test]
+fn parses_selective_aliased_import_declaration() {
+    with_session(|session| {
+        let decls = parse_program("import \"foo.owl\" as Foo only [x]", session).unwrap();
+        assert_eq!(decls.len(), 1);
+        match &decls[0] {
+            Decl::Import { path, alias, only } => {
+                assert_eq!(path, "foo.owl");
+                assert_eq!(alias, &Some("Foo".to_string()));
+                assert_eq!(only, &Some(vec!["x".to_string()]));
+            }
+            _ => panic!("expected import declaration"),
+        }
+    });
+}
+
+#[test]
+fn selective_import_requires_bracket_list() {
+    with_session(|session| {
+        let err = parse_program("import \"foo.owl\" only add", session).unwrap_err();
+        assert!(err.message.contains("'['"), "got: {}", err.message);
     });
 }
 
@@ -136,7 +185,10 @@ fn parses_module_declaration() {
         .unwrap();
         assert_eq!(decls.len(), 3);
         match &decls[0] {
-            Decl::Module { name } => assert_eq!(name, "M"),
+            Decl::Module { name, params } => {
+                assert_eq!(name, "M");
+                assert!(params.is_empty());
+            }
             _ => panic!("expected module declaration"),
         }
         match &decls[1] {
@@ -144,6 +196,138 @@ fn parses_module_declaration() {
             _ => panic!("expected def inside module"),
         }
         assert_eq!(decls[2], Decl::ModuleEnd);
+    });
+}
+
+#[test]
+fn parses_parameterized_module_declaration() {
+    with_session(|session| {
+        let decls = parse_program(
+            "module M (A : Type) where\n\
+             def id : A -> A := fun x => x\n\
+             end",
+            session,
+        )
+        .unwrap();
+        assert_eq!(decls.len(), 3);
+        match &decls[0] {
+            Decl::Module { name, params } => {
+                assert_eq!(name, "M");
+                assert_eq!(params, &vec![("A".to_string(), Term::TUniv(0))]);
+            }
+            _ => panic!("expected parameterized module declaration"),
+        }
+        // The def is closed over `A`: type `Pi (A : Type). A -> A`. The
+        // arrow desugars to a Pi with a `"_"` phantom binder, so the body's
+        // `A` references sit at index 1 under [A, _].
+        match &decls[1] {
+            Decl::Def { name, ty, val, .. } => {
+                assert_eq!(name, "M.id");
+                assert_eq!(
+                    ty,
+                    &Term::TPi(
+                        "A".into(),
+                        Box::new(Term::TUniv(0)),
+                        Box::new(Term::TPi(
+                            "_".into(),
+                            Box::new(Term::TVar(0)),
+                            Box::new(Term::TVar(1))
+                        ))
+                    )
+                );
+                assert_eq!(
+                    val,
+                    &Term::TAbs(
+                        "A".into(),
+                        Box::new(Term::TAbs("x".into(), Box::new(Term::TVar(0))))
+                    )
+                );
+            }
+            _ => panic!("expected def inside parameterized module"),
+        }
+    });
+}
+
+#[test]
+fn parses_module_param_sibling_autoapplication() {
+    with_session(|session| {
+        let decls = parse_program(
+            "module M (A : Type) where\n\
+             def f : A -> A := fun x => x\n\
+             def g : A -> A := fun x => f x\n\
+             end",
+            session,
+        )
+        .unwrap();
+        assert_eq!(decls.len(), 4);
+        // Inside `g`, the bare sibling reference `f` resolves to `M.f`
+        // applied to the in-scope parameter variable.
+        match &decls[2] {
+            Decl::Def { val, .. } => {
+                // fun A => fun x => ((M.f A) x)  — global ref at index
+                // term_env.len() (=1 here: A and x), plus its global slot,
+                // applied to A (TVar(1)) first.
+                match val {
+                    Term::TAbs(_, bx) => match &**bx {
+                        Term::TAbs(_, bbody) => match &**bbody {
+                            // ((M.f A) x): outer arg is x (TVar(0)), the
+                            // parameter A (TVar(1)) is applied to M.f first.
+                            Term::TApp(inner, xarg) => {
+                                assert!(matches!(**xarg, Term::TVar(0)));
+                                match inner.as_ref() {
+                                    Term::TApp(g, a) => {
+                                        assert!(matches!(**a, Term::TVar(1)));
+                                        assert!(matches!(**g, Term::TVar(_)));
+                                    }
+                                    other => panic!("expected applied global, got {other:?}"),
+                                }
+                            }
+                            other => panic!("expected application, got {other:?}"),
+                        },
+                        other => panic!("expected lambda, got {other:?}"),
+                    },
+                    other => panic!("expected lambda, got {other:?}"),
+                }
+            }
+            _ => panic!("expected def"),
+        }
+    });
+}
+
+#[test]
+fn rejects_datatype_inside_parameterized_module() {
+    with_session(|session| {
+        let err = parse_program(
+            "module M (A : Type) where\n\
+             inductive T where | mk : T\n\
+             end",
+            session,
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("not supported"),
+            "got: {}",
+            err.message
+        );
+    });
+}
+
+#[test]
+fn rejects_nested_parameterized_modules() {
+    with_session(|session| {
+        let err = parse_program(
+            "module M (A : Type) where\n\
+             module N (B : Type) where\n\
+             end\n\
+             end",
+            session,
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("nested parameterized"),
+            "got: {}",
+            err.message
+        );
     });
 }
 

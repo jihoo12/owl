@@ -4,6 +4,131 @@
 
 ## Completed (implementation log)
 
+- [x] **Module instantiation — `module N = M (e1) ... (en)`.** Parser (`parse_module_decl`):
+  after the name, an `=` switches to the instantiation form — source module name resolved
+  to its full dotted path by `resolve_module_source` (innermost-qualified candidates first,
+  accepted when it prefixes known globals), then self-delimiting parenthesized arguments;
+  new `Decl::ModuleInst { name, source, args }`. Driver: `instantiate_module` expands the
+  declaration into ordinary definitions `N.x : ann := spine` fed through `process_def`, so
+  the kernel re-checks every expansion. Two non-obvious mechanics: (1) the annotation is
+  computed by asking the typechecker to INFER the applied spine in the pre-insert layout —
+  inference validates each argument against its domain and returns the concrete
+  instantiated type, which passes `process_def`'s universe check; neither term-level
+  application to an embedded Pi (ill-typed) nor NbE evaluation (do_apply intentionally
+  blocks on VPi) can produce it; (2) the value spine references the source member at
+  `idx + 1` because `process_def` front-inserts this very member before checking its body —
+  the syntactic spine only needs to be valid for that immediate check. Members expand
+  oldest-first with per-member index recomputation; nested members rejected in v1; partial
+  instantiation falls out naturally (members stay Pi over unapplied parameters); aliased
+  imports reject instantiation (no modules exist under folding). Instantiated names sync
+  back via `parser.sync_from_env` so later declarations resolve them.
+  Verified: driver tests `run_module_instantiation_typechecks_and_computes`
+  (parameterized source, computes), `run_module_instantiation_of_plain_module`;
+  `examples/module_params.owl` extended (`NatSemi.twice_id three` → `3`); smoke-tested
+  partial application and plain-module case manually; full `cargo test` **227 green**;
+  docs/reference.md §13 updated.
+
+- [x] **Module parameters — `module M (A : Type) where ... end` (defs-only v1).** Parser:
+  `parse_module_decl` (`src/cubical/parser/mod.rs`) accepts binder lists via new
+  `parse_module_binders` (`src/cubical/parser/grammar.rs`, record-parameter style:
+  front-inserted into `term_env`, last binder at index 0); `module_params: Vec<Vec<(Name,
+  Term)>>` runs parallel to `module_stack`; `Decl::Module` gained `params`. Two de Bruijn
+  subtleties handled explicitly: (1) each parsed parameter type is weakened by
+  `shift(-1,0)` because it was parsed in a layout containing its own binder while the final
+  Pi-chain places it *before* that binder; (2) sibling auto-application
+  (`apply_module_params`) computes parameter-variable indices relative to the **current**
+  `term_env` depth (`L-1-i` for the i-th declared parameter) since references may sit under
+  additional local binders — the first cut used static offsets and was wrong for multi-param
+  modules under lambdas. Semantics: every def inside is closed over the params
+  (`wrap_with_module_params`: `Pi` on the annotation, `TAbs` on the value — body indices
+  already match the leading-binder layout), so consumers instantiate by ordinary application
+  (`((Semi.twice_id Nat) two)`); bare sibling refs inside resolve to the qualified global
+  applied to in-scope param vars; unrelated globals stay unapplied. Restrictions (clear
+  parse errors): no nested parameterized modules; no datatypes/records/imports inside.
+  Aliased imports interoperate: module headers are folded as before but their binder scopes
+  still open/close around the body (folded-scope pop at `end` when
+  `module_params.len() > module_stack.len()`). Kernel/typechecker untouched — wrapped defs
+  are ordinary Pi-typed globals. Verified: parser tests
+  `parses_parameterized_module_declaration` (exact wrapped shapes),
+  `parses_module_param_sibling_autoapplication`,
+  `rejects_datatype_inside_parameterized_module`, `rejects_nested_parameterized_modules`;
+  driver tests `run_parameterized_module_defs_typecheck_and_compute`
+  (computes: `(Semi.twice_id Nat) one` → `2`),
+  `run_parameterized_module_rejects_datatype_inside`,
+  `run_aliased_import_folds_parameterized_module_member` (plain keeps `Semi.idty`, alias
+  folds to `P.idty`); `examples/module_params.owl` + sweep guard; multi-param smoke test
+  with value-typed second parameter evaluates correctly; full `cargo test` **225 green**;
+  docs/reference.md §13 updated.
+
+- [x] **Unification of same-name imports — provenance-based conflict detection.** The
+  driver now threads two registries (`def_sources`/`dt_sources: HashMap<Name, PathBuf>`)
+  mapping every imported name to its **defining file's canonical path**
+  (`note_imported_def`/`note_imported_dt`, registered per-declaration in
+  `process_file_source` with an `origin: Option<&Path>` parameter; `None` for the root
+  file). Policy: (1) import-vs-import collisions across **different** files are hard
+  `RunError::Import` errors naming both sources and the remedies — silently shadowing used
+  to make later declarations depend on import order; (2) re-merges of the **same** file are
+  tolerated (diamond imports, several `only [...]` selections of one library) because
+  origins track the defining file, not the importer — a transitive merge inside A then a
+  direct merge of the same file share one origin; (3) **local definitions may still shadow
+  imported names** (innermost-wins), preserving long-standing behavior like defining
+  `main` after an import; (4) hiding via `only [...]` suppresses registration entirely, so
+  unselected names never participate in conflicts — selection is itself a disambiguation
+  mechanism. Content-based definitional-equality unification was considered and rejected:
+  stored terms from separate merges normalize with different global-reference anchoring
+  (stuck eliminators quote case bodies relative to their captured env), so "definitionally
+  equal at merge time" is not reliably decidable without fragile level-mapping; explicit
+  `as`/`only` is the documented route instead. Cycle detection also moved to per-canonical-
+  path keys (Phase 1). Verified: driver tests `run_same_name_imports_from_different_files_rejected`
+  (conflict even for byte-identical texts, three-file layout so only `double` collides),
+  `run_diamond_import_of_same_file_tolerated`, `run_conflicting_imported_definitions_rejected`
+  (confa transitively merged through confb — single Nat origin — while confb's differing
+  `helper` conflicts), `run_conflicting_imported_datatypes_rejected`; existing import tests
+  and all lib/example guards unaffected (ring_laws ∩ field_laws = ∅); full `cargo test`
+  **218 green**; docs/reference.md §13 updated.
+
+- [x] **Selective imports — `import "f.owl" only [x, M.y]`.** Grammar (`parse_import` +
+  new `parse_only_list` in `src/cubical/parser/grammar.rs`) accepts an optional
+  `only [a, b.c,]` clause after the path/alias: bracketed comma-separated dotted names,
+  trailing comma and empty list allowed; `Decl::Import` gained `only: Option<Vec<Name>>`.
+  Driver semantics (**visibility pruning**, `src/cubical/driver.rs`): the imported file is
+  processed **fully** (de Bruijn indices are assigned from declaration order at parse time,
+  so dropping decls would corrupt every later reference), then each of *its own* declarations
+  that is not selected is hidden — defs by **renaming** to a NUL-prefixed unmatchable name
+  (`hide_front_def`; names are cosmetic labels, positions are what matter), datatypes by
+  **removal** from `env.datatypes` (`prune_datatypes`; lookup is by name). Selection entries
+  are dotted paths relative to the file's top level, pre-aliasing (`import_selection_selected`
+  strips the forced-alias prefix): entry matches exactly or as module-path prefix, so
+  `only [M]` keeps all of module `M`, `only [M.x]` one member. Transitive imports inside the
+  selected file are unaffected (their decls bypass this file's pruning hooks). Consequence:
+  dependencies must be listed (`only [Nat, add]`, not just `add`) — referencing a hidden or
+  dropped name fails loudly at its point of use, never mis-resolves. Dedup key extended to
+  `(canonical path, alias, sorted selection)` (`loaded_tag`) so different selections load
+  separately; circular-import detection moved to per-canonical-path keys (alias/selection
+  keys would miss same-file cycles through different selections). Verified: parser tests
+  `parses_selective_import_declaration`, `parses_selective_aliased_import_declaration`,
+  `selective_import_requires_bracket_list`; driver tests `run_selective_import_keeps_selected_names`,
+  `run_selective_import_hides_unselected_names`, `run_selective_import_module_member_selection`,
+  `run_selective_import_avoids_name_collisions` (two libs exposing same-named `helper`
+  coexist via disjoint selections); full `cargo test` **214 green**; docs/reference.md §13 updated.
+
+- [x] **Module & import system basics landed (`module M where`, file imports, aliased imports).**
+  Commit `a99fe11`. Modules are lexical namespaces over the flat de Bruijn global env:
+  `module M where ... end` prefixes every subsequent declaration's name with `M.` (nested
+  modules compose: `Outer.Inner.T`), and unqualified references resolve innermost-module-first
+  then enclosing modules then top level (`qualified_candidates`/`resolve_dotted` in
+  `src/cubical/parser/grammar.rs`). Dotted references (`M.x`, `M.Nat.zero`,
+  datatype-qualified constructors `Nested.mk`) resolve through `resolve_dotted`. File imports
+  merge whole files recursively into one env (`load_import`, `src/cubical/driver.rs`):
+  `import "f.owl"` keeps the file's own names; `import "f.owl" as A` forces the `A.` namespace,
+  folding the file's own module segments away. Dedup key is `(canonical path, alias)` so the
+  same file can be imported under several aliases; circular imports are detected via a loading
+  set. Verified by driver tests `run_with_import_merges_declarations`,
+  `run_reports_circular_import`, `run_aliased_import_qualifies_names`,
+  `run_nested_modules_and_aliased_folding` and parser tests `parses_import_declaration`,
+  `parses_aliased_import_declaration`, `parses_module_declaration`,
+  `import_without_string_is_parse_error`; documented in `docs/reference.md` §13.
+
 - [x] **Split the 7,192-line `nbe/mod.rs` into focused submodules.** Pure code motion — no logic changes — along the file's natural section boundaries: `value.rs` (runtime types: `Scope`, `Value`, `Neutral`, closures, `Globals`), `eval.rs` (`eval_nbe`, `subst_interval_var`, `eval_system`), `elim.rs` (`do_force/apply/papp/fst/snd/proj/elim`, `reduce_con_at_endpoint`, `stuck_elim`), `transport.rs` (`do_transport`, per-shape `transport_*`, `uses_var_at_level`, `transport_term_fallback`), `hcomp.rs` (`do_hcomp/comp/fill/hfill`, tube-coherence helpers), `quote.rs` (`quote` family + depth guard, `level_to_var`), `meta.rs` (`meta_mentions`, `try_solve_meta`, `zonk`, term-children walkers), and `util.rs` (cross-cutting helpers: `value_to_dnf`, `value_to_endpoint`, `do_equiv_fwd`, `equiv_dom_value`). `mod.rs` is now a ~160-line facade: module docs, re-exports preserving the historical flat API (`crate::cubical::nbe::*` unchanged for all external callers — none needed editing), and the top-level entry points (`normalize`, `nbe_eval`, `nbe_eval_with_globals`, `nbe_eval_ctx`). Cross-module items that were private use `pub(super)` so nothing new leaks into the crate API; the re-export block carries an annotated `#[allow(unused_imports)]` because some exports are external/test-only API in a binary crate. Also deleted the dead helper `find_system_entry_at_endpoint` (zero callers). The nbe unit tests moved verbatim to `tests.rs` (`#[cfg(test)] mod tests`). Verified: `cargo build` clean (0 warnings), `cargo fmt --check` clean, full `cargo test` **207 green** (including the slow field/ring suites), spot checks `cargo run -- check examples/{nat,nat_path_algebra,partial_elements}.owl` OK; rust-analyzer-db rescanned.
 
 - [x] **Consolidated thread-local state into a single `Session` struct.** All 14 scattered `thread_local!` blocks (across `nbe/mod.rs`, `typechecker/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs`, `equality.rs`, `nbe/trace.rs`) are now behind one `thread_local! { static SESSION: RefCell<Session> }` in `src/cubical/session.rs`. The `Session` struct holds all mutable shared state: NbE globals/cache/depth guards, metavariable solutions/names/expected types, typechecker flags (`skip_plam_endpt`, `skip_guard`, `current_def`), elim-case recursion depth, error positions, and debug trace. Public accessor functions (`set_current_dts`, `current_dts`, `set_current_globals`, `fresh_meta_id`, `should_skip_guard`, etc.) preserve the existing API — callers continue to use the same function names, which now delegate to `Session` fields. This eliminates hidden coupling between modules (the typechecker and NbE evaluator no longer communicate through separate implicit channels), removes the error-prone manual save/restore patterns for thread-locals, and makes all shared state visible in one place. 9 files changed, net -123 lines. Full `cargo test` **207 green** (previously 207). Future work: thread `&mut Session` through function signatures to make state explicit in the call graph.
@@ -131,12 +256,31 @@ discharge routine algebraic/arithmetic goals in one line instead of writing them
 
 Needed for organizing larger codebases/libraries; not blocking for single-file examples.
 
-- [ ] `module M where ...` — basic namespace declaration. *(🟡)*
-- [ ] Module parameters. *(🟢 — depends on basic modules first.)*
-- [ ] Module instantiation. *(🟢 — depends on module parameters.)*
-- [ ] Qualified imports (`import M as mod`). *(🟡)*
-- [ ] Selective imports (`import M only [x, y]`). *(🟢)*
-- [ ] Unification of same-name imports. *(🟢)*
+- [x] `module M where ...` — basic namespace declaration. *(🟡)* Implemented in commit
+  `a99fe11` (see the implementation-log entry at the top of this file); remaining §D work:
+  module parameters/instantiation, selective imports, same-name unification.
+- [x] Module parameters. *(🟢 — depends on basic modules first.)* Implemented defs-only:
+  every def in `module M (A : Type) where` is closed over the params, sibling refs
+  auto-apply them, consumers instantiate by application; datatypes/records/imports and
+  nesting inside parameterized modules are rejected with clear errors — see the
+  implementation-log entry at the top of this file and `docs/reference.md` §13.
+- [x] Module instantiation. *(🟢 — depends on module parameters.)* Implemented as
+  driver-side expansion to kernel-checked definitions: `module N = M (args)` re-defines
+  each member with the args applied (annotation via typechecker inference of the applied
+  spine, value as a reference-spine); partial instantiation works, nested members rejected
+  in v1 — see the implementation-log entry at the top of this file and
+  `docs/reference.md` §13.
+- [x] Qualified imports (`import M as mod`). *(🟡)* Implemented file-based in commit
+  `a99fe11`: `import "f.owl" as A` forces the `A.` namespace (folding the file's own module
+  segments), plain `import "f.owl"` merges names as-is; see `docs/reference.md` §13.
+- [x] Selective imports (`import M only [x, y]`). *(🟢)* Implemented as visibility pruning
+  over the fully-processed import (defs renamed out of the way, datatypes removed); entries
+  are pre-alias dotted paths, module-prefix matching included; see the implementation-log
+  entry at the top of this file and `docs/reference.md` §13.
+- [x] Unification of same-name imports. *(🟢)* Implemented as provenance-based conflict
+  detection: different defining files claiming one visible name → hard error; same-file
+  re-merges and local shadowing allowed; `only [...]` hiding suppresses participation. See
+  the implementation-log entry at the top of this file and `docs/reference.md` §13.
 
 ### E. Proof Assistant UX 🟡
 

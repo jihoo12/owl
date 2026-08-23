@@ -2087,6 +2087,7 @@ fun A B a b => a
 ```
 import "relative/path/to/file.owl"            -- merge names as-is
 import "relative/path/to/file.owl" as A       -- alias: force the `A.` namespace
+import "relative/path/to/file.owl" only [x, M.y]  -- selective import
 ```
 
 Imports read and process another Owl file, making all its definitions and
@@ -2099,6 +2100,26 @@ This is how two libraries that both define `Nat` can coexist. A file whose
 top-level names are already inside `module` blocks is **folded** into the
 alias: from `import "outer.owl" as O`, a datatype `Outer.Inner.T` is available
 as `O.T` (the file's module segments are dropped).
+
+**Selective imports** (`only [x, M.y]`) expose exactly the chosen names and
+hide everything else the file declares. The list holds dotted paths relative
+to the imported file's top level (its own module prefixes, not an import
+alias): `only [Nat]` keeps the datatype `Nat`; `only [M.one]` keeps that one
+declaration inside module `M`; `only [M]` keeps everything in module `M`.
+Combining with an alias works — selection matches pre-alias names:
+`import "f.owl" as L only [x]` exposes `L.x`.
+
+Semantics worth knowing:
+
+- Selecting a declaration does **not** pull in its dependencies. If you keep a
+  function whose type mentions datatype `Nat`, list `Nat` too; referencing a
+  hidden (or dropped) name fails with a resolution/type error at its point of
+  use. Hidden definitions are never silently mis-resolved.
+- Transitive imports (`import`s written inside the imported file) are not
+  affected by your `only` clause — they load fully under their own namespaces.
+- Each distinct `(file, alias, selection)` combination loads once; importing
+  the same file with two different selections merges it twice with different
+  visibility.
 
 ### Modules
 
@@ -2124,6 +2145,40 @@ A `module M where ... end` block namespaces everything declared inside it:
 - Constructors are qualified by their datatype's module (`Nested.mk`).
 - Consumer code references the full dotted path: `MyModule.Nested.T`.
 
+**Parameterized modules** (defs-only):
+
+```
+module Semi (A : Type) where
+  def idty : A -> A := fun x => x
+  -- bare sibling reference `idty` means `(idty A)` here:
+  def twice_id : A -> A := fun x => idty (idty x)
+end
+
+def v : Nat := ((Semi.twice_id Nat) two)
+```
+
+- Every def inside is closed over the parameters: `Semi.idty` has type
+  `(A : Type) -> A -> A`. Consumers instantiate explicitly by application.
+- Inside the module, references to *sibling members* automatically apply the
+  in-scope parameters, so bodies read as if the parameters were fixed.
+  Unrelated globals are left untouched.
+- Plain modules may nest inside parameterized ones; parameterized modules may
+  not nest, and datatypes, records, and imports are rejected inside them.
+
+**Module instantiation**:
+
+```
+module NatSemi = Semi (Nat)
+
+def v : Nat := (NatSemi.twice_id three)   -- no parameter application needed
+```
+
+`module N = M (e1) ... (en)` defines every member of `M` as `N.<member>`,
+with the arguments applied: each expansion is an ordinary definition that the
+kernel re-checks. Partial instantiations are allowed (fewer arguments than
+parameters leave the remaining ones in place). Instantiating a module with
+nested modules inside is not supported.
+
 **Portability rule**: a library file intended for aliased import should use
 unqualified self-references inside its `module` blocks (write `T`, not
 `Outer.Inner.T`) — under an alias the file's own module segments are dropped,
@@ -2136,10 +2191,19 @@ so qualified self-references would dangle.
    current environment
 3. Subsequent declarations in the current file can reference imported names
 4. Circular imports are detected and rejected with an error
+5. **Same-name conflicts are rejected**: when two *different* files define the
+   same top-level name and both are merged visibly, the second import fails
+   with a conflict error instead of silently shadowing. Re-merges of the same
+   file (diamond imports, several `only [...]` selections) are fine, since
+   origins track the defining file. Local definitions may still shadow
+   imported names. Use `as` aliases or `only [...]` selections to bring both
+   libraries together; hiding a name via `only` also suppresses its conflict
+   participation.
 
-Each file is processed once per (canonical path, alias) pair: importing the
-same file twice with different aliases creates two separate namespaces;
-importing it under the same alias twice is a no-op.
+Each file is processed once per (canonical path, alias, selection) triple:
+importing the same file twice with different aliases creates two separate
+namespaces; importing it under the same alias and selection twice is a no-op.
+Circular imports are detected per canonical path and rejected with an error.
 
 ### Example
 
