@@ -293,3 +293,136 @@ def mul_0_l : forall (a : Nat), Path Nat (mul zero a) zero := fun a => <i> zero
 def mul_0_r : forall (a : Nat), Path Nat (mul a zero) zero := _owl_mul_zero_r
 def mul_add_l : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (mul a (add b c)) (add (mul a b) (mul a c)) := _owl_mul_add_l
 def mul_add_r : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (mul (add a b) c) (add (mul a c) (mul b c)) := _owl_mul_add_r
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Part 4 — integer algebra (first batch)
+-- ══════════════════════════════════════════════════════════════════════════
+--
+-- Congruence glue and the integer identities whose proofs are direct: case
+-- analysis reducing to the Part-1 natural-number lemmas, or branches that
+-- hold definitionally.  Heavier laws (associativity of int_add,
+-- distributivity, int_mul_assoc) are deferred; see TODO.md §H3.
+
+def int_trans : forall (a : Int), forall (b : Int), forall (c : Int),
+  Path Int a b -> Path Int b c -> Path Int a c :=
+  fun a b c p q => <i> hcomp Int [~i => <j> a, i => q] (p @ i)
+
+def int_sym : forall (a : Int), forall (b : Int), Path Int a b -> Path Int b a :=
+  fun a b p => <i> p @ ~i
+
+def int_cong_add_l : forall (a : Int), forall (b : Int), forall (n : Int),
+  Path Int a b -> Path Int (int_add a n) (int_add b n) :=
+  fun a b n p => <i> int_add (p @ i) n
+
+def int_cong_add_r : forall (a : Int), forall (b : Int), forall (m : Int),
+  Path Int a b -> Path Int (int_add m a) (int_add m b) :=
+  fun a b m p => <i> int_add m (p @ i)
+
+def int_cong_neg : forall (a : Int), forall (b : Int),
+  Path Int a b -> Path Int (int_neg a) (int_neg b) :=
+  fun a b p => <i> int_neg (p @ i)
+
+def int_cong_mul_l : forall (a : Int), forall (b : Int), forall (n : Int),
+  Path Int a b -> Path Int (int_mul a n) (int_mul b n) :=
+  fun a b n p => <i> int_mul (p @ i) n
+
+def int_cong_mul_r : forall (a : Int), forall (b : Int), forall (m : Int),
+  Path Int a b -> Path Int (int_mul m a) (int_mul m b) :=
+  fun a b m p => <i> int_mul m (p @ i)
+
+-- Adding the integer zero on the left: both branches compute positionally,
+-- but the scrutinee is the neutral `a`, so the proof case-splits.
+def int_add_0_l : forall (a : Int), Path Int (int_add int_zero a) a :=
+  fun a =>
+    match a return Path Int (int_add int_zero a) a with
+    | pos y => <i> pos y
+    | negsuc y => <i> negsuc y
+
+-- nat_add x zero = x, by induction (bridge for the right-zero law).
+def _owl_nat_add_zero_r : forall (x : Nat), Path Nat (nat_add x zero) x :=
+  fun x =>
+    match x return Path Nat (nat_add x zero) x with
+    | zero => <i> zero
+    | suc x' => <i> suc ((_owl_nat_add_zero_r x') @ i)
+
+-- Adding the integer zero on the right: the pos branch needs the natural
+-- bridge above; the negsuc branch holds definitionally.
+def int_add_0_r : forall (a : Int), Path Int (int_add a int_zero) a :=
+  fun a =>
+    match a return Path Int (int_add a int_zero) a with
+    | pos x => <i> pos ((_owl_nat_add_zero_r x) @ i)
+    | negsuc x => <i> negsuc x
+
+-- Additive commutativity: the mixed-sign cases agree definitionally (both
+-- reduce to `_owl_add_pos_neg x y`); the same-sign cases commute inside the
+-- constructor via the natural-number lemma.
+def int_add_comm : forall (a : Int), forall (b : Int),
+  Path Int (int_add a b) (int_add b a) :=
+  fun a b =>
+    match a return Path Int (int_add a b) (int_add b a) with
+    | pos x =>
+      match b return Path Int (int_add (pos x) b) (int_add b (pos x)) with
+      | pos y => <i> pos ((_owl_add_comm x y) @ i)
+      | negsuc y => <i> int_add (pos x) (negsuc y)
+    | negsuc x =>
+      match b return Path Int (int_add (negsuc x) b) (int_add b (negsuc x)) with
+      | pos y => <i> int_add (negsuc x) (pos y)
+      | negsuc y => <i> negsuc (suc ((_owl_add_comm x y) @ i))
+
+-- Double negation: both branches compute positionally.
+def int_neg_neg : forall (a : Int), Path Int (int_neg (int_neg a)) a :=
+  fun a =>
+    match a return Path Int (int_neg (int_neg a)) a with
+    | pos x =>
+      match x return Path Int (int_neg (int_neg (pos x))) (pos x) with
+      | zero => <i> pos zero
+      | suc x' => <i> pos (suc x')
+    | negsuc x => <i> negsuc x
+
+-- Multiplicative commutativity: mixed-sign cases agree definitionally (both
+-- sides reduce to the same `_owl_MPN` application); same-sign cases commute
+-- via the natural-number lemma.
+def int_mul_comm : forall (a : Int), forall (b : Int),
+  Path Int (int_mul a b) (int_mul b a) :=
+  fun a b =>
+    match a return Path Int (int_mul a b) (int_mul b a) with
+    | pos x =>
+      match b return Path Int (int_mul (pos x) b) (int_mul b (pos x)) with
+      | pos y => <i> pos ((_owl_mul_comm x y) @ i)
+      | negsuc y => <i> int_mul (pos x) (negsuc y)
+    | negsuc x =>
+      match b return Path Int (int_mul (negsuc x) b) (int_mul b (negsuc x)) with
+      | pos y => <i> int_mul (negsuc x) (pos y)
+      | negsuc y => <i> pos ((_owl_mul_comm (suc x) (suc y)) @ i)
+
+-- Multiplying by the integer zero on the left: both branches compute.
+def int_mul_0_l : forall (a : Int), Path Int (int_mul int_zero a) int_zero :=
+  fun a =>
+    match a return Path Int (int_mul int_zero a) int_zero with
+    | pos y => <i> pos zero
+    | negsuc y => <i> pos zero
+
+-- Multiplying by the integer zero on the right: the pos branch lifts the
+-- natural `_owl_mul_zero_r`; the negsuc branch computes to +0.
+def int_mul_0_r : forall (a : Int), Path Int (int_mul a int_zero) int_zero :=
+  fun a =>
+    match a return Path Int (int_mul a int_zero) int_zero with
+    | pos x => <i> pos ((_owl_mul_zero_r x) @ i)
+    | negsuc x => <i> pos zero
+
+-- Multiplying by the integer one on the left: both branches compute
+-- positionally (nat_mul (suc zero) y unfolds definitionally).
+def int_mul_1_l : forall (a : Int), Path Int (int_mul int_one a) a :=
+  fun a =>
+    match a return Path Int (int_mul int_one a) a with
+    | pos y => <i> pos y
+    | negsuc y => <i> negsuc y
+
+-- Multiplying by the integer one on the right: the pos branch lifts
+-- `_owl_mul_one_r`; the negsuc branch reduces definitionally to `negsuc x`
+-- (the scratch multiplication collapses to `suc x`).
+def int_mul_1_r : forall (a : Int), Path Int (int_mul a int_one) a :=
+  fun a =>
+    match a return Path Int (int_mul a int_one) a with
+    | pos x => <i> pos ((_owl_mul_one_r x) @ i)
+    | negsuc x => <i> negsuc x

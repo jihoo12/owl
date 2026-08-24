@@ -1,0 +1,90 @@
+-- `by omega` over the concrete integers.
+--
+-- lib/ring_laws.owl defines Int = pos : Nat -> Int | negsuc : Nat -> Int
+-- (pos n = n, negsuc n = -(n+1)) with int_add / int_neg / int_sub / int_mul.
+-- Exercises both tiers of the omega decision procedure over this carrier:
+--   1. definitional reflexivity (unfolding the Int operations on
+--      constructor-headed arguments),
+--   2. direct application of a previously verified global lemma.
+
+import "../lib/ring_laws.owl"
+
+-- Shorthands for readability.
+def int0 : Int := pos zero
+def int1 : Int := pos (suc zero)
+def int2 : Int := pos (suc (suc zero))
+def mint1 : Int := negsuc zero
+def mint2 : Int := negsuc (suc zero)
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Tier 1 — definitional computation
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- 1 + (-1) = 0:  pos x + negsuc y with y = 0 lands on pos x with x = 0.
+def int_add_pn : Path Int (int_add int1 mint1) int0 :=
+  by omega
+
+-- -(2) = -2:  _owl_nat_neg walks suc n' to negsuc n'.
+def int_neg_pos : Path Int (int_neg int2) mint2 :=
+  by omega
+
+-- Double negation:  -(-2) = 2.
+def int_neg_neg : Path Int (int_neg (int_neg int2)) int2 :=
+  by omega
+
+-- Subtraction is addition of the negation:  1 - 2 = -1.
+def int_sub_compute : Path Int (int_sub int1 int2) mint1 :=
+  by omega
+
+-- 1 + (-2) = -1:  pos 1 + negsuc 1 → _owl_add_pos_neg 1 1 → suc/suc → -1.
+def int_add_cross : Path Int (int_add int1 mint2) mint1 :=
+  by omega
+
+-- Two negatives add to a deeper negative:  -1 + -1 = -2.
+def int_add_nn : Path Int (int_add mint1 mint1) mint2 :=
+  by omega
+
+-- Multiplication by sign:  (-1) · 2 = -2.
+def int_mul_sign : Path Int (int_mul mint1 int2) mint2 :=
+  by omega
+
+-- Negative × negative = positive:  (-1) · (-2) = 2.
+def int_mul_nn : Path Int (int_mul mint1 mint2) int2 :=
+  by omega
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Tier 2 — lemma matching
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- Helper: nat_add x zero = x (proved by induction here).
+def _owl_nat_add_zero_r : forall (x : Nat), Path Nat (nat_add x zero) x :=
+  fun x =>
+    match x return Path Nat (nat_add x zero) x with
+    | zero => <i> zero
+    | suc x' => <i> suc ((_owl_nat_add_zero_r x') @ i)
+
+-- A verified helper over Int: adding the integer zero on the right computes
+-- positionally on the left argument.
+def _owl_int_add_0_r : forall (a : Int), Path Int (int_add a int0) a :=
+  fun a =>
+    match a return Path Int (int_add a int0) a with
+    | pos x => <i> pos ((_owl_nat_add_zero_r x) @ i)
+    | negsuc x => <i> negsuc x
+
+-- Helper used above: nat_add x zero = x (proved by induction here).
+def _owl_nat_add_zero_r : forall (x : Nat), Path Nat (nat_add x zero) x :=
+  fun x =>
+    match x return Path Nat (nat_add x zero) x with
+    | zero => <i> zero
+    | suc x' => <i> suc ((_owl_nat_add_zero_r x') @ i)
+
+-- Lemma matching over Int: omega finds `_owl_int_add_0_r`.
+def int_add_0_by_omega : forall (a : Int), Path Int (int_add a int0) a :=
+  by intro a; omega
+
+-- Lemma matching still works over Nat in the same file (carrier
+-- coexistence): omega applies ring_laws' `_owl_add_comm` with swapped
+-- variables.
+def nat_comm_by_omega :
+  forall (m : Nat), forall (n : Nat), Path Nat (nat_add n m) (nat_add m n) :=
+  by intro m n; omega

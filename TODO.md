@@ -4,6 +4,30 @@
 
 ## Completed (implementation log)
 
+- [x] **H3 — Int `by omega` + first batch of integer algebra in lib/ring_laws.owl.**
+  **omega over Int** (`src/cubical/omega.rs`): the tactic's machinery (definitional
+  reflexivity + lemma-instance matching with argument permutations) was already
+  carrier-agnostic — only the goal check hardcoded `TData("Nat")`. It now accepts a carrier
+  whitelist (`Nat`, `Int`) via `supported_carrier`, with error messages naming the carrier.
+  `examples/int_demo.owl` exercises both tiers over Int: eight definitional-computation
+  goals (`int_add` across sign combinations, `int_neg` double negation, `int_sub`,
+  `int_mul` sign cases) plus two lemma-matching goals, and a Nat lemma-matching goal in the
+  same file to prove carrier coexistence. **Int algebra** (`lib/ring_laws.owl` Part 4,
+  ten new proofs): congruence glue (`int_trans/sym`, `int_cong_add_l/r`, `int_cong_neg`,
+  `int_cong_mul_l/r`), `int_add_0_l/r` (the left law case-splits because the outer match is
+  stuck on the neutral argument; the right law lifts `_owl_nat_add_zero_r`), `int_add_comm`
+  (mixed-sign branches agree definitionally on `_owl_add_pos_neg`; same-sign lift
+  `_owl_add_comm`), `int_neg_neg` (inner case-split; both branches compute), `int_mul_comm`
+  (mixed-sign both reduce to the same `_owl_MPN` application), and unit/zero multiplication
+  laws (`int_mul_0_l/r`, `int_mul_1_l/r` — the `1_r` negsuc branch collapses
+  definitionally, an earlier draft's unnecessary inner case-split had a wrong zero-case).
+  **Deferred**: `int_add_assoc`, `int_mul_assoc`, distributivity, and the full `CommRing`
+  record bundling that would switch `by ring` onto Int — these are the remaining gap before
+  H5 can build on a complete int-ring; noted under §H3's follow-up.
+  Verified: driver test `int_omega_example_checks`; lib/ring_laws.owl, examples/int_demo.owl,
+  examples/omega_demo.owl, examples/ring_demo.owl all check; full `cargo test`
+  **232 green**; docs/reference.md gained an `#### omega` section.
+
 - [x] **Section B closed — group solver (`by group with G`) and equality chaining (`by eq`).**
   **Group solver** (`src/cubical/group.rs`, ~700 lines): proves word identities over an
   abstract `Group A mul inv one` record. Both goal sides are classified into a structure
@@ -257,7 +281,7 @@ subtyping relations are simply not recognized by the checker.
 The single highest-leverage category for day-to-day proof productivity — these let users
 discharge routine algebraic/arithmetic goals in one line instead of writing them by hand.
 
-- [x] **Omega / Linear arithmetic** — decision procedure for linear arithmetic over Nat/Int. *(🔴 — most general-purpose payoff; underlies many other proofs.)* Implemented in `src/cubical/omega.rs`: `by omega` proves `Path Nat u v` goals by (1) definitional reflexivity (normalization unfolds `add`/etc. on constructor-headed arguments) and (2) direct application of a previously verified global lemma to the context's variables, both re-checked by the kernel. Worked example in `examples/omega_demo.owl`. *Remaining: on-demand induction synthesis (structural recursion via the current definition) and `Int` support.*
+- [x] **Omega / Linear arithmetic** — decision procedure for linear arithmetic over Nat/Int. *(🔴 — most general-purpose payoff; underlies many other proofs.)* Implemented in `src/cubical/omega.rs`: `by omega` proves `Path Nat u v` goals by (1) definitional reflexivity (normalization unfolds `add`/etc. on constructor-headed arguments) and (2) direct application of a previously verified global lemma to the context's variables, both re-checked by the kernel. Worked example in `examples/omega_demo.owl`. *Remaining: on-demand induction synthesis (structural recursion via the current definition). `Int` support landed — see §H3.*
 - [x] **Ring solver** — decision procedure for ring identities (normalize + compare polynomial forms). *(🔴 — classic high-value tactic, e.g. Coq/Agda's `ring`.)* Implemented in `src/cubical/ring.rs`: `by ring` proves `Path Nat u v` goals by normalizing both sides to polynomial normal form over the commutative semiring over `Nat` (`add`/`mul`/`zero`/`one`, recognized by the shape of the normal forms their eliminators unfold to) and, when the normal forms agree, building a proof tree by applying ring laws resolved from the context. `lib/ring_laws.owl` supplies the required law names (`add_comm`, `add_assoc`, `add_0_l/r`, `mul_comm`, `mul_assoc`, `mul_1_l/r`, `mul_0_l/r`, `mul_add_l/r`) and the structural lemmas (`trans`, `sym`, `cong_add_l/r`, `cong_mul_l/r`); `examples/ring_demo.owl` exercises it. The generated proof is a raw law-application tree that the kernel re-checks; the structural-recursion guard is skipped for ring output because law bodies unfold to elims on compound neutral scrutinees in the normal form. The final blocker was an ill-typed `trans` in `expand_single` — its proof chain already landed on `sum_term(products)`, but a trailing `sum_concat` step re-wrapped the LHS with an extra `add _ zero`, so the emitted `trans` mismatched the chain's actual endpoint and the kernel re-check normalize-and-retry loop overflowed the stack; dropping the redundant step fixed all three demos. *Remaining: `Int`/additive-group support (neg/sub).* Abstract-ring support (`by ring with C`) landed as part of the H1 work — see §H.1.
 - [x] **Group solver** — decision procedure for group identities (associativity, identity,
   inverses). *(🟡)* Landed as `by group with G` over an abstract `Group A mul inv one`
@@ -379,9 +403,12 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   - *Part 3 — plumbing*: `Tactic::Field(Option<Term>)` in `syntax/mod.rs` (+`shift_tactic`/`subst_tactic`), `show_tactic` in `pretty.rs`, `parse_tactic` (`field [with <term>]`), `"field"` in `is_tactic_keyword`, `Tactic::Field` arm in `tactics.rs` mirroring the `Ring` arm, `pub mod field;` in `mod.rs`. (The `by` block must sit at the root of the `def`, like `by ring`.)
   - *Part 4 — demo/tests*: `examples/field_demo.owl` proves `(a/b)·(c/d) = (ac)/(bd)`, `(a/b)+(c/d) = (ad+bc)/(bd)`, `(a/b)/(c/d) = (ad)/(bc)`, `inv (inv a) = a`, `inv (a·b) = inv a · inv b`, `a·inv a = one` (each with per-atom `≠ 0` hypotheses); `field_demo_example_checks` + `field_laws_lib_checks` in the driver on 64 MiB stacks. The demo re-check is slow in debug builds (~1 min for the biggest theorem per kernel pass, ~5 min total for the demo).
   - *Remaining: `neg`/`sub` (additive group) support is folded into H3.*
-- [ ] **H3. Int `by omega` + group solver** *(🟡 — omega-Int for valuation/residue computations; group solver is the base of the field ladder.)*
-  The group-solver half has landed (see §B.3 / the section-B log entry); remaining here is
-  the Int side of `by omega` (also noted as the remaining scope of §B.1/§B.2's `neg`/`sub`).
+- [x] **H3. Int `by omega` + group solver** *(🟡)* Both halves landed: the group solver
+  (see §B.3) and omega-over-Int plus a first batch of concrete integer algebra
+  (additive commutativity/unit laws, double negation, multiplicative commutativity and
+  unit/zero laws — see the H3 log entry at the top of this file). Deferred follow-up:
+  `int_add_assoc`, `int_mul_assoc`, distributivity, and the `CommRing` record bundling that
+  would route `by ring` over Int — natural groundwork for §H5.
 - [ ] **H4. Bundled algebra records + lightweight instance search** *(🔴 — without typeclasses, every theorem must thread `CommRing R` explicitly. Minimal implicit-argument + instance-search layer, Lean/Coq-style, on top of the existing record system.)*
 - [ ] **H5. Commutative algebra library** *(🔴)*: `CommRing`/`Field`/`Module`/`Ideal` structures; quotient rings `R/I` and localization `S⁻¹R` via the existing HIT quotients; polynomial rings `R[X]`; prime/maximal ideals; finite fields `F_p`.
 - [ ] **H6. Set-level foundation polish** *(🟡)*: quotient elimination ergonomics, proof irrelevance for Prop, `isSet` stability — AG objects are all sets.

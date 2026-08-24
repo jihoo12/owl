@@ -1,25 +1,39 @@
-//! `by omega` — linear arithmetic decision procedure over `Nat`.
+//! `by omega` — linear arithmetic over `Nat` and `Int`.
 //!
-//! Proves goals of the form `Path Nat u v` where `u` and `v` are linear
-//! expressions over the context's `Nat` variables (built with `add`, `suc`,
-//! `zero`). The proof term is constructed from kernel-verified lemmas and
-//! re-checked by the typechecker:
+//! Proves goals of the form `Path C u v` where `C` is one of the supported
+//! concrete carriers (`Nat`, `Int` from lib/ring_laws.owl) and `u`/`v` are
+//! expressions over the context's variables of that type (for `Nat`: built
+//! with `add`, `suc`, `zero`; for `Int`: with `int_add`, `int_neg`,
+//! `int_sub`, `pos`, `negsuc`).  The proof term is constructed from
+//! kernel-verified lemmas and re-checked by the typechecker:
 //!
 //! 1. **Reflexivity** — when the two sides are definitionally equal after
-//!    normalization (which unfolds global definitions such as `add` applied
-//!    to constructor-headed arguments).
+//!    normalization (which unfolds global definitions such as `add` or
+//!    `int_add` applied to constructor-headed arguments).
 //! 2. **Lemma matching** — when the goal is a direct instance of a previously
-//!    verified global lemma (`forall ... Path Nat L R`), omega applies it to
-//!    the context's `Nat` variables in every order and re-checks the result.
+//!    verified global lemma (`forall ... Path C L R`), omega applies it to
+//!    the context's variables in every order and re-checks the result.
 //!
-//! Goals requiring induction (e.g. `add_comm` without a pre-proved comm
-//! lemma) are not yet synthesized; see `TODO.md` §B.1.
+//! Goals requiring induction (e.g. commutativity without a pre-proved lemma)
+//! are not yet synthesized; see `TODO.md` §B.1/§H3.
 
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::nbe::nbe_eval_ctx;
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError, check_dt};
+
+/// The carriers `by omega` supports, recognized by their datatype head.
+fn supported_carrier(a_nf: &Term) -> Option<&'static str> {
+    match a_nf {
+        Term::TData(d, p) if p.is_empty() => match d.as_str() {
+            "Nat" => Some("Nat"),
+            "Int" => Some("Int"),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 /// Entry point called by the `Tactic::Omega` arm.
 ///
@@ -35,26 +49,26 @@ pub fn prove(
     _num_intro: usize,
     session: &mut Session,
 ) -> Result<Term, TypeError> {
-    // The goal must be a path over Nat.
+    // The goal must be a path over a supported carrier.
     let (a, u, v) = {
         let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty, session);
         match goal_nf {
             Term::TPath(a, u, v) => (*a, *u, *v),
             other => {
                 return Err(TypeError::Other(format!(
-                    "omega: goal is not a path over Nat\n  goal: {}",
+                    "omega: goal is not a path\n  goal: {}",
                     other,
                 )));
             }
         }
     };
     let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
-    if !matches!(a_nf, Term::TData(ref d, ref p) if d == "Nat" && p.is_empty()) {
-        return Err(TypeError::Other(format!(
-            "omega: goal is not a path over Nat (got '{}')",
+    let carrier = supported_carrier(&a_nf).ok_or_else(|| {
+        TypeError::Other(format!(
+            "omega: goal is not a path over a supported carrier (Nat, Int); got '{}'",
             a_nf,
-        )));
-    }
+        ))
+    })?;
 
     // 1. Reflexivity after normalization (definitional equality).
     let u_nf = nbe_eval_ctx(ctx.len(), &u, session);
@@ -87,8 +101,8 @@ pub fn prove(
     }
 
     Err(TypeError::Other(format!(
-        "omega: unable to solve goal\n  goal : Path {} {} {}\n  left  : {}\n  right : {}",
-        a, u, v, u_nf, v_nf,
+        "omega: unable to solve goal over {}\n  goal : Path {} {} {}\n  left  : {}\n  right : {}",
+        carrier, a, u, v, u_nf, v_nf,
     )))
 }
 

@@ -1905,6 +1905,27 @@ def trivial_path : Path Nat zero zero := by trivial
 def trivial_nat : Nat := by trivial    -- applies 'zero'
 ```
 
+#### `omega`
+
+Linear-arithmetic goals over the supported concrete carriers (`Nat`, and
+`Int` from `lib/ring_laws.owl`).  The tactic works in two tiers:
+
+1. **Reflexivity** — when both sides normalize to the same term (this
+   unfolds the carrier's operations on constructor-headed arguments, e.g.
+   `int_add (pos one) (negsuc zero)` computes to `pos zero`).
+2. **Lemma matching** — when the goal is a direct instance of a previously
+   verified global lemma over the same carrier, omega applies it to the
+   context variables in every argument permutation and re-checks.
+
+```
+def int_add_cross : Path Int (int_add int1 mint2) mint1 :=
+  by omega
+```
+
+Goals requiring induction (e.g. commutativity with no pre-proved lemma) are
+out of scope; provide the lemma and let omega apply it. See
+`examples/omega_demo.owl` (Nat) and `examples/int_demo.owl` (Int).
+
 #### `ring`
 
 Prove polynomial identities. Two modes:
