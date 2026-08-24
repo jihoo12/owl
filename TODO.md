@@ -432,6 +432,14 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   examples/module_demo.owl). Remaining: complete Int assoc/distributivity proofs then bundle
   `IntCommRing` (the first concrete instance, unblocking self-modules); Ideal predicates;
   R[X]; quotients/localization (relation-parameterized HITs — research-level); F_p.
+  **Session-3 findings**: `NatCommRing` — the first concrete CommRing
+  instance — is bundled in lib/algebra.owl from the Part-3 globals, and consumers
+  verify via direct field projection (`exact (NatCommRing.mul_comm a b)`). Kernel gap
+  discovered: the ring tactic's structured mode reifies goal heads AFTER normalization,
+  so concrete global operations (nat_mul unfolding on neutrals mid-check) lose their
+  head symbols and defeat reification — abstract parameter ops stay neutral and work.
+  Follow-up: match record-op heads pre-normalization (or whnf-only) in ring.rs, after
+  which `by ring with NatCommRing` (and Int once laws land) becomes fully automatic.
   **Session-2 findings on the int assoc/distributivity blocker**: the
   truncated-subtraction encoding (`pos`/`negsuc` + `_owl_add_pos_neg`) is itself the
   obstacle. Four one-directional APN bridges were designed and two fully proven

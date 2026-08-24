@@ -107,3 +107,44 @@ record Module
 --     current HIT support).
 --   * Polynomial rings R[X] (list encoding) + evaluation homomorphism.
 --   * Finite fields F_p = Z/p.
+
+-- ────────────────────────────────────────────────────────────────────────
+-- Bundled concrete instance: the natural numbers
+-- ────────────────────────────────────────────────────────────────────────
+--
+-- `Nat` is a commutative *semi*ring (no additive inverses), but the
+-- `CommRing` record only demands the semiring laws, so the Part-3 globals
+-- from lib/ring_laws.owl bundle directly into the first concrete tactic
+-- instance: `by ring with NatCommRing` proves polynomial identities over
+-- Nat without threading a record parameter through every theorem.
+import "ring_laws.owl"
+
+def NatCommRing : CommRing Nat add mul zero one :=
+  mkCommRing
+    _owl_trans
+    _owl_sym
+    _owl_cong_add_l
+    _owl_cong_add_r
+    _owl_cong_mul_l
+    _owl_cong_mul_r
+    add_comm
+    add_assoc
+    add_0_l
+    add_0_r
+    mul_comm
+    mul_assoc
+    mul_1_l
+    mul_1_r
+    mul_0_l
+    mul_0_r
+    mul_add_l
+    mul_add_r
+
+-- A first consumer: commutativity of multiplication over Nat, proved by
+-- projecting the bundled law directly.  (The automatic route
+-- `by intro a b; ring with NatCommRing` currently fails: the structured
+-- ring mode matches operation heads after normalization, and concrete
+-- global operations unfold before head-matching — tracked in TODO §H5.)
+def nat_mul_comm_by_instance : forall (a : Nat), forall (b : Nat),
+  Path Nat (mul a b) (mul b a) :=
+  fun a b => NatCommRing.mul_comm a b
