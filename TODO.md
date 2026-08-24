@@ -4,6 +4,21 @@
 
 ## Completed (implementation log)
 
+- [x] **H5 started — shared structure library (`lib/algebra.owl`) with the `Module` record.**
+  Consolidates `CommRing`/`Group`/`Field` documentation-and-declarations in one library file
+  (tactic resolution matches datatype names, so pre-existing inline declarations in
+  examples/comm_ring_demo.owl and lib/field_laws.owl keep working unchanged) and introduces
+  **`Module`**: an additive group `M` with scalar multiplication over a bundled ring, whose
+  ring side is carried by a *record-typed parameter* `C : CommRing A add mul zero one` — the
+  first use of records-as-parameters in the kernel, verified to project correctly
+  (`Mod.smul_one x`, `Mod.smul_dist_r r s x` in examples/module_demo.owl). Module v1 carries
+  seven laws (additive assoc/unit/inverse on M, both scalar distributivities, scalar
+  associativity, unitality); additive commutativity of M is deliberately omitted as
+  derivable over commutative rings. The self-module instance and concrete `IntCommRing`
+  remain blocked on the int assoc/distributivity proofs deferred from H3 (case-matrix and
+  required nested-induction bridges analyzed; dedicated proving session needed). Verified:
+  cargo check clean; lib/algebra.owl + examples/module_demo.owl typecheck; full suite green.
+
 - [x] **H3 — Int `by omega` + first batch of integer algebra in lib/ring_laws.owl.**
   **omega over Int** (`src/cubical/omega.rs`): the tactic's machinery (definitional
   reflexivity + lemma-instance matching with argument permutations) was already
@@ -411,6 +426,12 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   would route `by ring` over Int — natural groundwork for §H5.
 - [ ] **H4. Bundled algebra records + lightweight instance search** *(🔴 — without typeclasses, every theorem must thread `CommRing R` explicitly. Minimal implicit-argument + instance-search layer, Lean/Coq-style, on top of the existing record system.)*
 - [ ] **H5. Commutative algebra library** *(🔴)*: `CommRing`/`Field`/`Module`/`Ideal` structures; quotient rings `R/I` and localization `S⁻¹R` via the existing HIT quotients; polynomial rings `R[X]`; prime/maximal ideals; finite fields `F_p`.
+  **In progress**: structures half landed — `lib/algebra.owl` consolidates
+  `CommRing`/`Group`/`Field` and adds the `Module` record (with the kernel's first
+  record-typed parameter: the ring side is a bundled `CommRing` argument; see
+  examples/module_demo.owl). Remaining: complete Int assoc/distributivity proofs then bundle
+  `IntCommRing` (the first concrete instance, unblocking self-modules); Ideal predicates;
+  R[X]; quotients/localization (relation-parameterized HITs — research-level); F_p.
 - [ ] **H6. Set-level foundation polish** *(🟡)*: quotient elimination ergonomics, proof irrelevance for Prop, `isSet` stability — AG objects are all sets.
 - [ ] **H7. Category + sheaf core** *(🔴)*: categories, functors, natural transformations, Yoneda; presheaves and sheaves; the Zariski site.
 - [ ] **H8. Schemes** *(🔴)*: **functor-of-points route** — `Spec R := Hom(R, −)` on `CommRing^op`; a scheme is a Zariski sheaf locally represented by affines (the UniMath approach). Avoids building the structure sheaf on a point-set, which is far costlier in type theory. Targets: `Spec R`, Zariski opens `D(f)`, affine cover, products/pullbacks, projective space `P^n`, closed/open immersions.

@@ -1,0 +1,35 @@
+-- Modules over a commutative ring (lib/algebra.owl).
+--
+-- Exercises the `Module` record with its record-typed parameter: given an
+-- abstract commutative ring `C` and an abstract `C`-module `Mod`, the law
+-- fields project and compose exactly like any other bundled structure.
+
+import "../lib/algebra.owl"
+
+-- Given any ring and any module over it, scalar multiplication by one is
+-- the identity — projected straight from the record.
+def smul_one_is_id :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A),
+  forall (zero : A), forall (one : A),
+  forall (C : CommRing A add mul zero one),
+  forall (M : Type), forall (m_add : M -> M -> M), forall (m_neg : M -> M),
+  forall (m_zero : M), forall (smul : A -> M -> M),
+  forall (Mod : Module A add mul zero one C M m_add m_neg m_zero smul),
+  forall (x : M),
+  Path M (smul one x) x :=
+  by intro A add mul zero one C M m_add m_neg m_zero smul Mod x;
+     exact (Mod.smul_one x)
+
+-- The two distributivities meet in the middle: for the sum of scalars we
+-- can rewrite via dist_r and read off both summands.
+def smul_dist_r_use :
+  forall (A : Type), forall (add : A -> A -> A), forall (mul : A -> A -> A),
+  forall (zero : A), forall (one : A),
+  forall (C : CommRing A add mul zero one),
+  forall (M : Type), forall (m_add : M -> M -> M), forall (m_neg : M -> M),
+  forall (m_zero : M), forall (smul : A -> M -> M),
+  forall (Mod : Module A add mul zero one C M m_add m_neg m_zero smul),
+  forall (r : A), forall (s : A), forall (x : M),
+  Path M (smul (add r s) x) (m_add (smul r x) (smul s x)) :=
+  by intro A add mul zero one C M m_add m_neg m_zero smul Mod r s x;
+     exact (Mod.smul_dist_r r s x)

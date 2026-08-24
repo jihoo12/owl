@@ -1,0 +1,109 @@
+-- ────────────────────────────────────────────────────────────────────────
+-- lib/algebra.owl — shared algebraic structures (H5)
+-- ────────────────────────────────────────────────────────────────────────
+--
+-- Consolidates the bundled structure records used by the tactics:
+--
+--   * `CommRing A add mul zero one`  — consumed by `by ring with C`
+--     (the same shape also lives inline in examples/comm_ring_demo.owl and
+--     as fields of Field in lib/field_laws.owl; tactic resolution matches
+--     the datatype NAME `CommRing`, so any of these declarations works).
+--   * `Field A add mul inv zero one` — consumed by `by field with F`
+--     (canonical declaration lives in lib/field_laws.owl).
+--   * `Group A mul inv one`          — consumed by `by group with G`
+--     (see examples/group_demo.owl).
+--
+-- New here: `Module R M smul` — an R-module as an abelian group `M`
+-- (written additively, operations `m_add`, `m_neg`, `m_zero` carried as
+-- parameters alongside the carrier) with scalar multiplication `smul`
+-- satisfying the standard four laws.  Instances are expected to be built
+-- over an underlying `CommRing` record; the self-module construction
+-- (`R` as a module over itself via `smul := mul`) becomes provable once
+-- the integer ring's associativity/distributivity proofs land — see
+-- TODO.md §H3-deferred / §H5.
+--
+-- NOTE on parameter style: record *fields* cannot reference earlier
+-- fields in this kernel, so operations/laws that mention other operations
+-- are all passed as parameters and the laws as fields — exactly like
+-- CommRing/Field/Group.
+
+record CommRing (A : Type) (add : A -> A -> A) (mul : A -> A -> A) (zero : A) (one : A) where
+  field trans : forall (a : A), forall (b : A), forall (c : A), Path A a b -> Path A b c -> Path A a c
+  field sym : forall (a : A), forall (b : A), Path A a b -> Path A b a
+  field cong_add_l : forall (a : A), forall (b : A), forall (n : A), Path A a b -> Path A (add a n) (add b n)
+  field cong_add_r : forall (a : A), forall (b : A), forall (m : A), Path A a b -> Path A (add m a) (add m b)
+  field cong_mul_l : forall (a : A), forall (b : A), forall (n : A), Path A a b -> Path A (mul a n) (mul b n)
+  field cong_mul_r : forall (a : A), forall (b : A), forall (m : A), Path A a b -> Path A (mul m a) (mul m b)
+  field add_comm : forall (a : A), forall (b : A), Path A (add a b) (add b a)
+  field add_assoc : forall (a : A), forall (b : A), forall (c : A), Path A (add (add a b) c) (add a (add b c))
+  field add_0_l : forall (a : A), Path A (add zero a) a
+  field add_0_r : forall (a : A), Path A (add a zero) a
+  field mul_comm : forall (a : A), forall (b : A), Path A (mul a b) (mul b a)
+  field mul_assoc : forall (a : A), forall (b : A), forall (c : A), Path A (mul (mul a b) c) (mul a (mul b c))
+  field mul_1_l : forall (a : A), Path A (mul one a) a
+  field mul_1_r : forall (a : A), Path A (mul a one) a
+  field mul_0_l : forall (a : A), Path A (mul zero a) zero
+  field mul_0_r : forall (a : A), Path A (mul a zero) zero
+  field mul_add_l : forall (a : A), forall (b : A), forall (c : A), Path A (mul a (add b c)) (add (mul a b) (mul a c))
+  field mul_add_r : forall (a : A), forall (b : A), forall (c : A), Path A (mul (add a b) c) (add (mul a c) (mul b c))
+
+record Group (A : Type) (mul : A -> A -> A) (inv : A -> A) (one : A) where
+  field trans : forall (a : A), forall (b : A), forall (c : A), Path A a b -> Path A b c -> Path A a c
+  field sym : forall (a : A), forall (b : A), Path A a b -> Path A b a
+  field cong_mul_l : forall (a : A), forall (b : A), forall (n : A), Path A a b -> Path A (mul a n) (mul b n)
+  field cong_mul_r : forall (a : A), forall (b : A), forall (m : A), Path A a b -> Path A (mul m a) (mul m b)
+  field cong_inv : forall (a : A), forall (b : A), Path A a b -> Path A (inv a) (inv b)
+  field mul_assoc : forall (a : A), forall (b : A), forall (c : A), Path A (mul (mul a b) c) (mul a (mul b c))
+  field one_mul : forall (a : A), Path A (mul one a) a
+  field mul_one : forall (a : A), Path A (mul a one) a
+  field inv_l : forall (a : A), Path A (mul (inv a) a) one
+  field inv_r : forall (a : A), Path A (mul a (inv a)) one
+  field inv_one : Path A (inv one) one
+  field inv_inv : forall (a : A), Path A (inv (inv a)) a
+  field inv_mul : forall (a : A), forall (b : A), Path A (inv (mul a b)) (mul (inv b) (inv a))
+
+-- An R-module: an additive group `M` (its operations passed as parameters,
+-- since fields cannot reference fields) with scalar multiplication
+-- `smul`, where the ring side is carried by the bundled `CommRing` record
+-- `C` so the scalar-law fields can project `add`/`mul`/`one` from it.
+--
+-- Laws (v1): additive associativity/unit/inverse on `M`, the two scalar
+-- distributivities, scalar associativity, and unitality.  Additive
+-- commutativity of `M` is derivable for modules over commutative rings
+-- once distributivity + ring add-comm are available, so it is not an
+-- independent field here.
+record Module
+  (A : Type) (add : A -> A -> A) (mul : A -> A -> A) (zero : A) (one : A)
+  (C : CommRing A add mul zero one)
+  (M : Type) (m_add : M -> M -> M) (m_neg : M -> M) (m_zero : M)
+  (smul : A -> M -> M) where
+  field m_add_assoc : forall (x : M), forall (y : M), forall (z : M),
+    Path M (m_add (m_add x y) z) (m_add x (m_add y z))
+  field m_add_0_l : forall (x : M), Path M (m_add m_zero x) x
+  field m_add_inv_l : forall (x : M), Path M (m_add (m_neg x) x) m_zero
+  field smul_dist_l : forall (r : A), forall (x : M), forall (y : M),
+    Path M (smul r (m_add x y)) (m_add (smul r x) (smul r y))
+  field smul_dist_r : forall (r : A), forall (s : A), forall (x : M),
+    Path M (smul (add r s) x) (m_add (smul r x) (smul s x))
+  field smul_assoc : forall (r : A), forall (s : A), forall (x : M),
+    Path M (smul r (smul s x)) (smul (mul r s) x)
+  field smul_one : forall (x : M), Path M (smul one x) x
+
+-- ────────────────────────────────────────────────────────────────────────
+-- Status / roadmap (H5)
+-- ────────────────────────────────────────────────────────────────────────
+--
+-- Landed: CommRing / Group / Field / Module structure records; concrete
+-- Int algebra batch (see lib/ring_laws.owl Part 4).
+--
+-- Remaining:
+--   * int_add_assoc / int_mul_assoc / distributivity over Int, then the
+--     bundled instance `IntCommRing : CommRing Int int_add int_mul
+--     int_zero int_one` — the first concrete instance, after which
+--     `by ring with IntCommRing` works and `Int` becomes a self-module
+--     (`smul := int_mul`) reusing the distributivity laws.
+--   * Ideal predicates, quotient rings R/I, localization S⁻¹R — need
+--     relation-parameterized HIT quotients (research-level under the
+--     current HIT support).
+--   * Polynomial rings R[X] (list encoding) + evaluation homomorphism.
+--   * Finite fields F_p = Z/p.

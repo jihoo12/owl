@@ -2054,6 +2054,39 @@ Scope: no `neg`/`sub`; `inv` of a sum or numeral multiple (e.g.
 `inv (add a b)`) is an explicit error; the `by` block must sit at the root of
 the `def`. See `examples/field_demo.owl` and `lib/field_laws.owl`.
 
+### Shared Structures (lib/algebra.owl)
+
+`lib/algebra.owl` consolidates the bundled algebraic structures consumed by
+the tactic family — `CommRing`, `Group`, and `Field` (canonical home of the
+latter: lib/field_laws.owl) — and adds:
+
+#### `Module` — modules over a commutative ring
+
+An R-module packages an additive group `M` with scalar multiplication
+`smul : A -> M -> M`, where the ring side is carried by a **record-typed
+parameter** `C : CommRing A add mul zero one`:
+
+```
+record Module
+  (A : Type) (add : A -> A -> A) (mul : A -> A -> A) (zero : A) (one : A)
+  (C : CommRing A add mul zero one)
+  (M : Type) (m_add : M -> M -> M) (m_neg : M -> M) (m_zero : M)
+  (smul : A -> M -> M) where
+  field m_add_assoc : ...
+  field m_add_0_l : ...
+  field m_add_inv_l : ...
+  field smul_dist_l : ...   -- smul r (x + y)   = smul r x + smul r y
+  field smul_dist_r : ...   -- smul (r + s) x   = smul r x + smul s x
+  field smul_assoc  : ...   -- smul r (smul s x) = smul (r·s) x
+  field smul_one    : ...   -- smul one x        = x
+```
+
+Law fields project like any record: given `Mod : Module ...`,
+`Mod.smul_dist_r r s x` proves the right-distributivity instance. See
+`examples/module_demo.owl`. The self-module instance (`R` over itself,
+`smul := mul`) lands together with the integer associativity/
+distributivity proofs tracked in TODO.md §H5.
+
 #### Instance search (omitting `with C` / `with F`)
 
 `ring` and `field` accept the instance implicitly. When the goal's carrier is
