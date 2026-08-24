@@ -432,19 +432,18 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   examples/module_demo.owl). Remaining: complete Int assoc/distributivity proofs then bundle
   `IntCommRing` (the first concrete instance, unblocking self-modules); Ideal predicates;
   R[X]; quotients/localization (relation-parameterized HITs — research-level); F_p.
-  **Bridge design for the int proofs (session notes)**: `_owl_add_pos_neg m n`
-  (= m ∸ (n+1), signed) satisfies four one-directional bridges that carry all eight
-  sign cases of `int_add_assoc`: `apn_pos_lift` (`pos x + APN y z = APN (x+y) z`;
- induction on y, landed ✓ in lib/ring_laws.owl together with the two APN congruence
- helpers `int_cong_apn`/`int_cong_apn_r`), plus still-to-prove `apn_pos_r`
- (`APN x y + pos z = APN (x+z) y`, induction on x, all branches definitional after
- lifting) and `apn_neg_r`/`apn_neg_l` (subtrahend-extension, same shape). Pitfalls hit:
- (a) inside `by_wf` match branches the kernel's stuck-elims suppress `nat_add zero x ↦ x`,
- so zero-rewrites must be lifted as explicit `int_cong_apn` steps rather than relied on
- definitionally; (b) `int_trans`/`int_sym` are curried globals — endpoints must be applied
- explicitly before the proof arguments; (c) paren discipline: an over-closed branch makes a
- LATER unrelated match report phantom incompleteness. Next session: land the three
- remaining bridges from these recipes, assemble int_add_assoc, then mul side.
+  **Session-2 findings on the int assoc/distributivity blocker**: the
+  truncated-subtraction encoding (`pos`/`negsuc` + `_owl_add_pos_neg`) is itself the
+  obstacle. Four one-directional APN bridges were designed and two fully proven
+  (`apn_pos_lift`, plus congruence helpers — later reverted with the experimental batch to
+  keep the library at a committed-green state; derivations preserved in this note). The
+  hard wall: any proof lifting `nat_add a b ↔ suc/add-form` through an APN slot needs its
+  path argument evaluated inside a stuck-elim context, which this kernel suppresses — each
+  workaround spawned a deeper lemma whose own instantiations hit the same wall one level
+  further in. **Recommended route**: switch the library's Int to a sign/magnitude-style
+  encoding (or difference-of-naturals pairs quotiented), where add/assoc/distributivity are
+  plain case analyses with constructor-driven reductions; then reprove the CommRing bundle
+  cheaply. The current pos/negsuc Int stays for omega's definitional tier.
 - [ ] **H6. Set-level foundation polish** *(🟡)*: quotient elimination ergonomics, proof irrelevance for Prop, `isSet` stability — AG objects are all sets.
 - [ ] **H7. Category + sheaf core** *(🔴)*: categories, functors, natural transformations, Yoneda; presheaves and sheaves; the Zariski site.
 - [ ] **H8. Schemes** *(🔴)*: **functor-of-points route** — `Spec R := Hom(R, −)` on `CommRing^op`; a scheme is a Zariski sheaf locally represented by affines (the UniMath approach). Avoids building the structure sheaf on a point-set, which is far costlier in type theory. Targets: `Spec R`, Zariski opens `D(f)`, affine cover, products/pullbacks, projective space `P^n`, closed/open immersions.
