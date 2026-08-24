@@ -426,3 +426,111 @@ def int_mul_1_r : forall (a : Int), Path Int (int_mul a int_one) a :=
     match a return Path Int (int_mul a int_one) a with
     | pos x => <i> pos ((_owl_mul_one_r x) @ i)
     | negsuc x => <i> negsuc x
+-- Congruence of the truncated difference in its first argument.
+def int_cong_apn : forall (a : Nat), forall (b : Nat), forall (n : Nat),
+  Path Nat a b -> Path Int (_owl_add_pos_neg a n) (_owl_add_pos_neg b n) :=
+  fun a b n p => <i> _owl_add_pos_neg (p @ i) n
+
+-- Bridge: a non-negative summand distributes over the truncated difference.
+-- Proof by induction on y; the successor cases re-associate `nat_add x y`
+-- into head position via `_owl_add_suc_r` so the APN recursion fires.
+def apn_pos_lift : forall (x : Nat), forall (y : Nat), forall (z : Nat),
+  Path Int (int_add (pos x) (_owl_add_pos_neg y z))
+           (_owl_add_pos_neg (nat_add x y) z) by_wf :=
+  fun x y z =>
+    match y return Path Int (int_add (pos x) (_owl_add_pos_neg y z))
+                       (_owl_add_pos_neg (nat_add x y) z) with
+    | zero =>
+      int_trans
+        (int_add (pos x) (negsuc z))
+        (_owl_add_pos_neg x z)
+        (_owl_add_pos_neg (nat_add x zero) z)
+        (<i> _owl_add_pos_neg x z)
+        (int_sym
+          (_owl_add_pos_neg (nat_add x zero) z)
+          (_owl_add_pos_neg x z)
+          (int_cong_apn (nat_add x zero) x z
+            (_owl_nat_add_zero_r x)))
+    | suc y' =>
+      match z return Path Int (int_add (pos x) (_owl_add_pos_neg (suc y') z))
+                         (_owl_add_pos_neg (nat_add x (suc y')) z) with
+      | zero =>
+        int_trans
+          (int_add (pos x) (pos y'))
+          (_owl_add_pos_neg (suc (nat_add x y')) zero)
+          (_owl_add_pos_neg (nat_add x (suc y')) zero)
+          (<i> pos (nat_add x y'))
+          (int_sym
+            (_owl_add_pos_neg (nat_add x (suc y')) zero)
+            (_owl_add_pos_neg (suc (nat_add x y')) zero)
+            (int_cong_apn (nat_add x (suc y')) (suc (nat_add x y')) zero
+              (_owl_add_suc_r x y')))
+      | suc z' =>
+        int_trans
+          (int_add (pos x) (_owl_add_pos_neg y' z'))
+          (_owl_add_pos_neg (nat_add x y') z')
+          (_owl_add_pos_neg (nat_add x (suc y')) (suc z'))
+          (apn_pos_lift x y' z')
+          (int_trans
+            (_owl_add_pos_neg (nat_add x y') z')
+            (_owl_add_pos_neg (suc (nat_add x y')) (suc z'))
+            (_owl_add_pos_neg (nat_add x (suc y')) (suc z'))
+            (<i> _owl_add_pos_neg (nat_add x y') z')
+            (int_sym
+              (_owl_add_pos_neg (nat_add x (suc y')) (suc z'))
+              (_owl_add_pos_neg (suc (nat_add x y')) (suc z'))
+              (int_cong_apn (nat_add x (suc y')) (suc (nat_add x y')) (suc z')
+                (_owl_add_suc_r x y'))))
+
+-- Congruence of the truncated difference in its second argument.
+def int_cong_apn_r : forall (n : Nat), forall (b : Nat), forall (c : Nat),
+  Path Nat b c -> Path Int (_owl_add_pos_neg n b) (_owl_add_pos_neg n c) :=
+  fun n b c p => <i> _owl_add_pos_neg n (p @ i)
+
+def apn_pos_lift : forall (x : Nat), forall (y : Nat), forall (z : Nat),
+  Path Int (int_add (pos x) (_owl_add_pos_neg y z))
+           (_owl_add_pos_neg (nat_add x y) z) by_wf :=
+  fun x y z =>
+    match y return Path Int (int_add (pos x) (_owl_add_pos_neg y z))
+                       (_owl_add_pos_neg (nat_add x y) z) with
+    | zero =>
+      int_trans
+        (int_add (pos x) (negsuc z))
+        (_owl_add_pos_neg x z)
+        (_owl_add_pos_neg (nat_add x zero) z)
+        (<i> _owl_add_pos_neg x z)
+        (int_sym
+          (_owl_add_pos_neg (nat_add x zero) z)
+          (_owl_add_pos_neg x z)
+          (int_cong_apn (nat_add x zero) x z
+            (_owl_nat_add_zero_r x)))
+    | suc y' =>
+      match z return Path Int (int_add (pos x) (_owl_add_pos_neg (suc y') z))
+                         (_owl_add_pos_neg (nat_add x (suc y')) z) with
+      | zero =>
+        int_trans
+          (int_add (pos x) (pos y'))
+          (_owl_add_pos_neg (suc (nat_add x y')) zero)
+          (_owl_add_pos_neg (nat_add x (suc y')) zero)
+          (<i> pos (nat_add x y'))
+          (int_sym
+            (_owl_add_pos_neg (nat_add x (suc y')) zero)
+            (_owl_add_pos_neg (suc (nat_add x y')) zero)
+            (int_cong_apn (nat_add x (suc y')) (suc (nat_add x y')) zero
+              (_owl_add_suc_r x y')))
+      | suc z' =>
+        int_trans
+          (int_add (pos x) (_owl_add_pos_neg y' z'))
+          (_owl_add_pos_neg (nat_add x y') z')
+          (_owl_add_pos_neg (nat_add x (suc y')) (suc z'))
+          (apn_pos_lift x y' z')
+          (int_trans
+            (_owl_add_pos_neg (nat_add x y') z')
+            (_owl_add_pos_neg (suc (nat_add x y')) (suc z'))
+            (_owl_add_pos_neg (nat_add x (suc y')) (suc z'))
+            (<i> _owl_add_pos_neg (nat_add x y') z')
+            (int_sym
+              (_owl_add_pos_neg (nat_add x (suc y')) (suc z'))
+              (_owl_add_pos_neg (suc (nat_add x y')) (suc z'))
+              (int_cong_apn (nat_add x (suc y')) (suc (nat_add x y')) (suc z')
+                (_owl_add_suc_r x y'))))
