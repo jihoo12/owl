@@ -134,6 +134,11 @@ pub struct TacticEngine<'a> {
     dts: &'a [Datatype],
     tactic_ctx: Ctx,
     goal_ty: Term,
+    /// The un-normalized goal type (the elaborated annotation as written).
+    /// Structured algebra tactics reify from this so concrete global
+    /// operation heads survive; everything else uses the normalized
+    /// `goal_ty`.
+    raw_goal_ty: Term,
     intro_names: Vec<Name>,
     result: Option<Term>,
     pending_apps: Vec<Term>,
@@ -141,11 +146,12 @@ pub struct TacticEngine<'a> {
 }
 
 impl<'a> TacticEngine<'a> {
-    pub fn new(dts: &'a [Datatype], goal_ty: Term) -> Self {
+    pub fn new(dts: &'a [Datatype], goal_ty: Term, raw_goal_ty: Term) -> Self {
         TacticEngine {
             dts,
             tactic_ctx: Vec::new(),
             goal_ty,
+            raw_goal_ty,
             intro_names: Vec::new(),
             result: None,
             pending_apps: Vec::new(),
@@ -1089,6 +1095,7 @@ impl<'a> TacticEngine<'a> {
                     self.dts,
                     &combined_ctx,
                     &self.goal_ty,
+                    Some(&self.raw_goal_ty),
                     self.tactic_ctx.len(),
                     self.intro_names.len(),
                     ring_term.as_ref(),
@@ -1207,7 +1214,7 @@ pub fn resolve_tactics(
     match val {
         Term::TBy(tactics) => {
             let goal_ty = nbe_eval_ctx(ctx.len(), ty, session);
-            let mut engine = TacticEngine::new(dts, goal_ty);
+            let mut engine = TacticEngine::new(dts, goal_ty, ty.clone());
             for tac in tactics {
                 engine.run_tactic(tac, ctx, session)?;
             }

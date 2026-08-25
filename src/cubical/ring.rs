@@ -65,6 +65,25 @@ pub(crate) fn ring_ops_from_type(
     }
 }
 
+/// Carrier type of the bundled record instance (`CommRing ...` params[0]),
+/// normalized; `None` when `inst` is not such a record.
+fn ring_ops_carrier(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    inst_term: &Term,
+    session: &mut Session,
+) -> Option<Term> {
+    let Ok(inst_ty) = infer_dt(dts, ctx, inst_term, session) else {
+        return None;
+    };
+    match nbe_eval_ctx(ctx.len(), &inst_ty, session) {
+        Term::TData(dname, params) if dname == "CommRing" && !params.is_empty() => {
+            Some(params[0].clone())
+        }
+        _ => None,
+    }
+}
+
 /// Search the context for a bundled algebra record instance whose carrier
 /// matches `carrier`: a context variable `C` whose type is
 /// `CommRing A ...` or `Field A ...` with `A` definitionally equal to
@@ -154,6 +173,11 @@ pub(crate) struct Ring {
     pub(crate) mul_add_r: Term,
     pub(crate) ctx_len: usize,
     pub(crate) mode: Mode,
+    /// True when the carrier datatype is `Nat`: numerals are then the
+    /// constructor suc-chain `TCon("Nat","suc",..)` form, recognized and
+    /// emitted accordingly (the abstract `add one (...)` canonical form
+    /// would not match user-written suc literals).
+    pub(crate) numerals_are_suc: bool,
 }
 
 impl Ring {
@@ -190,6 +214,19 @@ impl Ring {
         // from the bundled record's type (`CommRing A add mul zero one` /
         // `Field A add mul inv zero one`), so they work regardless of how the
         // parameter names are bound in the context.
+        // Numerals are suc-chains exactly when the carrier is concrete Nat.
+        let numerals_are_suc = match mode {
+            Mode::Concrete => true,
+            Mode::Structured => {
+                let carrier_nf = ring_term
+                    .and_then(|c| ring_ops_carrier(dts, ctx, c, session))
+                    .map(|c| nbe_eval_ctx(ctx.len(), &c, session));
+                matches!(
+                    carrier_nf,
+                    Some(Term::TData(d, ref p)) if d == "Nat" && p.is_empty()
+                )
+            }
+        };
         let mut op = |name: &str| -> Result<Term, TypeError> {
             match mode {
                 Mode::Concrete => var(name),
@@ -221,6 +258,7 @@ impl Ring {
         Ok(Ring {
             ctx_len: ctx.len(),
             mode,
+            numerals_are_suc,
             add: op("add")?,
             mul: op("mul")?,
             zero: op("zero")?,
@@ -342,6 +380,15 @@ pub(crate) fn numeral(r: &Ring, k: i64) -> Term {
             t
         }
         Mode::Structured => {
+            if r.numerals_are_suc {
+                // Concrete Nat carrier: emit the constructor chain so goal
+                // occurrences written as suc-literals match syntactically.
+                let mut t = Term::TCon("Nat".into(), "zero".into(), Vec::new());
+                for _ in 0..k {
+                    t = Term::TCon("Nat".into(), "suc".into(), vec![t]);
+                }
+                return t;
+            }
             let mut t = r.zero.clone();
             for _ in 0..k {
                 t = app(&app(&r.add, &r.one), &t);
@@ -365,6 +412,25 @@ pub(crate) fn numeral_of(r: &Ring, t: &Term, session: &mut Session) -> Option<i6
             _ => None,
         },
         Mode::Structured => {
+            // Raw syntactic match first: concrete global `add` unfolds under
+            // nbe and would destroy the head symbol.
+            if *t == r.zero {
+                return Some(0);
+            }
+            if let Term::TApp(outer, inner) = t {
+                if let Term::TApp(g, one_t) = &**outer {
+                    let g_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, g, session);
+                    let add_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.add, session);
+                    if g_nf == add_nf && **one_t == r.one {
+                        return numeral_of(r, inner, session).map(|j| j + 1);
+                    }
+                }
+            }
+            if r.numerals_are_suc {
+                if let Some(k) = nat_suc_chain(t) {
+                    return Some(k);
+                }
+            }
             let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session);
             if nf == r.zero {
                 return Some(0);
@@ -385,10 +451,31 @@ pub(crate) fn numeral_of(r: &Ring, t: &Term, session: &mut Session) -> Option<i6
     }
 }
 
+/// Recognize the concrete-Nat suc-chain numerals (`zero`, `suc zero`, ...)
+/// against `numeral_of`'s count.
+fn nat_suc_chain(t: &Term) -> Option<i64> {
+    match t {
+        Term::TCon(d, c, args) if d == "Nat" && c == "zero" && args.is_empty() => Some(0),
+        Term::TCon(d, c, args) if d == "Nat" && c == "suc" && args.len() == 1 => {
+            nat_suc_chain(&args[0]).map(|k| k + 1)
+        }
+        _ => None,
+    }
+}
+
 /// In `Structured` mode, prove `t = numeral(k)` for a term `t` recognized as
 /// the numeral `k` by `numeral_of` (which may be written non-canonically,
 /// e.g. `add one zero`).
 fn numeral_refl_eq(r: &Ring, t: &Term, k: i64) -> EqP {
+    // Concrete Nat carrier: both the user-written suc-chain and the emitted
+    // numeral are the same constructor chain, so the equation is rfl.
+    if r.numerals_are_suc {
+        return EqP {
+            a: t.clone(),
+            b: numeral(r, k),
+            p: refl(t),
+        };
+    }
     if k == 0 {
         return EqP {
             a: t.clone(),
@@ -598,6 +685,29 @@ fn is_mulshape_elim(r: &Ring, t: &Term, session: &mut Session) -> bool {
     }
 }
 
+/// Syntactic binary-spine match: if `t` is literally `op a b` (head term
+/// structurally equal to `op`, exactly two arguments) return `(a, b)`
+/// without normalizing.  Concrete global operations unfold under nbe even
+/// on neutral arguments, destroying the head symbol; matching the raw
+/// elaborated term first keeps structured mode working over bundled
+/// concrete instances such as `NatCommRing`.
+fn raw_as_binop(r: &Ring, op: &Term, t: &Term, session: &mut Session) -> Option<(Term, Term)> {
+    if let Term::TApp(outer, b) = t {
+        if let Term::TApp(g, a) = &**outer {
+            // The head may carry a different de Bruijn offset than the
+            // resolved op term (the raw annotation is shifted by the
+            // definition slot); comparing their normal forms is a cheap
+            // single-symbol check that tolerates that shift.
+            let g_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, g, session);
+            let op_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, op, session);
+            if g_nf == op_nf {
+                return Some(((**a).clone(), (**b).clone()));
+            }
+        }
+    }
+    None
+}
+
 /// Treat `t` as an `add` operation, returning `(a, b)` with `t ~ add a b`.
 ///
 /// - `Concrete`: the operation may be the unfolded eliminator or a stuck
@@ -620,6 +730,9 @@ pub(crate) fn as_add(r: &Ring, t: &Term, session: &mut Session) -> Option<(Term,
             None
         }
         Mode::Structured => {
+            if let Some(res) = raw_as_binop(r, &r.add, t, session) {
+                return Some(res);
+            }
             let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session);
             match nf {
                 Term::TApp(outer, b) => match *outer {
@@ -667,6 +780,9 @@ pub(crate) fn as_mul(r: &Ring, t: &Term, session: &mut Session) -> Option<(Term,
             None
         }
         Mode::Structured => {
+            if let Some(res) = raw_as_binop(r, &r.mul, t, session) {
+                return Some(res);
+            }
             let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session);
             match nf {
                 Term::TApp(outer, b) => match *outer {
@@ -696,6 +812,10 @@ pub(crate) fn decomp(
     t: &Term,
     session: &mut Session,
 ) -> Result<(Vec<Mono>, EqP), TypeError> {
+    crate::debug_log!(
+        "decomp: {}",
+        crate::cubical::syntax::pretty::show_term(&[], t)
+    );
     if let Some((s, z)) = as_add(r, t, session) {
         let (ps, pfs) = decomp(r, &s, session)?;
         let (pz, pfz) = decomp(r, &z, session)?;
@@ -1563,29 +1683,69 @@ fn ring_carrier(r: &Ring) -> &'static str {
 ///   *instance search*: the context is scanned for a bundled `CommRing`/`Field`
 ///   record whose carrier matches the goal, which is then used as if the user
 ///   had written `ring with C`.
+
+/// Extract `(lhs, rhs, carrier)` from a normalized path goal.
+fn sides_from_nf(
+    ctx: &Ctx,
+    goal_ty: &Term,
+    session: &mut Session,
+) -> Result<(Term, Term, Term), TypeError> {
+    let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty, session);
+    match goal_nf {
+        Term::TPath(a, u, v) => {
+            let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
+            Ok((*u, *v, a_nf))
+        }
+        other => Err(TypeError::Other(format!(
+            "ring: goal is not a path (got '{}')",
+            other,
+        ))),
+    }
+}
+
 pub fn prove(
     dts: &[Datatype],
     ctx: &Ctx,
     goal_ty: &Term,
+    raw_goal_ty: Option<&Term>,
     _num_tactic: usize,
     _num_intro: usize,
     ring_term: Option<&Term>,
     session: &mut Session,
 ) -> Result<Term, TypeError> {
-    let (u, v, carrier) = {
-        let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty, session);
-        match goal_nf {
-            Term::TPath(a, u, v) => {
-                let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
-                (*u, *v, a_nf)
+    // Sides are taken from the RAW goal when available: concrete global
+    // operations unfold under normalization and would defeat the raw
+    // syntactic head-matching in `as_add`/`as_mul`/`numeral_of`.  The NF
+    // path stays as the fallback (abstract-parameter instances).
+    if let Some(raw) = raw_goal_ty {
+        crate::debug_log!(
+            "ring: RAW sides u={} v={}",
+            match raw {
+                Term::TPath(_, a, _) => crate::cubical::syntax::pretty::show_term(&[], a),
+                _ => "<not-path>".into(),
+            },
+            match raw {
+                Term::TPath(_, _, b) => crate::cubical::syntax::pretty::show_term(&[], b),
+                _ => "<not-path>".into(),
             }
-            other => {
-                return Err(TypeError::Other(format!(
-                    "ring: goal is not a path (got '{}')",
-                    other,
-                )));
-            }
+        );
+    }
+    let (u, v, carrier) = if let Some(raw) = raw_goal_ty {
+        // Strip the Pi telescope peeled off by `intro` tactics.
+        let mut r_cur = raw;
+        while let Term::TPi(_, _, body) = r_cur {
+            r_cur = body;
         }
+        let raw = r_cur;
+        match raw {
+            Term::TPath(a, ru, rv) => {
+                let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
+                ((**ru).clone(), (**rv).clone(), a_nf)
+            }
+            _ => sides_from_nf(ctx, goal_ty, session)?,
+        }
+    } else {
+        sides_from_nf(ctx, goal_ty, session)?
     };
 
     // Select the ring: an explicit `ring with C` wins; otherwise the goal

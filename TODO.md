@@ -432,14 +432,17 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   examples/module_demo.owl). Remaining: complete Int assoc/distributivity proofs then bundle
   `IntCommRing` (the first concrete instance, unblocking self-modules); Ideal predicates;
   R[X]; quotients/localization (relation-parameterized HITs — research-level); F_p.
-  **Session-3 findings**: `NatCommRing` — the first concrete CommRing
-  instance — is bundled in lib/algebra.owl from the Part-3 globals, and consumers
-  verify via direct field projection (`exact (NatCommRing.mul_comm a b)`). Kernel gap
-  discovered: the ring tactic's structured mode reifies goal heads AFTER normalization,
-  so concrete global operations (nat_mul unfolding on neutrals mid-check) lose their
-  head symbols and defeat reification — abstract parameter ops stay neutral and work.
-  Follow-up: match record-op heads pre-normalization (or whnf-only) in ring.rs, after
-  which `by ring with NatCommRing` (and Int once laws land) becomes fully automatic.
+  **Session-3/4 state**: `NatCommRing` — the first concrete CommRing instance — is
+  bundled in lib/algebra.owl; consumers prove identities by direct field projection
+  (`exact (NatCommRing.mul_comm a b)`); see examples/natcommring_demo.owl + driver guard.
+  Kernel progress: `as_add`/`as_mul`/`numeral_of` now attempt RAW syntactic spine
+  matching before normalization, and structured ring tactics receive the un-normalized
+  goal type (Pi-stripped) so concrete heads can survive reification. Remaining before
+  automatic `by ring with NatCommRing`: canonical-numeral handling in the structured
+  reifier (suc-chains vs `add one (...)` canonical forms interact across
+  expand/reify_add/reify_mul), plus proof-term construction for mixed concrete shapes;
+  a pre-existing `-d` trace re-entrancy bug was also fixed en route (reduction_trace
+  moved out of Session into nbe/trace.rs).
   **Session-2 findings on the int assoc/distributivity blocker**: the
   truncated-subtraction encoding (`pos`/`negsuc` + `_owl_add_pos_neg`) is itself the
   obstacle. Four one-directional APN bridges were designed and two fully proven

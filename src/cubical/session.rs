@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::ptr;
 use std::rc::Rc;
 
-use crate::cubical::nbe::trace::ReductionStep;
 use crate::cubical::syntax::{Datatype, Name, Term};
 use crate::cubical::typechecker::errors::Pos;
 
@@ -45,9 +44,7 @@ pub struct Session {
 
     // ── Error positions ─────────────────────────────────────────────
     pub decl_name_positions: Vec<(Name, Pos, bool)>,
-
     // ── Debug trace ─────────────────────────────────────────────────
-    pub reduction_trace: Vec<ReductionStep>,
 }
 
 impl Session {
@@ -67,7 +64,6 @@ impl Session {
             skip_guard: false,
             current_def: None,
             decl_name_positions: Vec::new(),
-            reduction_trace: Vec::new(),
         }
     }
 }

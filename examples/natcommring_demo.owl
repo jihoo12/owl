@@ -1,0 +1,28 @@
+-- `NatCommRing` — the bundled concrete Nat CommRing instance.
+--
+-- lib/algebra.owl bundles the Part-3 globals of lib/ring_laws.owl into
+-- `NatCommRing : CommRing Nat add mul zero one`.  Identities over Nat can
+-- then be discharged by projecting the bundled laws directly.
+--
+-- Scope note: the fully-automatic route (`by ring with NatCommRing`)
+-- currently fails for goals whose reified normal forms require canonical
+-- numeral/shape handling beyond syntactic head matching; tracked in
+-- TODO.md §H5 together with the follow-up kernel work.
+
+import "../lib/algebra.owl"
+
+def t_addcomm : forall (a : Nat), forall (b : Nat), Path Nat (add a b) (add b a) :=
+  by intro a b; exact (NatCommRing.add_comm a b)
+
+def t_mulcomm : forall (a : Nat), forall (b : Nat), Path Nat (mul a b) (mul b a) :=
+  by intro a b; exact (NatCommRing.mul_comm a b)
+
+def t_distrib :
+  forall (a : Nat), forall (b : Nat), forall (c : Nat),
+  Path Nat (mul a (add b c)) (add (mul a b) (mul a c)) :=
+  by intro a b c; exact (NatCommRing.mul_add_l a b c)
+
+def t_addassoc :
+  forall (a : Nat), forall (b : Nat), forall (c : Nat),
+  Path Nat (add (add a b) c) (add a (add b c)) :=
+  by intro a b c; exact (NatCommRing.add_assoc a b c)

@@ -3662,7 +3662,8 @@ pub fn check_dt(
         // Tactic block: run tactics to produce a proof term, then check it
         Term::TBy(tactics) => {
             let goal_ty = nbe_eval(ty, session);
-            let mut engine = crate::cubical::tactics::TacticEngine::new(dts, goal_ty);
+            let mut engine =
+                crate::cubical::tactics::TacticEngine::new(dts, goal_ty.clone(), goal_ty);
             for tac in tactics {
                 engine.run_tactic(tac, ctx, session)?;
             }

@@ -1536,6 +1536,19 @@ def main : Nat := v\n";
     }
 
     #[test]
+    fn natcommring_demo_example_checks() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/natcommring_demo.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .unwrap();
+        handle
+            .join()
+            .unwrap()
+            .expect("natcommring_demo.owl should typecheck");
+    }
+
+    #[test]
     fn int_omega_example_checks() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/int_demo.owl");
         let handle = std::thread::Builder::new()
