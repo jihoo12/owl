@@ -715,8 +715,10 @@ pub fn prove(
         )));
     }
 
-    // Per-side diagnostics: check each half independently first.
-    {
+    // Per-side diagnostics: check each half independently first. Verify-once
+    // policy (see field.rs): these are diagnostic-only under --debug; the
+    // driver's process_def re-check is the soundness backstop.
+    if crate::cubical::debug::is_active() {
         let goal_l = Term::TPath(
             Box::new(carrier.clone()),
             Box::new(u.clone()),
@@ -759,10 +761,16 @@ pub fn prove(
 
     let pf = tr(&grp, &pu, &sy(&grp, &pv));
 
-    // Hand the proof to the kernel — the soundness backstop.
+    // Hand the proof to the kernel — the soundness backstop. (The driver's
+    // process_def pass re-verifies; this final check is the --debug
+    // diagnostic per the verify-once policy in field.rs.)
     let prev_skip = crate::cubical::typechecker::termination::should_skip_guard(session);
     crate::cubical::typechecker::termination::set_skip_guard(true, session);
-    let check_res = check_dt(dts, ctx, &pf.p, goal_ty, session);
+    let check_res = if crate::cubical::debug::is_active() {
+        check_dt(dts, ctx, &pf.p, goal_ty, session)
+    } else {
+        Ok(())
+    };
     crate::cubical::typechecker::termination::set_skip_guard(prev_skip, session);
     if let Err(_e) = &check_res {
         crate::debug_log!(

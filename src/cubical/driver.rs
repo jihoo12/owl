@@ -852,6 +852,27 @@ fn collect_meta_ids(t: &Term, out: &mut Vec<i32>) {
     }
 }
 
+/// Phase timer for the per-definition pipeline, reported to stderr when
+/// `OWL_TIMINGS=1`. Zero cost otherwise (one env lookup per report call,
+/// which itself is gated).
+struct PhaseTiming<'a>(&'a str, std::time::Instant);
+
+impl<'a> PhaseTiming<'a> {
+    fn start(def: &'a str) -> Self {
+        Self(def, std::time::Instant::now())
+    }
+    fn report(&self, phase: &str) {
+        if std::env::var_os("OWL_TIMINGS").is_some() {
+            eprintln!(
+                "[timing] {:<28} {:<14} {:>10.2?}",
+                self.0,
+                phase,
+                self.1.elapsed()
+            );
+        }
+    }
+}
+
 fn process_def(
     name: &Name,
     ty: &Term,
@@ -914,6 +935,7 @@ fn process_def(
     // (de Bruijn index 0 of the goal scope) stays neutral.
     let globals = crate::cubical::env::build_definition_values(env, session);
     let prev_globals = session.set_current_globals(Some(globals));
+    let tm_resolve = PhaseTiming::start(name.as_str());
     let resolved_val = crate::cubical::tactics::resolve_tactics(
         &env.datatypes,
         val,
@@ -924,6 +946,7 @@ fn process_def(
     .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
     session.set_current_globals(prev_globals);
     let resolved_val = resolved_val?;
+    tm_resolve.report("tactic-resolve");
 
     // Register before checking the body so recursive calls resolve.
     // Store the RAW annotation so that consumers resolving this definition's
@@ -933,8 +956,20 @@ fn process_def(
     env.define(name.clone(), ty.clone(), resolved_val.clone());
     let prev_def =
         crate::cubical::typechecker::termination::set_current_def(Some(name.clone()), session);
-    let result = check_with_full_env(env, &resolved_val, &check_ty, session)
-        .map_err(|e| RunError::Type(Box::new(ContextualError::with_def(name, e).inner)));
+    let tm_check = PhaseTiming::start(name.as_str());
+    let from_tactic = matches!(val, Term::TBy(_));
+    let result = check_with_full_env(env, &resolved_val, &check_ty, session).map_err(|e| {
+        let err = ContextualError::with_def(name, e);
+        if from_tactic && !crate::cubical::debug::is_active() {
+            RunError::Type(Box::new(TypeError::Other(format!(
+                "{err}\n  (the body was produced by a tactic block; re-run with --debug for \
+                 the solver's own diagnostic)"
+            ))))
+        } else {
+            RunError::Type(Box::new(err.inner))
+        }
+    });
+    tm_check.report("kernel-recheck");
     crate::cubical::typechecker::termination::set_current_def(prev_def, session);
     if by_wf {
         crate::cubical::typechecker::termination::set_skip_guard(false, session);
@@ -951,12 +986,14 @@ fn process_def(
         )));
     }
 
+    let tm_norm = PhaseTiming::start(name.as_str());
     let output = RunOutput {
         name: name.clone(),
         ty: zonk(ty, session),
         value: zonk(&nbe_eval(&resolved_val, session), session),
         global_names: env.defs.iter().map(|(n, _, _)| n.clone()).collect(),
     };
+    tm_norm.report("output-norm");
 
     Ok(output)
 }

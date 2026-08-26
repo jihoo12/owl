@@ -1797,9 +1797,15 @@ pub fn prove(
     // The raw proof already checks: kernel re-infers each leaf from raw law
     // declarations (lookup_ctx / TApp raw beta), and check_dt(dts, ctx, &pf.p,
     // goal_ty) passes.
+    // Verify-once policy (see field.rs): the driver's `process_def` re-check
+    // is the soundness backstop; this diagnostic pass runs only under --debug.
     let prev_skip = crate::cubical::typechecker::termination::should_skip_guard(session);
     crate::cubical::typechecker::termination::set_skip_guard(true, session);
-    let check_res = check_dt(dts, ctx, &pf.p, goal_ty, session);
+    let check_res = if crate::cubical::debug::is_active() {
+        check_dt(dts, ctx, &pf.p, goal_ty, session)
+    } else {
+        Ok(())
+    };
     crate::cubical::typechecker::termination::set_skip_guard(prev_skip, session);
     if let Err(e) = check_res {
         let detail = match &e {

@@ -45,7 +45,7 @@ cargo run -- eval  examples/nat.owl   # typecheck + normalize main/last def
 cargo run -- check lib/ring_laws.owl  # check a library
 cargo fmt                          # format Rust (run after editing .rs files)
 scripts/verify.sh                  # full verification pipeline (build+fmt+test+rescan)
-scripts/verify.sh --quick          # fast iteration (skips the slow suites, §4)
+scripts/verify.sh --quick          # alias; no slow suites remain (see §4)
 ```
 
 `--debug` (or `-d`, or `OWL_DEBUG=1`) enables detailed typechecker/NbE traces —
@@ -81,10 +81,10 @@ use it when reducing or typechecking behaves unexpectedly.
   handle.join()??;
   ```
 - `bad_examples/*.owl` are negative tests: typechecking them must **fail**.
-- **Slow in debug builds:** `field_demo_example_checks` / `field_laws_lib_checks`
-  (~5 min total; the biggest field theorem ~1 min per kernel pass) and the
-  `stress_*` / ring demos. Use `scripts/verify.sh --quick` for fast iteration
-  and the full `cargo test` when you touch the kernel, NbE, or equality.
+- **Slow suites:** none since the 2026-08 perf work — `cargo test` runs the
+  whole suite (~233 tests) in ~30–55 s thanks to opt-level-2 dev/test profiles
+  and verify-once tactic proofs. The full suite is cheap enough for iteration;
+  prefer targeted `cargo test <name>` while narrowing a failure.
 - When you add a kernel feature or fix, add a **dedicated example guard test** so
   it can't silently regress.
 
@@ -113,8 +113,7 @@ available directly. See `rust-analyzer-db.md` for the full command list. The
 1. `cargo build` — the change compiles.
 2. `cargo fmt --check` — formatting is clean (or run `cargo fmt`).
 3. Run tests: targeted `cargo test <name>` first, then the full suite
-   (`scripts/verify.sh --quick` for iteration, full `cargo test` for kernel/
-   NbE/equality changes).
+   (`cargo test` — fast enough to run for every change).
 4. `cargo run -- check` on the `.owl` files you touched or added.
 5. `uvx rust-analyzer-db scan src --db rust_code.db` so the db reflects the new
    source.
@@ -154,7 +153,18 @@ available directly. See `rust-analyzer-db.md` for the full command list. The
   globals resolve through the global definition value vector. Inlining globals
   into the env re-opens recursive definitions and causes unbounded term growth /
   `EtaFuelExhausted`.
-- **Deep normal forms overflow the 2 MiB test stack** — see §4.
+- **Deep normal forms overflow the 2 MiB test stack** — see §4. The `owl` CLI
+  itself runs the driver on a 256 MiB-stack worker thread (`src/main.rs`), so
+  command-line checks never need `ulimit` tricks; only libtest threads need the
+  64 MiB spawn pattern.
+- **Tactic proofs are verified once** (the mandatory `process_def`
+  re-check). The solvers' internal `check_dt` diagnostics run only under
+  `--debug`; on a kernel rejection of a tactic-generated body the driver hints
+  at that. Don't re-add unconditional pre-checks in ring/field/group — they
+  doubled wall time on large proof trees.
+- `OWL_TIMINGS=1 owl check <file>` prints per-definition phase timings
+  (tactic-resolve / kernel-recheck / output-norm) to stderr — use it when
+  checking feels slow before optimizing blindly.
 
 ## 9. Rust conventions
 

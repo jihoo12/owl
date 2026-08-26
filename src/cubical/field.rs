@@ -978,7 +978,17 @@ pub fn prove(
 
     let prev_skip = crate::cubical::typechecker::termination::should_skip_guard(session);
     crate::cubical::typechecker::termination::set_skip_guard(true, session);
-    let check_res = check_dt(dts, ctx, &p.p, goal_ty, session);
+    // Verify-once policy: `process_def` re-checks every resolved definition
+    // body against its type (`check_with_full_env`) — that mandatory pass is
+    // the soundness backstop. Re-checking here as well duplicates the entire
+    // pass (~2x wall time on large proof trees, e.g. examples/field_demo.owl),
+    // so this diagnostic check runs only under `--debug`, where the rich
+    // "kernel rejected the constructed proof" message matters.
+    let check_res = if crate::cubical::debug::is_active() {
+        check_dt(dts, ctx, &p.p, goal_ty, session)
+    } else {
+        Ok(())
+    };
     crate::cubical::typechecker::termination::set_skip_guard(prev_skip, session);
     if let Err(e) = check_res {
         let detail = match &e {

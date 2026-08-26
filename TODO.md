@@ -4,6 +4,28 @@
 
 ## Completed (implementation log)
 
+- [x] **Performance pass — `cargo test` 102.8 s → ~31–54 s, tactic proofs verified once, CLI stack-safe.**
+  Motivated by H5 iteration pain (long test runs + debug-build stack overflows). Profiled
+  first with throwaway chokepoint timers + an allocation-counting global allocator
+  (`field_demo.owl`: 53.9 s release, 2.0 G allocations / 157 GiB churn; ~50 % of wall time
+  was the solvers' *internal* `check_dt` duplicating the driver's mandatory re-check, and
+  NbE internals — normalize/quote/shift/subst/eta_eq — were only ~4 s, so the cost is
+  per-node Term cloning inside one infer/check traversal, not arithmetic). Three changes:
+  (1) **verify-once policy** — ring/field/group's internal kernel checks are now
+  `--debug`-only diagnostics; production runs rely on the single mandatory
+  `process_def` re-check (soundness unchanged), and on rejection of a tactic-generated
+  body the driver appends a "re-run with --debug" hint (`examples/field_demo.owl`
+  53.9 → 27.8 s from this alone). omega's `check_dt` candidate filter is load-bearing
+  and untouched. (2) **opt-level 2 for dev/test profiles** (debug assertions kept) —
+  debug CLI ≈ release now; incremental builds 2.5 → 5.5 s. (3) **256 MiB-stack worker
+  thread** wrapping all `owl` CLI commands in `src/main.rs` (lazily committed; verified
+  under `ulimit -s 1024` on stress_hit_elimination). Also added a permanent
+  `OWL_TIMINGS=1` phase timer to stderr (tactic-resolve / kernel-recheck / output-norm),
+  updated verify.sh (--quick skip list obsolete), AGENTS.md §4/§6/§8, and removed all
+  profiling scaffolding. Verified: full suite **233 green** (~31 s warm); field_demo
+  release+debug ≈ 30 s each (was 53.9 / 99.5); bad_examples still fail;
+  group_solver_rejects_non_identity etc. intact.
+
 - [x] **H5 started — shared structure library (`lib/algebra.owl`) with the `Module` record.**
   Consolidates `CommRing`/`Group`/`Field` documentation-and-declarations in one library file
   (tactic resolution matches datatype names, so pre-existing inline declarations in
@@ -425,6 +447,15 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   `int_add_assoc`, `int_mul_assoc`, distributivity, and the `CommRing` record bundling that
   would route `by ring` over Int — natural groundwork for §H5.
 - [ ] **H4. Bundled algebra records + lightweight instance search** *(🔴 — without typeclasses, every theorem must thread `CommRing R` explicitly. Minimal implicit-argument + instance-search layer, Lean/Coq-style, on top of the existing record system.)*
+- [ ] **Kernel perf follow-ups (profiled 2026-08, post verify-once)** *(🟡 — only if large-proof
+  checking feels slow again; `OWL_TIMINGS=1` first)*. After the perf pass,
+  `field_demo.owl`'s remaining ~25 s is ONE `infer_dt/check_dt` traversal of a
+  ~392k-node law-application tree with ~1 G allocations. Candidate levers in
+  expected order: (a) cache/memoize leaf-law type instantiation during re-check
+  (each leaf application currently normalizes its instantiated Pi type fresh —
+  args differ so the whole-term `eval_cache` never hits); (b) term sharing
+  (`Rc<Term>`/hash-consing) for O(1) clones + pointer-eq fast paths — invasive,
+  de Bruijn bug class, do behind a full-suite run; (c) shrink `infer_dt` frames.
 - [ ] **H5. Commutative algebra library** *(🔴)*: `CommRing`/`Field`/`Module`/`Ideal` structures; quotient rings `R/I` and localization `S⁻¹R` via the existing HIT quotients; polynomial rings `R[X]`; prime/maximal ideals; finite fields `F_p`.
   **In progress**: structures half landed — `lib/algebra.owl` consolidates
   `CommRing`/`Group`/`Field` and adds the `Module` record (with the kernel's first
@@ -443,6 +474,8 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   expand/reify_add/reify_mul), plus proof-term construction for mixed concrete shapes;
   a pre-existing `-d` trace re-entrancy bug was also fixed en route (reduction_trace
   moved out of Session into nbe/trace.rs).
+  (The test-time / stack-overflow iteration blocker was resolved 2026-08 — see the
+  perf log entry atop this file; remaining kernel-perf ideas live in their own open item.)
   **Session-2 findings on the int assoc/distributivity blocker**: the
   truncated-subtraction encoding (`pos`/`negsuc` + `_owl_add_pos_neg`) is itself the
   obstacle. Four one-directional APN bridges were designed and two fully proven

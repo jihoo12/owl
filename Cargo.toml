@@ -4,3 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+# The kernel is recursion- and allocation-heavy over multi-hundred-knode proof
+# terms; at opt-level 0 each infer_dt/check_dt frame spills ~176 KiB (stack
+# overflows) and wall time inflates several-fold (see TODO.md perf log).
+# opt-level 2 for dev/test trades slower incremental compiles for usable
+# check/test latency; debug assertions stay on.
+[profile.dev]
+opt-level = 2
+
+[profile.test]
+opt-level = 2

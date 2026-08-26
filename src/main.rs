@@ -38,43 +38,67 @@ fn main() {
     args.retain(|a| a != "--debug" && a != "-d");
 
     let mut args_iter = args.into_iter();
-    let result = cubical::session::with_session_mut(|session| match args_iter.next().as_deref() {
-        None | Some("help") | Some("--help") | Some("-h") => {
-            print!("{USAGE}");
-            Ok(())
+    // Run the whole session on a worker thread with a large stack. The
+    // kernel recurses over deep normal forms (quote/subst/infer_dt); on
+    // small `ulimit -s` values those recursions overflow the default 8 MiB
+    // main-thread stack. Thread stacks are lazily committed, so reserving
+    // 256 MiB costs nothing until deep recursion actually touches it. The
+    // driver is single-threaded and its Session is thread-local, so moving
+    // everything onto one worker preserves semantics exactly.
+    let worker = std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(move || {
+            cubical::session::with_session_mut(|session| match args_iter.next().as_deref() {
+                None | Some("help") | Some("--help") | Some("-h") => {
+                    print!("{USAGE}");
+                    Ok(())
+                }
+                Some("check") => file_arg(args_iter.next(), "check").and_then(|path| {
+                    reject_extra(args_iter)?;
+                    check(&path, session)
+                        .map(|()| println!("{}: OK", path.display()))
+                        .map_err(format_run_error)
+                }),
+                Some("eval") | Some("run") => file_arg(args_iter.next(), "eval").and_then(|path| {
+                    reject_extra(args_iter)?;
+                    run(&path, session)
+                        .map(|output| println!("{output}"))
+                        .map_err(format_run_error)
+                }),
+                Some("repl") => {
+                    if args_iter.next().is_some() {
+                        Err("`owl repl` does not accept a file argument".to_string())
+                    } else {
+                        repl(session)
+                    }
+                }
+                Some(path) if !path.starts_with('-') => {
+                    if args_iter.next().is_some() {
+                        Err("expected a single source file; run `owl help` for usage".to_string())
+                    } else {
+                        run(path, session)
+                            .map(|output| println!("{output}"))
+                            .map_err(format_run_error)
+                    }
+                }
+                Some(command) => Err(format!(
+                    "unknown command `{command}`; run `owl help` for usage"
+                )),
+            })
+        })
+        .expect("spawn owl worker thread");
+    let result = match worker.join() {
+        Ok(r) => r,
+        Err(panic) => {
+            let msg = panic
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| panic.downcast_ref::<String>().map(|s| s.as_str()))
+                .unwrap_or("unknown panic");
+            eprintln!("owl: internal error (panic): {msg}");
+            std::process::exit(101);
         }
-        Some("check") => file_arg(args_iter.next(), "check").and_then(|path| {
-            reject_extra(args_iter)?;
-            check(&path, session)
-                .map(|()| println!("{}: OK", path.display()))
-                .map_err(format_run_error)
-        }),
-        Some("eval") | Some("run") => file_arg(args_iter.next(), "eval").and_then(|path| {
-            reject_extra(args_iter)?;
-            run(&path, session)
-                .map(|output| println!("{output}"))
-                .map_err(format_run_error)
-        }),
-        Some("repl") => {
-            if args_iter.next().is_some() {
-                Err("`owl repl` does not accept a file argument".to_string())
-            } else {
-                repl(session)
-            }
-        }
-        Some(path) if !path.starts_with('-') => {
-            if args_iter.next().is_some() {
-                Err("expected a single source file; run `owl help` for usage".to_string())
-            } else {
-                run(path, session)
-                    .map(|output| println!("{output}"))
-                    .map_err(format_run_error)
-            }
-        }
-        Some(command) => Err(format!(
-            "unknown command `{command}`; run `owl help` for usage"
-        )),
-    });
+    };
 
     if debug {
         let steps = cubical::nbe::trace::drain_trace();
