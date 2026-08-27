@@ -22,6 +22,20 @@ def nat_mul : Nat -> Nat -> Nat := fun m n =>
   | zero => zero
   | suc m' => nat_add (nat_mul m' n) n
 
+-- Nat lemmas (from ring_laws.owl) - all commented out - need proper pattern matching proofs
+-- def _owl_add_assoc : forall (x : Nat), forall (y : Nat), forall (z : Nat), Path Nat (nat_add (nat_add x y) z) (nat_add x (nat_add y z))
+-- def _owl_add_comm : forall (a : Nat), forall (b : Nat), Path Nat (nat_add a b) (nat_add b a)
+-- def _owl_add_0_r : forall (x : Nat), Path Nat (nat_add x zero) x
+-- def _owl_add_suc_r : forall (m : Nat), forall (n : Nat), Path Nat (nat_add m (suc n)) (suc (nat_add m n))
+-- def _owl_mul_assoc : forall (x : Nat), forall (y : Nat), forall (z : Nat), Path Nat (nat_mul (nat_mul x y) z) (nat_mul x (nat_mul y z))
+-- def _owl_mul_comm : forall (a : Nat), forall (b : Nat), Path Nat (nat_mul a b) (nat_mul b a)
+-- def _owl_mul_add_l : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (nat_mul a (nat_add b c)) (nat_add (nat_mul a b) (nat_mul a c))
+-- def _owl_mul_add_r : forall (a : Nat), forall (b : Nat), forall (c : Nat), Path Nat (nat_mul (nat_add a b) c) (nat_add (nat_mul a c) (nat_mul b c))
+-- def _owl_mul_one_r : forall (n : Nat), Path Nat (nat_mul n (suc zero)) n
+-- def _owl_mul_one_l : forall (n : Nat), Path Nat (nat_mul (suc zero) n) n
+-- def _owl_mul_zero_r : forall (n : Nat), Path Nat (nat_mul n zero) zero
+-- def _owl_mul_zero_l : forall (n : Nat), Path Nat (nat_mul zero n) zero
+
 -- Bool for sign (false = pos, true = neg)
 inductive Bool where
   | false : Bool
@@ -92,12 +106,60 @@ def smg_one : IntSM := mkIntSM false (suc zero)
 -- def bool_xor_assoc : forall (a : Bool), forall (b : Bool), forall (c : Bool), Path Bool (bool_xor (bool_xor a b) c) (bool_xor a (bool_xor b c)) :=
 --   fun a b c => <i> bool_xor a (bool_xor b c)
 
--- IntSM lemmas (commented out for now - need actual proofs)
--- def smg_add_comm : forall (a : IntSM), forall (b : IntSM), Path IntSM (smg_add a b) (smg_add b a) :=
---   fun a b => <i> smg_add a b
---
--- def smg_add_assoc : forall (a : IntSM), forall (b : IntSM), forall (c : IntSM), Path IntSM (smg_add (smg_add a b) c) (smg_add a (smg_add b c)) :=
---   fun a b c => <i> smg_add (smg_add a b) c
+-- Addition associativity: (a + b) + c = a + (b + c)
+-- Addition associativity: (a + b) + c = a + (b + c)
+-- Commented out - needs proper Nat lemmas to be proven
+-- def smg_add_assoc : forall (a : IntSM), forall (b : IntSM), forall (c : IntSM), Path IntSM (smg_add (smg_add a b) c) (smg_add a (smg_add b c)) by_wf :=
+--   fun a b c =>
+--     match a return forall (b : IntSM), forall (c : IntSM), Path IntSM (smg_add (smg_add a b) c) (smg_add a (smg_add b c)) with
+--     | mkIntSM false a_mag =>
+--       -- a is positive
+--       fun b c =>
+--         match b return forall (c : IntSM), Path IntSM (smg_add (smg_add (mkIntSM false a_mag) b) c) (smg_add (mkIntSM false a_mag) (smg_add b c)) with
+--         | mkIntSM false b_mag =>
+--           -- b is positive
+--           fun c =>
+--             match c return Path IntSM (smg_add (smg_add (mkIntSM false a_mag) (mkIntSM false b_mag)) c) (smg_add (mkIntSM false a_mag) (smg_add (mkIntSM false b_mag) c)) with
+--             | mkIntSM false c_mag =>
+--               -- c is positive: pos + pos + pos = pos
+--               <i> mkIntSM false (a_mag)
+--             | mkIntSM true c_mag =>
+--               -- c is negative: pos + pos + neg
+--               <i> smg_add (smg_add (mkIntSM false a_mag) (mkIntSM false b_mag)) (mkIntSM true c_mag)
+--         | mkIntSM true b_mag =>
+--           -- b is negative
+--           fun c =>
+--             match c return Path IntSM (smg_add (smg_add (mkIntSM false a_mag) (mkIntSM true b_mag)) c) (smg_add (mkIntSM false a_mag) (smg_add (mkIntSM true b_mag) c)) with
+--             | mkIntSM false c_mag =>
+--               -- c is positive: pos + neg + pos
+--               <i> smg_add (smg_add (mkIntSM false a_mag) (mkIntSM true b_mag)) (mkIntSM false c_mag)
+--             | mkIntSM true c_mag =>
+--               -- c is negative: pos + neg + neg
+--               <i> smg_add (smg_add (mkIntSM false a_mag) (mkIntSM true b_mag)) (mkIntSM true c_mag)
+--     | mkIntSM true a_mag =>
+--       -- a is negative
+--       fun b c =>
+--         match b return forall (c : IntSM), Path IntSM (smg_add (smg_add (mkIntSM true a_mag) b) c) (smg_add (mkIntSM true a_mag) (smg_add b c)) with
+--         | mkIntSM false b_mag =>
+--           -- b is positive
+--           fun c =>
+--             match c return Path IntSM (smg_add (smg_add (mkIntSM true a_mag) (mkIntSM false b_mag)) c) (smg_add (mkIntSM true a_mag) (smg_add (mkIntSM false b_mag) c)) with
+--             | mkIntSM false c_mag =>
+--               -- c is positive: neg + pos + pos
+--               <i> smg_add (smg_add (mkIntSM true a_mag) (mkIntSM false b_mag)) (mkIntSM false c_mag)
+--             | mkIntSM true c_mag =>
+--               -- c is negative: neg + pos + neg
+--               <i> smg_add (smg_add (mkIntSM true a_mag) (mkIntSM false b_mag)) (mkIntSM true c_mag)
+--         | mkIntSM true b_mag =>
+--           -- b is negative
+--           fun c =>
+--             match c return Path IntSM (smg_add (smg_add (mkIntSM true a_mag) (mkIntSM true b_mag)) c) (smg_add (mkIntSM true a_mag) (smg_add (mkIntSM true b_mag) c)) with
+--             | mkIntSM false c_mag =>
+--               -- c is positive: neg + neg + pos
+--               <i> smg_add (smg_add (mkIntSM true a_mag) (mkIntSM true b_mag)) (mkIntSM false c_mag)
+--             | mkIntSM true c_mag =>
+--               -- c is negative: neg + neg + neg = neg
+--               <i> mkIntSM true (a_mag)
 --
 -- def smg_add_zero_r : forall (a : IntSM), Path IntSM (smg_add a smg_zero) a :=
 --   fun a => <i> smg_add a smg_zero
