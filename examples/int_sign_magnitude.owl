@@ -1,0 +1,89 @@
+-- Experiment: Sign/magnitude Int encoding for tractable ring proofs
+--
+-- Int = (sign : Bool, mag : Nat) where
+--   (false, n) = n
+--   (true, n) = -n
+--
+-- This makes add/mul/associativity much simpler because we can just
+-- do case analysis on signs and use Nat algebra.
+
+-- Nat
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def nat_add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (nat_add m' n)
+
+def nat_mul : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => zero
+  | suc m' => nat_add (nat_mul m' n) n
+
+-- Bool for sign (false = pos, true = neg)
+inductive Bool where
+  | false : Bool
+  | true : Bool
+
+-- Sign/magnitude Int
+record IntSM where
+  field sign : Bool
+  field mag : Nat
+
+-- Addition on sign/magnitude Int
+def smg_add : IntSM -> IntSM -> IntSM := fun a b =>
+  match a return IntSM with
+  | mkIntSM false a_mag =>
+    match b return IntSM with
+    | mkIntSM false b_mag => mkIntSM false (nat_add a_mag b_mag)
+    | mkIntSM true b_mag =>
+      match a_mag return IntSM with
+      | zero => mkIntSM true b_mag
+      | suc a_mag' =>
+        match b_mag return IntSM with
+        | zero => mkIntSM false a_mag'
+        | suc b_mag' => smg_add (mkIntSM false a_mag') (mkIntSM true b_mag')
+  | mkIntSM true a_mag =>
+    match b return IntSM with
+    | mkIntSM false b_mag =>
+      match a_mag return IntSM with
+      | zero => mkIntSM false b_mag
+      | suc a_mag' =>
+        match b_mag return IntSM with
+        | zero => mkIntSM true a_mag'
+        | suc b_mag' => smg_add (mkIntSM true a_mag') (mkIntSM false b_mag')
+    | mkIntSM true b_mag => mkIntSM true (nat_add a_mag b_mag)
+
+-- Negation
+def smg_neg : IntSM -> IntSM := fun a =>
+  match a return IntSM with
+  | mkIntSM false a_mag => mkIntSM true a_mag
+  | mkIntSM true a_mag => mkIntSM false a_mag
+
+-- Boolean xor
+def bool_xor : Bool -> Bool -> Bool by_wf := fun a b =>
+  match a return Bool with
+  | false =>
+    match b return Bool with
+    | false => false
+    | true => true
+  | true =>
+    match b return Bool with
+    | false => true
+    | true => false
+
+-- Multiplication
+def smg_mul : IntSM -> IntSM -> IntSM by_wf := fun a b =>
+  match a return IntSM with
+  | mkIntSM a_sign a_mag =>
+    match b return IntSM with
+    | mkIntSM b_sign b_mag => mkIntSM (bool_xor a_sign b_sign) (nat_mul a_mag b_mag)
+
+-- Zero and one
+def smg_zero : IntSM := mkIntSM false zero
+def smg_one : IntSM := mkIntSM false (suc zero)
+
+-- Main
+def main : U1 := U0

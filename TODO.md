@@ -491,10 +491,20 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   encoding (or difference-of-naturals pairs quotiented), where add/assoc/distributivity are
   plain case analyses with constructor-driven reductions; then reprove the CommRing bundle
   cheaply. The current pos/negsuc Int stays for omega's definitional tier.
+- [x] **Sign/magnitude Int prototype** — `examples/int_sign_magnitude.owl` demonstrates `IntSM` with `sign : Bool` / `mag : Nat`. Addition, negation, multiplication defined via case analysis on signs with nested matches on magnitudes. All core definitions typecheck (uses `by_wf` for termination). Next: prove ring laws (add_assoc, mul_assoc, distributivity) with this encoding, then bundle `IntCommRing`.
+- [ ] Prove Int ring laws (add_assoc, mul_assoc, distributivity) with new encoding
+- [ ] Bundle IntCommRing instance
+- [ ] Make `by ring with NatCommRing` work automatically (canonical numeral handling)
+- [ ] Add Ideal predicates to lib/algebra.owl
+- [ ] Add polynomial rings R[X]
+- [ ] Add quotient rings R/I and localization S⁻¹R via HITs
+- [ ] Add finite fields F_p
+
 - [ ] **H6. Set-level foundation polish** *(🟡)*: quotient elimination ergonomics, proof irrelevance for Prop, `isSet` stability — AG objects are all sets.
 - [ ] **H7. Category + sheaf core** *(🔴)*: categories, functors, natural transformations, Yoneda; presheaves and sheaves; the Zariski site.
 - [ ] **H8. Schemes** *(🔴)*: **functor-of-points route** — `Spec R := Hom(R, −)` on `CommRing^op`; a scheme is a Zariski sheaf locally represented by affines (the UniMath approach). Avoids building the structure sheaf on a point-set, which is far costlier in type theory. Targets: `Spec R`, Zariski opens `D(f)`, affine cover, products/pullbacks, projective space `P^n`, closed/open immersions.
 - [ ] **H9. Long tail — derived schemes / higher stacks** *(🟢 — where cubical/HoTT genuinely shines over vanilla ITT: simplicial rings, homotopy limits/colimits, higher truncation. Research-level.)*
+- [ ] **H10. Ergonomics blockers at library scale** *(🟡)*: `forall` cannot follow `->` (`docs/reference.md:213` — all binders must precede the arrow chaing tail — derived schemes / higher stacks** *(🟢 — where cubical/HoTT genuinely shines over vanilla ITT: simplicial rings, homotopy limits/colimits, higher truncation. Research-level.)*
 - [ ] **H10. Ergonomics blockers at library scale** *(🟡)*: `forall` cannot follow `->` (`docs/reference.md:213` — all binders must precede the arrow chain) and the basic module/import system (§D) become painful for a growing AG library.
 
 ---
