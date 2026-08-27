@@ -17,7 +17,9 @@ pub fn meta_mentions(id: i32, t: &Term) -> bool {
         | Term::TCube(_) => false,
         Term::TApp(f, a) => meta_mentions(id, f) || meta_mentions(id, a),
         Term::TAbs(_, b) | Term::PLam(_, b) => meta_mentions(id, b),
-        Term::TPi(_, a, b) | Term::TSigma(_, a, b) => meta_mentions(id, a) || meta_mentions(id, b),
+        Term::TPi(_, a, b, _) | Term::TSigma(_, a, b) => {
+            meta_mentions(id, a) || meta_mentions(id, b)
+        }
         Term::TPath(a, u, v) => {
             meta_mentions(id, a) || meta_mentions(id, u) || meta_mentions(id, v)
         }
@@ -150,7 +152,7 @@ fn term_children_mut(t: &mut Term) -> Vec<&mut Term> {
         | Term::Meta(_) => vec![],
         Term::TApp(f, a) => vec![f.as_mut(), a.as_mut()],
         Term::TAbs(_, b) | Term::PLam(_, b) => vec![b.as_mut()],
-        Term::TPi(_, a, b) | Term::TSigma(_, a, b) => vec![a.as_mut(), b.as_mut()],
+        Term::TPi(_, a, b, _) | Term::TSigma(_, a, b) => vec![a.as_mut(), b.as_mut()],
         Term::TPath(a, u, v) => vec![a.as_mut(), u.as_mut(), v.as_mut()],
         Term::PApp(p, r) => vec![p.as_mut(), r.as_mut()],
         Term::THComp(a, sys, base)
@@ -252,7 +254,7 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         | Term::Meta(_) => vec![],
         Term::TApp(f, a) => vec![f.as_ref(), a.as_ref()],
         Term::TAbs(_, b) | Term::PLam(_, b) => vec![b.as_ref()],
-        Term::TPi(_, a, b) | Term::TSigma(_, a, b) => vec![a.as_ref(), b.as_ref()],
+        Term::TPi(_, a, b, _) | Term::TSigma(_, a, b) => vec![a.as_ref(), b.as_ref()],
         Term::TPath(a, u, v) => vec![a.as_ref(), u.as_ref(), v.as_ref()],
         Term::PApp(p, r) => vec![p.as_ref(), r.as_ref()],
         Term::THComp(a, sys, base)

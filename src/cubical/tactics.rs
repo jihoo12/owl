@@ -447,7 +447,7 @@ impl<'a> TacticEngine<'a> {
 
                 for name in names {
                     match current_ty {
-                        Term::TPi(_x, a, b) => {
+                        Term::TPi(_x, a, b, _) => {
                             let dom =
                                 nbe_eval_ctx(self.tactic_ctx.len() + outer_ctx.len(), &a, session);
                             // Use the user-provided name, not the type's binder name,
@@ -543,7 +543,7 @@ impl<'a> TacticEngine<'a> {
                 let f_ty = infer_dt(self.dts, &combined_ctx, term, session)?;
                 let f_ty_nf = nbe_eval(&f_ty, session);
                 match f_ty_nf {
-                    Term::TPi(ref _x, ref a_ty, ref b_ty) => {
+                    Term::TPi(ref _x, ref a_ty, ref b_ty, _) => {
                         let goal_nf = nbe_eval(&self.goal_ty, session);
                         let b_nf = nbe_eval(&b_ty, session);
 

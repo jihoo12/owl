@@ -36,7 +36,8 @@ fn parses_dependent_pi() {
             Term::TPi(
                 "x".to_string(),
                 Box::new(Term::TUniv(0)),
-                Box::new(Term::TVar(0))
+                Box::new(Term::TVar(0)),
+                false
             )
         );
     });
@@ -48,15 +49,15 @@ fn parses_forall_after_arrow() {
         // `A -> forall (x : B), C -> D` parses as `A -> (forall (x : B), (C -> D))`
         let term = parse_term("U0 -> forall (x : U1), U1 -> U0", session).unwrap();
         match term {
-            Term::TPi(dom_b, dom, cod) => {
+            Term::TPi(dom_b, dom, cod, _) => {
                 assert_eq!(dom_b, "_");
                 assert_eq!(*dom, Term::TUniv(0));
                 match *cod {
-                    Term::TPi(x, bx, body) => {
+                    Term::TPi(x, bx, body, _) => {
                         assert_eq!(x, "x");
                         assert_eq!(*bx, Term::TUniv(1));
                         match *body {
-                            Term::TPi(_, bd, b) => {
+                            Term::TPi(_, bd, b, _) => {
                                 assert_eq!(*bd, Term::TUniv(1));
                                 assert_eq!(*b, Term::TUniv(0));
                             }
@@ -231,8 +232,10 @@ fn parses_parameterized_module_declaration() {
                         Box::new(Term::TPi(
                             "_".into(),
                             Box::new(Term::TVar(0)),
-                            Box::new(Term::TVar(1))
-                        ))
+                            Box::new(Term::TVar(1)),
+                            false
+                        )),
+                        false
                     )
                 );
                 assert_eq!(
@@ -447,7 +450,7 @@ fn system_type_in_function_type() {
         let src = "forall (_ : [0 => U0, 1 => U0]), U0";
         let term = parse_term(src, session).unwrap();
         match term {
-            Term::TPi(_, _, _) => {}
+            Term::TPi(_, _, _, _) => {}
             other => panic!("expected TPi, got: {:?}", other),
         }
     });
@@ -482,7 +485,7 @@ fn parses_unicode_binders() {
     with_session(|session| {
         assert!(matches!(
             parse_term("∀ (A : Type), A -> A", session).unwrap(),
-            Term::TPi(_, _, _)
+            Term::TPi(_, _, _, _)
         ));
         assert!(matches!(
             parse_term("Σ (A : Type), A", session).unwrap(),

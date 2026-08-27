@@ -537,7 +537,7 @@ impl Parser {
         let mut depth: i32 = 0;
         loop {
             match cur {
-                Term::TPi(_, a, b) => {
+                Term::TPi(_, a, b, _) => {
                     let shifted_a = shift(-depth, 0, &a);
                     args.push(shifted_a);
                     depth += 1;
@@ -603,13 +603,28 @@ impl Parser {
             self.ivar_env.remove(0);
             return Ok(Term::PLam(binder, Box::new(body)));
         }
+        // Implicit binder: {x : A}
+        if self.consume(&TokenKind::LBrace) {
+            let binder = self.expect_ident("expected binder name in implicit binder")?;
+            self.expect(
+                TokenKind::Colon,
+                "expected ':' after binder in implicit binder",
+            )?;
+            let ty = self.parse_term()?;
+            self.expect(TokenKind::RBrace, "expected '}' to close implicit binder")?;
+            self.expect_binder_separator("implicit Pi")?;
+            self.term_env.insert(0, binder.clone());
+            let body = self.parse_term()?;
+            self.term_env.remove(0);
+            return Ok(Term::TPi(binder, Box::new(ty), Box::new(body), true));
+        }
         if self.consume_ident("∀") || self.consume_ident("forall") {
             let (binder, ty) = self.parse_parenthesized_binder("Pi")?;
             self.expect_binder_separator("Pi")?;
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
-            return Ok(Term::TPi(binder, Box::new(ty), Box::new(body)));
+            return Ok(Term::TPi(binder, Box::new(ty), Box::new(body), false));
         }
         if self.consume_ident("Σ") {
             let (binder, ty) = self.parse_parenthesized_binder("Sigma")?;
@@ -769,7 +784,12 @@ impl Parser {
             self.term_env.insert(0, "_".to_string());
             let right = self.parse_arrow_codomain()?;
             self.term_env.remove(0);
-            Ok(Term::TPi("_".to_string(), Box::new(left), Box::new(right)))
+            Ok(Term::TPi(
+                "_".to_string(),
+                Box::new(left),
+                Box::new(right),
+                false,
+            ))
         } else {
             Ok(left)
         }
@@ -779,13 +799,28 @@ impl Parser {
     /// follow a non-dependent arrow — it binds looser than `->`, so
     /// `A -> forall (x : B), C -> D` parses as `A -> forall (x : B), (C -> D)`.
     fn parse_arrow_codomain(&mut self) -> Result<Term, ParseError> {
+        // Implicit binder: {x : A}
+        if self.consume(&TokenKind::LBrace) {
+            let binder = self.expect_ident("expected binder name in implicit binder")?;
+            self.expect(
+                TokenKind::Colon,
+                "expected ':' after binder in implicit binder",
+            )?;
+            let ty = self.parse_term()?;
+            self.expect(TokenKind::RBrace, "expected '}' to close implicit binder")?;
+            self.expect_binder_separator("implicit Pi")?;
+            self.term_env.insert(0, binder.clone());
+            let body = self.parse_term()?;
+            self.term_env.remove(0);
+            return Ok(Term::TPi(binder, Box::new(ty), Box::new(body), true));
+        }
         if self.consume_ident("∀") || self.consume_ident("forall") {
             let (binder, ty) = self.parse_parenthesized_binder("Pi")?;
             self.expect_binder_separator("Pi")?;
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
-            Ok(Term::TPi(binder, Box::new(ty), Box::new(body)))
+            Ok(Term::TPi(binder, Box::new(ty), Box::new(body), false))
         } else {
             self.parse_arrow()
         }
@@ -2114,7 +2149,7 @@ impl Parser {
                 let mut val_w = val;
                 // Innermost parameter binds closest, so wrap in reverse.
                 for (pname, pty) in params.iter().rev() {
-                    ty_w = Term::TPi(pname.clone(), Box::new(pty.clone()), Box::new(ty_w));
+                    ty_w = Term::TPi(pname.clone(), Box::new(pty.clone()), Box::new(ty_w), false);
                     val_w = Term::TAbs(pname.clone(), Box::new(val_w));
                 }
                 (ty_w, val_w)
@@ -2673,7 +2708,9 @@ impl Parser {
                     Box::new(Term::TVar(1)),
                     Box::new(Term::TVar(0)),
                 )),
+                false,
             )),
+            false,
         )
     }
 
@@ -2722,9 +2759,17 @@ impl Parser {
                 Box::new(Term::TPi(
                     "_".to_string(),
                     Box::new(ty_p),
-                    Box::new(Term::TPi("_".to_string(), Box::new(ty_q), Box::new(body))),
+                    Box::new(Term::TPi(
+                        "_".to_string(),
+                        Box::new(ty_q),
+                        Box::new(body),
+                        false,
+                    )),
+                    false,
                 )),
+                false,
             )),
+            false,
         )
     }
 
@@ -2795,11 +2840,21 @@ impl Parser {
                         Box::new(Term::TPi(
                             "_".to_string(),
                             Box::new(ty_r),
-                            Box::new(Term::TPi("_".to_string(), Box::new(ty_s), Box::new(body))),
+                            Box::new(Term::TPi(
+                                "_".to_string(),
+                                Box::new(ty_s),
+                                Box::new(body),
+                                false,
+                            )),
+                            false,
                         )),
+                        false,
                     )),
+                    false,
                 )),
+                false,
             )),
+            false,
         )
     }
 }

@@ -41,7 +41,7 @@ pub fn term_size(t: &Term) -> usize {
         | Term::TTransport(f, a)
         | Term::TPair(f, a) => 1 + term_size(f) + term_size(a),
 
-        Term::TPi(_, a, b) | Term::TSigma(_, a, b) => 1 + term_size(a) + term_size(b),
+        Term::TPi(_, a, b, _) | Term::TSigma(_, a, b) => 1 + term_size(a) + term_size(b),
 
         Term::TPath(a, u, v)
         | Term::TGlue(a, u, v)
@@ -237,7 +237,9 @@ fn infer_ty(ctx: &Ctx, t: &Term, session: &mut Session) -> Option<Term> {
             }
         }
         Term::TApp(f, a) => match infer_ty(ctx, f, session) {
-            Some(Term::TPi(_, _, b_ty)) => Some(nbe_eval_ctx(ctx.len(), &beta(&b_ty, a), session)),
+            Some(Term::TPi(_, _, b_ty, _)) => {
+                Some(nbe_eval_ctx(ctx.len(), &beta(&b_ty, a), session))
+            }
             _ => None,
         },
         Term::TElim(motive, _, scrut) => Some(nbe_eval_ctx(
@@ -268,7 +270,9 @@ fn infer_neutral_ty(ctx: &Ctx, t: &Term, session: &mut Session) -> Option<Term> 
             }
         }
         Term::TApp(f, a) => match infer_neutral_ty(ctx, f, session) {
-            Some(Term::TPi(_, _, b_ty)) => Some(nbe_eval_ctx(ctx.len(), &beta(&b_ty, a), session)),
+            Some(Term::TPi(_, _, b_ty, _)) => {
+                Some(nbe_eval_ctx(ctx.len(), &beta(&b_ty, a), session))
+            }
             _ => None,
         },
         Term::TElim(motive, _, scrut) => Some(nbe_eval_ctx(
@@ -285,7 +289,7 @@ fn infer_neutral_ty(ctx: &Ctx, t: &Term, session: &mut Session) -> Option<Term> 
 /// a lambda. Returns `None` when the type cannot be determined.
 pub fn infer_lam_dom(ctx: &Ctx, neutral: &Term, session: &mut Session) -> Option<Term> {
     match infer_neutral_ty(ctx, neutral, session) {
-        Some(Term::TPi(_, dom_ty, _)) => Some(nbe_eval_ctx(ctx.len(), &dom_ty, session)),
+        Some(Term::TPi(_, dom_ty, _, _)) => Some(nbe_eval_ctx(ctx.len(), &dom_ty, session)),
         _ => None,
     }
 }
@@ -583,7 +587,7 @@ fn eta_eq_uncached(
     // ------------------------------------------------------------------
     // Type congruence (structural: no fuel consumed)
     // ------------------------------------------------------------------
-    if let (Term::TPi(_, a1, b1), Term::TPi(_, a2, b2)) = (t1, t2) {
+    if let (Term::TPi(_, a1, b1, _), Term::TPi(_, a2, b2, _)) = (t1, t2) {
         return and_result(
             eta_eq_memo(fuel, ctx, a1, a2, memo, session),
             eta_eq_memo(fuel, ctx, b1, b2, memo, session),

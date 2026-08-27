@@ -1733,7 +1733,7 @@ pub fn prove(
     let (u, v, carrier) = if let Some(raw) = raw_goal_ty {
         // Strip the Pi telescope peeled off by `intro` tactics.
         let mut r_cur = raw;
-        while let Term::TPi(_, _, body) = r_cur {
+        while let Term::TPi(_, _, body, _) = r_cur {
             r_cur = body;
         }
         let raw = r_cur;

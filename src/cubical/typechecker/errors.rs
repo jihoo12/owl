@@ -36,7 +36,7 @@ fn head_var_idx(t: &Term) -> Option<i32> {
             Term::TAbs(_, b) => go(b, best),
             Term::TLift(a, _) => go(a, best),
             Term::TLower(a) => go(a, best),
-            Term::TPi(_, a, b) => {
+            Term::TPi(_, a, b, _) => {
                 go(a, best);
                 go(b, best);
             }

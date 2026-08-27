@@ -45,15 +45,24 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
         Term::TLift(a, lvl) => format!("lift {} {}", show_term(env, a), lvl),
         Term::TLower(a) => format!("lower {}", show_term(env, a)),
         Term::TIntervalTy => "I".to_string(),
-        Term::TPi(x, a, b) => {
+        Term::TPi(x, a, b, implicit) => {
             let mut env2 = vec![x.clone()];
             env2.extend_from_slice(env);
-            format!(
-                "forall ({} : {}), {}",
-                x,
-                show_term(env, a),
-                show_term(&env2, b)
-            )
+            if *implicit {
+                format!(
+                    "{{{} : {}}} -> {}",
+                    x,
+                    show_term(env, a),
+                    show_term(&env2, b)
+                )
+            } else {
+                format!(
+                    "forall ({} : {}), {}",
+                    x,
+                    show_term(env, a),
+                    show_term(&env2, b)
+                )
+            }
         }
         Term::TInterval(i) => format!("{}", i),
         Term::TCube(c) => format!("{}", c),

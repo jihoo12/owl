@@ -31,6 +31,11 @@ pub type GlobalEnv = Vec<(Name, Term, Term)>;
 pub struct Env {
     pub defs: GlobalEnv,
     pub datatypes: Vec<Datatype>,
+    /// Global instance database for implicit argument resolution.
+    /// Each entry is (instance_name, instance_type, instance_value).
+    /// The instance_type should be a TData applied to parameters, e.g.,
+    /// `CommRing A add mul zero one`.
+    pub instances: Vec<(Name, Term, Term)>,
 }
 
 impl Env {
@@ -55,6 +60,33 @@ impl Env {
     #[allow(dead_code)]
     pub fn find_datatype(&self, name: &str) -> Option<&Datatype> {
         self.datatypes.iter().find(|dt| dt.name == name)
+    }
+
+    /// Register an instance for implicit argument resolution.
+    /// `instance_ty` should be the type of the instance (e.g., `CommRing A add mul zero one`).
+    /// `instance_val` is the instance term itself.
+    pub fn register_instance(&mut self, name: Name, instance_ty: Term, instance_val: Term) {
+        self.instances.push((name, instance_ty, instance_val));
+    }
+
+    /// Find an instance matching the given target type.
+    /// Searches the instance database for an instance whose type matches `target_ty`.
+    pub fn find_instance(&self, target_ty: &Term, session: &mut Session) -> Option<Term> {
+        let target_nf = crate::cubical::nbe::nbe_eval_ctx(0, target_ty, session);
+        let empty_ctx: Ctx = Vec::new();
+        for (_name, inst_ty, inst_val) in &self.instances {
+            let inst_ty_nf = crate::cubical::nbe::nbe_eval_ctx(0, inst_ty, session);
+            if crate::cubical::equality::definitionally_equal_ctx_r(
+                &empty_ctx,
+                &inst_ty_nf,
+                &target_nf,
+                session,
+            ) == crate::cubical::equality::EtaResult::Equal
+            {
+                return Some(inst_val.clone());
+            }
+        }
+        None
     }
 }
 

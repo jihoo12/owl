@@ -79,7 +79,7 @@ pub fn do_transport(
                 ),
 
                 // Pi transport (non-dependent codomain only)
-                (Value::VPi(arg_name, _, _), Value::VPi(_, _, _)) => {
+                (Value::VPi(arg_name, _, _, _), Value::VPi(_, _, _, _)) => {
                     let result = transport_pi(
                         env,
                         globals,
@@ -280,7 +280,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TVar(i) => *i == level,
         Term::TApp(f, a) => uses_var_at_level(f, level) || uses_var_at_level(a, level),
         Term::TAbs(_, b) => uses_var_at_level(b, level + 1),
-        Term::TPi(_, a, b) => uses_var_at_level(a, level) || uses_var_at_level(b, level + 1),
+        Term::TPi(_, a, b, _) => uses_var_at_level(a, level) || uses_var_at_level(b, level + 1),
         Term::TPath(a, u, v) => {
             uses_var_at_level(a, level)
                 || uses_var_at_level(u, level)
@@ -402,7 +402,7 @@ fn transport_pi(
     let (formal_env, pi_at_var) =
         eval_body_at_formal_interval(env, globals, global_offset, clos, session);
     let cod_clos = match &pi_at_var {
-        Value::VPi(_, _, cod_clos) => cod_clos,
+        Value::VPi(_, _, cod_clos, _) => cod_clos,
         _ => {
             return Value::VTransport(
                 Box::new(Value::VPLam("_".to_string(), clos.clone())),
@@ -1100,7 +1100,7 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
             }
 
             match (&b0, &b1) {
-                (Term::TPi(arg_name, a0, _), Term::TPi(_, a1, _)) => {
+                (Term::TPi(arg_name, a0, _, _), Term::TPi(_, a1, _, _)) => {
                     let arg_name = arg_name.clone();
                     let i_name = i_name.clone();
 
@@ -1111,7 +1111,7 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                             i_name.clone(),
                             Box::new(
                                 match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                                    Term::TPi(_, _, b_i) => {
+                                    Term::TPi(_, _, b_i, _) => {
                                         let max_idx = max_var(&b_i);
                                         let temp = max_idx + 1;
                                         let tmp_var = Term::TVar(temp);
@@ -1121,7 +1121,7 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                                     }
                                     _ => {
                                         let b0_body = match &b0 {
-                                            Term::TPi(_, _, b) => (**b).clone(),
+                                            Term::TPi(_, _, b, _) => (**b).clone(),
                                             _ => b0.clone(),
                                         };
                                         shift(1, 0, &b0_body)
@@ -1145,14 +1145,14 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                         )
                     } else {
                         let b_non_dep = match &b0 {
-                            Term::TPi(_, _, b0_body) => {
+                            Term::TPi(_, _, b0_body, _) => {
                                 subst(0, &Term::TUniv(0), b0_body) == **b0_body
                             }
                             _ => false,
                         };
                         if b_non_dep {
                             let b0_body = match &b0 {
-                                Term::TPi(_, _, b) => (**b).clone(),
+                                Term::TPi(_, _, b, _) => (**b).clone(),
                                 _ => b0.clone(),
                             };
                             let b_fam = Term::PLam(
@@ -1162,7 +1162,7 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                                         &beta(&shift(1, 0, body), &Term::TVar(0)),
                                         session,
                                     ) {
-                                        Term::TPi(_, _, b_i) => *b_i,
+                                        Term::TPi(_, _, b_i, _) => *b_i,
                                         _ => shift(1, 0, &b0_body),
                                     },
                                 ),
@@ -1191,15 +1191,15 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                             let pi_at_var =
                                 nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session);
                             let a_i = match &pi_at_var {
-                                Term::TPi(_, a, _) => (**a).clone(),
+                                Term::TPi(_, a, _, _) => (**a).clone(),
                                 _ => shift(1, 0, a0),
                             };
                             let b0_body = match &b0 {
-                                Term::TPi(_, _, b) => (**b).clone(),
+                                Term::TPi(_, _, b, _) => (**b).clone(),
                                 _ => b0.clone(),
                             };
                             let b_i = match &pi_at_var {
-                                Term::TPi(_, _, b) => (**b).clone(),
+                                Term::TPi(_, _, b, _) => (**b).clone(),
                                 _ => shift(1, 0, &b0_body),
                             };
 

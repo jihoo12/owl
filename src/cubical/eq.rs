@@ -248,7 +248,7 @@ fn is_trans_shape(ty: &Term) -> Option<usize> {
     let mut captures: Vec<(usize, Term, Term)> = Vec::new();
     loop {
         match cur {
-            Term::TPi(_, d, body) => {
+            Term::TPi(_, d, body, _) => {
                 if let Term::TPath(_, x, y) = *d.clone() {
                     captures.push((depth, *x, *y));
                 } else if captures.is_empty() {

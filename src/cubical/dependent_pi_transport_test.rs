@@ -35,6 +35,7 @@ mod tests {
                     "x".to_string(),
                     b(Term::TUniv(0)),
                     b(Term::TUniv(0)),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -64,6 +65,7 @@ mod tests {
                     "x".to_string(),
                     b(Term::TUniv(0)),
                     b(Term::TUniv(0)),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -91,8 +93,9 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
                     b(Term::TUniv(0)),
+                    b(Term::TUniv(0)),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -126,7 +129,9 @@ mod tests {
                         "y".to_string(),
                         b(Term::TUniv(0)),
                         b(Term::TVar(1)),
+                        false,
                     )),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -168,8 +173,11 @@ mod tests {
                             "z".to_string(),
                             b(Term::TUniv(0)),
                             b(Term::TVar(2)), // references x, two binders deep
+                            false,
                         )),
+                        false,
                     )),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -211,7 +219,9 @@ mod tests {
                         "y".to_string(),
                         b(Term::TUniv(0)),
                         b(Term::TUniv(0)),
+                        false,
                     )),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -244,7 +254,8 @@ mod tests {
                 b(Term::TPi(
                     "x".to_string(),
                     b(Term::TUniv(0)),
-                    b(Term::TVar(0)), // interval variable (after shift, this is the Pi arg NOT i)
+                    b(Term::TUniv(0)),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -287,17 +298,17 @@ mod tests {
     #[test]
     fn uses_var_level_under_pi_domain() {
         // TPi("x", TVar(0), TUniv(0)) — domain references level 0
-        let pi = Term::TPi("x".to_string(), b(Term::TVar(0)), b(Term::TUniv(0)));
+        let pi = Term::TPi("x".to_string(), b(Term::TVar(0)), b(Term::TUniv(0)), false);
         assert!(crate::cubical::nbe::uses_var_at_level(&pi, 0));
     }
 
     #[test]
     fn uses_var_level_under_pi_codomain() {
         // TPi("x", TUniv(0), TVar(0)) — TVar(0) is captured by the binder
-        let pi = Term::TPi("x".to_string(), b(Term::TUniv(0)), b(Term::TVar(0)));
+        let pi = Term::TPi("x".to_string(), b(Term::TUniv(0)), b(Term::TVar(0)), false);
         assert!(!crate::cubical::nbe::uses_var_at_level(&pi, 0));
         // TPi("x", TUniv(0), TVar(1)) — TVar(1) under one binder = outer level 0
-        let pi2 = Term::TPi("x".to_string(), b(Term::TUniv(0)), b(Term::TVar(1)));
+        let pi2 = Term::TPi("x".to_string(), b(Term::TUniv(0)), b(Term::TVar(1)), false);
         assert!(crate::cubical::nbe::uses_var_at_level(&pi2, 0));
     }
 
@@ -312,7 +323,9 @@ mod tests {
                 "y".to_string(),
                 b(Term::TUniv(0)),
                 b(Term::TVar(2)),
+                false,
             )),
+            false,
         );
         assert!(crate::cubical::nbe::uses_var_at_level(&pi, 0));
         // TVar(2) under two binders → checks level 1+2=3 → no match
@@ -353,8 +366,11 @@ mod tests {
                             "z".to_string(),
                             b(Term::TUniv(1)),
                             b(Term::TUniv(0)),
+                            false,
                         )),
+                        false,
                     )),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -384,6 +400,7 @@ mod tests {
                         b(Term::TUniv(0)),
                         b(Term::TVar(1)),
                     )),
+                    false,
                 )),
             );
             let input = Term::TAbs(
@@ -414,6 +431,7 @@ mod tests {
                         b(Term::TVar(1)),
                         b(Term::TVar(1)),
                     )),
+                    false,
                 )),
             );
             let input = Term::TAbs(

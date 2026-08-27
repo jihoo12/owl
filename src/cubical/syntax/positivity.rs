@@ -84,7 +84,7 @@ fn walk_param_polarities(
             }
         }
         // Arrow: the domain is a negative position, the codomain positive.
-        Term::TPi(_, a, b) => {
+        Term::TPi(_, a, b, _) => {
             walk_param_polarities(dts, var, di, a, depth, flip_pol(pset), out);
             walk_param_polarities(dts, var, di, b, depth + 1, pset, out);
         }
@@ -426,7 +426,7 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
         Term::TAbs(_, body) | Term::PLam(_, body) | Term::TUa(body) => {
             check_positivity_in(target, body, negative)
         }
-        Term::TPi(_, a, b) => {
+        Term::TPi(_, a, b, _) => {
             // Domain A is in a negative position (argument position).
             check_positivity_in(target, a, true)?;
             // Codomain B is in a positive position (result position).
@@ -652,8 +652,10 @@ mod tests {
                         "_".into(),
                         b(Term::TData("Nat".into(), vec![])),
                         b(Term::TData("Nat".into(), vec![])),
+                        false,
                     )),
                     b(Term::TData("Nat".into(), vec![])),
+                    false,
                 )],
             }],
             pcons: vec![],
@@ -676,6 +678,7 @@ mod tests {
                     "_".into(),
                     b(Term::TData("Bad".into(), vec![])),
                     b(Term::TData("Bad".into(), vec![])),
+                    false,
                 )],
             }],
             pcons: vec![],
@@ -702,8 +705,10 @@ mod tests {
                         "_".into(),
                         b(Term::TData("Nat".into(), vec![])),
                         b(Term::TData("Bad".into(), vec![])),
+                        false,
                     )),
                     b(Term::TData("Bad".into(), vec![])),
+                    false,
                 )],
             }],
             pcons: vec![],
@@ -728,8 +733,10 @@ mod tests {
                         "_".into(),
                         b(Term::TData("Bad".into(), vec![])),
                         b(Term::TData("Nat".into(), vec![])),
+                        false,
                     )),
                     b(Term::TData("Bad".into(), vec![])),
+                    false,
                 )],
             }],
             pcons: vec![],
@@ -823,7 +830,12 @@ mod tests {
     fn param_in_arrow_domain_is_contravariant() {
         let dt = var_dt(
             "Bad",
-            vec![Term::TPi("_".into(), b(Term::TVar(0)), b(Term::TUniv(0)))],
+            vec![Term::TPi(
+                "_".into(),
+                b(Term::TVar(0)),
+                b(Term::TUniv(0)),
+                false,
+            )],
         );
         assert_eq!(var_of(&dt), Variance::Contravariant);
     }
@@ -834,7 +846,7 @@ mod tests {
             "Bad",
             vec![
                 Term::TVar(0),
-                Term::TPi("_".into(), b(Term::TVar(0)), b(Term::TUniv(0))),
+                Term::TPi("_".into(), b(Term::TVar(0)), b(Term::TUniv(0)), false),
             ],
         );
         assert_eq!(var_of(&dt), Variance::Invariant);
@@ -864,7 +876,12 @@ mod tests {
         // inherit that contravariance from the nested application.
         let bar = var_dt(
             "Bar",
-            vec![Term::TPi("_".into(), b(Term::TVar(0)), b(Term::TUniv(0)))],
+            vec![Term::TPi(
+                "_".into(),
+                b(Term::TVar(0)),
+                b(Term::TUniv(0)),
+                false,
+            )],
         );
         let foo = var_dt("Foo", vec![Term::TData("Bar".into(), vec![Term::TVar(0)])]);
         let variances = compute_param_variances(&[bar, foo]);

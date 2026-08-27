@@ -110,7 +110,7 @@ pub fn prove(
 fn pi_arity(ty: &Term) -> usize {
     let mut t = ty;
     let mut n = 0;
-    while let Term::TPi(_, _, b) = t {
+    while let Term::TPi(_, _, b, _) = t {
         n += 1;
         t = b;
     }
@@ -158,7 +158,9 @@ mod tests {
                     Box::new(Term::TVar(0)),
                     Box::new(Term::TVar(0)),
                 )),
+                false,
             )),
+            false,
         );
         assert_eq!(pi_arity(&t), 2);
         assert_eq!(pi_arity(&nat()), 0);

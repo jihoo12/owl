@@ -56,7 +56,7 @@ fn quote_inner(
             Box::new(quote(size, globals, global_offset, *f, session)),
             Box::new(quote(size, globals, global_offset, *a, session)),
         ),
-        Value::VPi(x, a, b) => Term::TPi(
+        Value::VPi(x, a, b, implicit) => Term::TPi(
             x,
             Box::new(quote(size, globals, global_offset, *a, session)),
             Box::new(quote(
@@ -66,6 +66,7 @@ fn quote_inner(
                 b.apply(Value::VNeutral(Neutral::NVar(size)), session),
                 session,
             )),
+            implicit,
         ),
         Value::VSigma(x, a, b) => Term::TSigma(
             x,
@@ -565,7 +566,7 @@ fn quote_case_body(
             session,
         ))),
         Term::TIntervalTy => Term::TIntervalTy,
-        Term::TPi(x, a, b) => Term::TPi(
+        Term::TPi(x, a, b, _) => Term::TPi(
             x.clone(),
             Box::new(quote_case_body(
                 size,
@@ -585,6 +586,7 @@ fn quote_case_body(
                 b,
                 session,
             )),
+            false,
         ),
         Term::TInterval(i) => Term::TInterval(i.clone()),
         Term::TCube(c) => Term::TCube(c.clone()),

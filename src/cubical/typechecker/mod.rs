@@ -178,7 +178,7 @@ fn type_level_dt(
     // mentions outer binders can collapse free de Bruijn indices and break
     // universe-level checking for dependent arrows like `(A : U0) -> A -> A`.
     match t {
-        Term::TPi(x, a, b) => {
+        Term::TPi(x, a, b, _) => {
             let i = type_level_dt(dts, ctx, a, session)?;
             let ctx2 = extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), a, session), ctx);
             let j = type_level_dt(dts, &ctx2, b, session)?;
@@ -373,10 +373,11 @@ fn apply_literal_inner(lit: &Literal, t: &Term, session: &mut Session) -> Term {
                 session,
             ),
             Term::TAbs(x, b) => Term::TAbs(x.clone(), Box::new(go(b, n, val, session))),
-            Term::TPi(x, a, b) => Term::TPi(
+            Term::TPi(x, a, b, implicit) => Term::TPi(
                 x.clone(),
                 Box::new(go(a, n, val, session)),
                 Box::new(go(b, n, val, session)),
+                *implicit,
             ),
             Term::TPath(a, u, v) => Term::TPath(
                 Box::new(go(a, n, val, session)),
@@ -796,6 +797,68 @@ fn build_params(param_terms: &[Option<Term>]) -> Vec<Term> {
 }
 
 // ---------------------------------------------------------------------------
+// Implicit argument resolution
+// ---------------------------------------------------------------------------
+
+/// Try to find a term in the context that matches the given type.
+/// This is used for implicit argument resolution - when we have an implicit
+/// binder `{x : A}`, we search the context for a term of type `A`.
+fn find_implicit_arg(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    target_ty: &Term,
+    session: &mut Session,
+) -> Option<Term> {
+    let target_nf = nbe_eval_ctx(ctx.len(), target_ty, session);
+    for (i, (_name, ty)) in ctx.iter().enumerate() {
+        // Stored binder types are recorded relative to the binder's own frame
+        // (binder at index 0); re-anchor with the same shift `lookup_ctx`
+        // applies before comparing against the target.
+        let ty_shifted = shift(i as i32 + 1, 0, ty);
+        let ty_nf = nbe_eval_ctx(ctx.len(), &ty_shifted, session);
+        if definitionally_equal_ctx_r(ctx, &ty_nf, &target_nf, session) == EtaResult::Equal {
+            return Some(Term::TVar(i as i32));
+        }
+    }
+    None
+}
+
+/// Fill in implicit Pi arguments in a function type.
+/// Given a function type like `Π {x : A} (y : B) {z : C}. D`,
+/// and a context, this searches for implicit arguments and applies them.
+/// Returns the updated function term with implicit args applied, and the
+/// remaining type after implicit args are filled.
+fn fill_implicit_args(
+    _dts: &[Datatype],
+    ctx: &Ctx,
+    mut f: Term,
+    mut f_ty: Term,
+    session: &mut Session,
+) -> Result<(Term, Term), TypeError> {
+    loop {
+        let f_ty_nf = nbe_eval_ctx(ctx.len(), &f_ty, session);
+        match f_ty_nf {
+            Term::TPi(_x, a, b, implicit) if implicit => {
+                // Search for an implicit argument of type `a`
+                if let Some(arg) = find_implicit_arg(_dts, ctx, &a, session) {
+                    let arg_clone = arg.clone();
+                    // Apply the implicit argument
+                    f = Term::TApp(Box::new(f), Box::new(arg));
+                    // Update the type to the codomain with the argument substituted
+                    f_ty = beta(&b, &arg_clone);
+                    // Continue the loop in case there are more implicit args
+                    continue;
+                }
+                // No implicit arg found - we'll need the user to provide it explicitly
+                break;
+            }
+            _ => break,
+        }
+    }
+    Ok((f, f_ty))
+}
+
+// ---------------------------------------------------------------------------
 // Type Inference
 // ---------------------------------------------------------------------------
 
@@ -849,10 +912,13 @@ pub fn infer_dt(
         // Application: f a  where  f : Π(x:A).B
         Term::TApp(f, a) => match infer_dt(dts, ctx, f, session) {
             Ok(f_ty) => {
-                let (a_ty, b_ty) = match &f_ty {
-                    Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
-                    _ => match nbe_eval_ctx(ctx.len(), &f_ty, session) {
-                        Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
+                // Fill in any implicit arguments before checking the explicit argument
+                let (f_filled, f_ty_filled) =
+                    fill_implicit_args(dts, ctx, f.as_ref().clone(), f_ty, session)?;
+                let (a_ty, b_ty) = match &f_ty_filled {
+                    Term::TPi(_, a, b, _) => (a.as_ref().clone(), b.as_ref().clone()),
+                    _ => match nbe_eval_ctx(ctx.len(), &f_ty_filled, session) {
+                        Term::TPi(_, a, b, _) => (a.as_ref().clone(), b.as_ref().clone()),
                         other => {
                             return Err(TypeError::ExpectedPi {
                                 ty: other,
@@ -876,7 +942,7 @@ pub fn infer_dt(
         },
 
         // Pi formation: Π(x:A).B : U(max i j)
-        Term::TPi(x, a_ty, b_ty) => {
+        Term::TPi(x, a_ty, b_ty, _) => {
             let i = type_level_dt(dts, ctx, a_ty, session)?;
             let ctx2 = extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), a_ty, session), ctx);
             let j = type_level_dt(dts, &ctx2, b_ty, session)?;
@@ -989,14 +1055,24 @@ pub fn infer_dt(
             check(
                 ctx,
                 f,
-                &Term::TPi("_".into(), Box::new(a_.clone()), Box::new(shift(1, 0, &b_))),
+                &Term::TPi(
+                    "_".into(),
+                    Box::new(a_.clone()),
+                    Box::new(shift(1, 0, &b_)),
+                    false,
+                ),
                 session,
             )?;
             // g : B → A
             check(
                 ctx,
                 g,
-                &Term::TPi("_".into(), Box::new(b_.clone()), Box::new(shift(1, 0, &a_))),
+                &Term::TPi(
+                    "_".into(),
+                    Box::new(b_.clone()),
+                    Box::new(shift(1, 0, &a_)),
+                    false,
+                ),
                 session,
             )?;
             // eta : (a : A) → Path A a (g (f a))
@@ -1017,6 +1093,7 @@ pub fn infer_dt(
                             )),
                         )),
                     )),
+                    false,
                 ),
                 session,
             )?;
@@ -1038,6 +1115,7 @@ pub fn infer_dt(
                         )),
                         Box::new(Term::TVar(0)),
                     )),
+                    false,
                 ),
                 session,
             )?;
@@ -1795,7 +1873,12 @@ pub fn infer_dt(
                 for (_i, (pname, pty)) in remaining.iter().enumerate().rev() {
                     // Shift the param type to account for the remaining binders
                     let shifted_pty = shift(offset, 0, pty);
-                    result = Term::TPi(pname.clone(), Box::new(shifted_pty), Box::new(result));
+                    result = Term::TPi(
+                        pname.clone(),
+                        Box::new(shifted_pty),
+                        Box::new(result),
+                        false,
+                    );
                     offset -= 1;
                 }
                 // Substitute provided args for the outermost params
@@ -2192,7 +2275,7 @@ pub fn infer_dt(
                 _ => {
                     let motive_inferred = infer_dt(dts, ctx, motive, session)?;
                     match nbe_eval(&motive_inferred, session) {
-                        Term::TPi(x, dom, cod) => {
+                        Term::TPi(x, dom, cod, _) => {
                             require_equal(
                                 ctx,
                                 &nbe_eval(&dom, session),
@@ -3293,9 +3376,9 @@ pub fn check_dt(
         // Lambda introduction
         Term::TAbs(x, body) => {
             let (a_ty, b_ty) = match ty {
-                Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
+                Term::TPi(_, a, b, _) => (a.as_ref().clone(), b.as_ref().clone()),
                 _ => match nbe_eval_ctx(ctx.len(), ty, session) {
-                    Term::TPi(_, a, b) => (a.as_ref().clone(), b.as_ref().clone()),
+                    Term::TPi(_, a, b, _) => (a.as_ref().clone(), b.as_ref().clone()),
                     other => {
                         return Err(TypeError::ExpectedPi {
                             ty: other,
@@ -3425,6 +3508,7 @@ pub fn check_dt(
                                 "_".into(),
                                 Box::new(Term::TIntervalTy),
                                 Box::new(shifted_t_ty),
+                                false,
                             )
                         }
                         _ => t_ty.clone(),
@@ -3881,7 +3965,7 @@ fn cumulativity_check(
         (Term::TUniv(m), Term::TUniv(n)) => n <= m,
 
         // Pi cumulativity: contravariant in domain, covariant in codomain
-        (Term::TPi(_, a_exp, b_exp), Term::TPi(_, a_inf, b_inf)) => {
+        (Term::TPi(_, a_exp, b_exp, _), Term::TPi(_, a_inf, b_inf, _)) => {
             cumulativity_check(a_inf, a_exp, dts, session)
                 && cumulativity_check(b_exp, b_inf, dts, session)
         }
@@ -4260,6 +4344,7 @@ mod tests {
                     "_".into(),
                     Box::new(Term::TVar(0)),
                     Box::new(Term::TUniv(0)),
+                    false,
                 )],
             )];
             let d_u0 = tdata("D", vec![t_univ(0)]);
@@ -4285,6 +4370,7 @@ mod tests {
                         "_".into(),
                         Box::new(Term::TVar(0)),
                         Box::new(Term::TUniv(0)),
+                        false,
                     ),
                 ],
             )];
@@ -4323,6 +4409,7 @@ mod tests {
                         "_".into(),
                         Box::new(Term::TVar(0)),
                         Box::new(Term::TUniv(0)),
+                        false,
                     )],
                 ),
                 dt_one_param("Foo", vec![tdata("Bar", vec![Term::TVar(0)])]),
@@ -4430,7 +4517,9 @@ mod tests {
                         String::new(),
                         Box::new(Term::TVar(1)),
                         Box::new(cod),
+                        false,
                     )),
+                    false,
                 )
             };
             assert!(!sub_t(

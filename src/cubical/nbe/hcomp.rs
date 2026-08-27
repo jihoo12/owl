@@ -172,7 +172,7 @@ pub fn do_hcomp(
         //    tube @ 1 regardless of phi.
         match (&a_ty, &base) {
             // ── Pi decomposition ──
-            (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
+            (Value::VPi(arg_name, _, cod_clos, _), Value::VLam(_, base_clos)) => {
                 let arg_var = Value::VNeutral(Neutral::NVar(0));
                 let inner_sys: DNFSystem = sys
                     .iter()
@@ -498,7 +498,7 @@ pub fn do_comp(
     {
         match (&a_fam, &base) {
             // ── Pi decomposition ──
-            (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
+            (Value::VPi(arg_name, _, cod_clos, _), Value::VLam(_, base_clos)) => {
                 let arg_var = Value::VNeutral(Neutral::NVar(0));
                 let inner_sys: DNFSystem = sys
                     .iter()
@@ -889,7 +889,7 @@ pub fn do_fill(
         match (&a_fam, &base) {
             // ── Pi decomposition ──
             // fill (Π x:A. B) sys (λx. f x) = λj. λx. fill B [sys x] (f x) @ j
-            (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
+            (Value::VPi(arg_name, _, cod_clos, _), Value::VLam(_, base_clos)) => {
                 let arg_var = Value::VNeutral(Neutral::NVar(0));
                 let inner_sys: DNFSystem = sys
                     .iter()
@@ -1349,7 +1349,7 @@ pub fn do_hfill(
         match (&a_ty, &base) {
             // ── Pi decomposition ──
             // hfill (Π x:A. B) sys (λx. f x) = λj. λx. hfill B [sys x] (f x) @ j
-            (Value::VPi(arg_name, _, cod_clos), Value::VLam(_, base_clos)) => {
+            (Value::VPi(arg_name, _, cod_clos, _), Value::VLam(_, base_clos)) => {
                 let arg_var = Value::VNeutral(Neutral::NVar(0));
                 let inner_sys: DNFSystem = sys
                     .iter()

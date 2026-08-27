@@ -115,7 +115,7 @@ pub enum Value {
     VNeutral(Neutral),
     VLam(Name, Closure),
     VApp(Box<Value>, Box<Value>),
-    VPi(Name, Box<Value>, Closure),
+    VPi(Name, Box<Value>, Closure, bool),
     VSigma(Name, Box<Value>, Closure),
     VPair(Box<Value>, Box<Value>),
     VPath(Box<Value>, Box<Value>, Box<Value>),

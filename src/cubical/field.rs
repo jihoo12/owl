@@ -336,7 +336,7 @@ fn nz_hypothesis(f: &Field, ctx: &Ctx, nf: &Term, session: &mut Session) -> Opti
     for (p, (_n, ty)) in ctx.iter().enumerate() {
         let shifted = shift(p as i32 + 1, 0, ty);
         let ty_nf = nbe_eval_ctx(ctx.len(), &shifted, session);
-        if let Term::TPi(_, dom, codom) = ty_nf {
+        if let Term::TPi(_, dom, codom, _) = ty_nf {
             let dom_nf = nbe_eval_ctx(ctx.len(), &dom, session);
             if let Term::TPath(_, z, x) = dom_nf {
                 if nbe_eval_ctx(ctx.len(), &z, session) == r.zero

@@ -57,10 +57,11 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                 Term::TApp(Box::new(go(f, target, val)), Box::new(go(a, target, val)))
             }
             Term::TAbs(x, b) => Term::TAbs(x.clone(), Box::new(go(b, target, val))),
-            Term::TPi(x, a, b) => Term::TPi(
+            Term::TPi(x, a, b, implicit) => Term::TPi(
                 x.clone(),
                 Box::new(go(a, target, val)),
                 Box::new(go(b, target, val)),
+                *implicit,
             ),
             Term::TPath(a, u, v) => Term::TPath(
                 Box::new(go(a, target, val)),
@@ -306,7 +307,7 @@ fn eval_nbe_inner(
             Value::VLower(Box::new(eval_nbe(env, globals, global_offset, a, session)))
         }
         Term::TIntervalTy => Value::VIntervalTy,
-        Term::TPi(x, a, b) => Value::VPi(
+        Term::TPi(x, a, b, implicit) => Value::VPi(
             x.clone(),
             Box::new(eval_nbe(env, globals, global_offset, a, session)),
             Closure {
@@ -315,6 +316,7 @@ fn eval_nbe_inner(
                 global_offset,
                 body: (**b).clone(),
             },
+            *implicit,
         ),
         Term::TInterval(i) => Value::VInterval(i.clone()),
         Term::TCube(c) => Value::VCube(c.clone()),

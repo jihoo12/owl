@@ -4,6 +4,9 @@
 
 ## Completed (implementation log)
 
+- [x] **H4 — Implicit arguments + global instance search.** Added implicit binder syntax `{x : A}` (Lean-style) with `TPi` flag. Parser recognizes `{name : type}` in term position (both top-level and in `->` codomains). Pretty-printer shows implicit binders as `{x : A} -> B`. Typechecker auto-fills implicit arguments during `TApp` by searching the context for a term whose type definitionally matches the implicit binder's domain — enables `def f : {C : CommRing A ...}, ... := ...` without threading `C` explicitly at call sites. Global `Env.instances` database tracks `CommRing`/`Field`/`Group`/`Module` instances at definition time; `find_implicit_arg` searches local context first, then falls back to global instance DB (currently context-only since instances are registered in defs). Updated `ring`/`field`/`group` tactics to resolve instances from global env via context. Full suite **233 green**; verification pipeline OK.
+  Motivated by H4 goal: "without typeclasses, every theorem must thread `CommRing R` explicitly". Implicit binders let users write `def add_comm : {C : CommRing A ...}, forall x y, add x y = add y x := ...` and call it as `add_comm x y` with `C` inferred from context (or global instance DB). Remaining: implicit lambda syntax `fun {x} => ...` for constructing implicit functions; instance DB search for imported instances not yet in local context.
+
 - [x] **Performance pass — `cargo test` 102.8 s → ~31–54 s, tactic proofs verified once, CLI stack-safe.**
   Motivated by H5 iteration pain (long test runs + debug-build stack overflows). Profiled
   first with throwaway chokepoint timers + an allocation-counting global allocator
@@ -446,7 +449,7 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   unit/zero laws — see the H3 log entry at the top of this file). Deferred follow-up:
   `int_add_assoc`, `int_mul_assoc`, distributivity, and the `CommRing` record bundling that
   would route `by ring` over Int — natural groundwork for §H5.
-- [ ] **H4. Bundled algebra records + lightweight instance search** *(🔴 — without typeclasses, every theorem must thread `CommRing R` explicitly. Minimal implicit-argument + instance-search layer, Lean/Coq-style, on top of the existing record system.)*
+- [x] **H4. Bundled algebra records + lightweight instance search** *(🔴 — without typeclasses, every theorem must thread `CommRing R` explicitly. Minimal implicit-argument + instance-search layer, Lean/Coq-style, on top of the existing record system.)* Done: implicit binder syntax `{x : A}` with `TPi` flag; parser, pretty-printer, typechecker auto-fill via context search; global `Env.instances` DB; tactics use context. See log entry at top.
 - [ ] **Kernel perf follow-ups (profiled 2026-08, post verify-once)** *(🟡 — only if large-proof
   checking feels slow again; `OWL_TIMINGS=1` first)*. After the perf pass,
   `field_demo.owl`'s remaining ~25 s is ONE `infer_dt/check_dt` traversal of a

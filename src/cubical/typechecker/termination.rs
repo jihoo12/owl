@@ -189,7 +189,7 @@ fn check_body_guard(
         Term::TFst(p) | Term::TSnd(p) => check_body_guard(d, p, binder_count, def_idx),
 
         // Pi — domain is negative, codomain is positive.
-        Term::TPi(_, a, b) => {
+        Term::TPi(_, a, b, _) => {
             check_body_guard(d, a, binder_count, def_idx)?;
             check_body_guard(d, b, binder_count + 1, def_idx.map(|i| i + 1))
         }

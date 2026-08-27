@@ -40,7 +40,7 @@ pub enum Term {
     /// Must be applied to a lifted value. `lower(lift(A)) = A`.
     TLower(Box<Term>),
     TIntervalTy,
-    TPi(Name, Box<Term>, Box<Term>),
+    TPi(Name, Box<Term>, Box<Term>, bool),
     TInterval(I),
     TCube(DNF),
     TPath(Box<Term>, Box<Term>, Box<Term>),
@@ -453,7 +453,12 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TVar(i) => Term::TVar(if *i >= c { i + d } else { *i }),
         Term::TApp(f, a) => Term::TApp(b(shift(d, c, f)), b(shift(d, c, a))),
         Term::TAbs(x, body) => Term::TAbs(x.clone(), b(shift(d, c + 1, body))),
-        Term::TPi(x, a, body) => Term::TPi(x.clone(), b(shift(d, c, a)), b(shift(d, c + 1, body))),
+        Term::TPi(x, a, body, implicit) => Term::TPi(
+            x.clone(),
+            b(shift(d, c, a)),
+            b(shift(d, c + 1, body)),
+            *implicit,
+        ),
         Term::TUniv(n) => Term::TUniv(*n),
         Term::TProp => Term::TProp,
         Term::TSSet => Term::TSSet,
@@ -630,9 +635,14 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
             let s1 = shift(1, 0, s);
             Term::TAbs(x.clone(), b(subst(j + 1, &s1, body)))
         }
-        Term::TPi(x, a, body) => {
+        Term::TPi(x, a, body, implicit) => {
             let s1 = shift(1, 0, s);
-            Term::TPi(x.clone(), b(subst(j, s, a)), b(subst(j + 1, &s1, body)))
+            Term::TPi(
+                x.clone(),
+                b(subst(j, s, a)),
+                b(subst(j + 1, &s1, body)),
+                *implicit,
+            )
         }
         Term::TUniv(n) => Term::TUniv(*n),
         Term::TProp => Term::TProp,
@@ -824,7 +834,7 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TLift(a, _) => max_var(a),
         Term::TLower(a) => max_var(a),
         Term::TIntervalTy => -1,
-        Term::TPi(_, a, b) => max_var(a).max(max_var(b) - 1).max(-1),
+        Term::TPi(_, a, b, _) => max_var(a).max(max_var(b) - 1).max(-1),
         Term::TInterval(_) => -1,
         Term::TCube(_) => -1,
         Term::TPath(a, u, v) => max_var(a).max(max_var(u)).max(max_var(v)),

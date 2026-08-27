@@ -49,6 +49,7 @@ fn transport_over_nonconstant_pi_produces_lambda() {
             "x".to_string(),
             b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
             b(Term::TUniv(0)),
+            false,
         );
         let fam = Term::PLam("i".to_string(), b(body));
         let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
@@ -69,6 +70,7 @@ fn deep_transport_fallback_unsticks_pi() {
             "x".to_string(),
             b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
             b(Term::TUniv(0)),
+            false,
         );
         let fam = Term::PLam("i".to_string(), b(body));
         let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
@@ -121,6 +123,7 @@ fn native_pi_transport_no_deep_fallback() {
             "x".to_string(),
             b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
             b(Term::TUniv(0)),
+            false,
         );
         let fam = Term::PLam("i".to_string(), b(body));
         let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
@@ -147,7 +150,9 @@ fn dependent_codomain_pi_transport_reduces() {
                 "y".to_string(),
                 b(Term::TUniv(0)),
                 b(Term::TVar(1)),
+                false,
             )),
+            false,
         );
         let fam = Term::PLam("i".to_string(), b(body));
         let arg = Term::TAbs(

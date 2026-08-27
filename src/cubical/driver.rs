@@ -709,7 +709,7 @@ fn collect_meta_ids(t: &Term, out: &mut Vec<i32>) {
         Term::TLift(a, _) | Term::TLower(a) => {
             collect_meta_ids(a, out);
         }
-        Term::TPi(_, a, b) => {
+        Term::TPi(_, a, b, _) => {
             collect_meta_ids(a, out);
             collect_meta_ids(b, out);
         }
@@ -954,6 +954,12 @@ fn process_def(
     // (`nbe_eval_ctx(ctx.len(), shift(j+1, 0, annotation))`) see a clean,
     // non-inlined annotation.
     env.define(name.clone(), ty.clone(), resolved_val.clone());
+    // Register as an instance if the type is a known instance class
+    if let Term::TData(dname, params) = ty {
+        if matches!(dname.as_str(), "CommRing" | "Field" | "Group" | "Module") {
+            env.register_instance(name.clone(), ty.clone(), resolved_val.clone());
+        }
+    }
     let prev_def =
         crate::cubical::typechecker::termination::set_current_def(Some(name.clone()), session);
     let tm_check = PhaseTiming::start(name.as_str());
