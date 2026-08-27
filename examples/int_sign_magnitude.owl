@@ -85,5 +85,68 @@ def smg_mul : IntSM -> IntSM -> IntSM by_wf := fun a b =>
 def smg_zero : IntSM := mkIntSM false zero
 def smg_one : IntSM := mkIntSM false (suc zero)
 
+-- Congruence lemmas for Bool (commented out for now)
+-- def bool_xor_comm : forall (a : Bool), forall (b : Bool), Path Bool (bool_xor a b) (bool_xor b a) :=
+--   fun a b => <i> bool_xor a b
+
+-- def bool_xor_assoc : forall (a : Bool), forall (b : Bool), forall (c : Bool), Path Bool (bool_xor (bool_xor a b) c) (bool_xor a (bool_xor b c)) :=
+--   fun a b c => <i> bool_xor a (bool_xor b c)
+
+-- IntSM lemmas (commented out for now - need actual proofs)
+-- def smg_add_comm : forall (a : IntSM), forall (b : IntSM), Path IntSM (smg_add a b) (smg_add b a) :=
+--   fun a b => <i> smg_add a b
+--
+-- def smg_add_assoc : forall (a : IntSM), forall (b : IntSM), forall (c : IntSM), Path IntSM (smg_add (smg_add a b) c) (smg_add a (smg_add b c)) :=
+--   fun a b c => <i> smg_add (smg_add a b) c
+--
+-- def smg_add_zero_r : forall (a : IntSM), Path IntSM (smg_add a smg_zero) a :=
+--   fun a => <i> smg_add a smg_zero
+--
+-- def smg_add_zero_l : forall (a : IntSM), Path IntSM (smg_add smg_zero a) a :=
+--   fun a => <i> smg_add smg_zero a
+--
+-- def smg_add_neg : forall (a : IntSM), Path IntSM (smg_add a (smg_neg a)) smg_zero :=
+--   fun a => <i> smg_add a (smg_neg a)
+
+-- Boolean xor lemmas (commented out)
+-- def bool_xor_comm : forall (a : Bool), forall (b : Bool), Path Bool (bool_xor a b) (bool_xor b a) :=
+--   fun a b => <i> bool_xor a b
+
+-- def bool_xor_assoc : forall (a : Bool), forall (b : Bool), forall (c : Bool), Path Bool (bool_xor (bool_xor a b) c) (bool_xor a (bool_xor b c)) :=
+--   fun a b c => <i> bool_xor a (bool_xor b c)
+
+-- Multiplication commutativity
+-- def smg_mul_comm : forall (a : IntSM), forall (b : IntSM), Path IntSM (smg_mul a b) (smg_mul b a) :=
+--   fun a b => <i> smg_mul a b
+
+-- Multiplication associativity
+-- def smg_mul_assoc : forall (a : IntSM), forall (b : IntSM), forall (c : IntSM), Path IntSM (smg_mul (smg_mul a b) c) (smg_mul a (smg_mul b c)) :=
+--   fun a b c => <i> smg_mul (smg_mul a b) c
+
+-- Multiplicative identity
+-- def smg_mul_one_r : forall (a : IntSM), Path IntSM (smg_mul a smg_one) a :=
+--   fun a => <i> smg_mul a smg_one
+--
+-- def smg_mul_one_l : forall (a : IntSM), Path IntSM (smg_mul smg_one a) a :=
+--   fun a => <i> smg_mul smg_one a
+
+-- Multiplicative zero
+-- def smg_mul_zero_r : forall (a : IntSM), Path IntSM (smg_mul a smg_zero) smg_zero :=
+--   fun a => <i> smg_zero
+--
+-- def smg_mul_zero_l : forall (a : IntSM), Path IntSM (smg_mul smg_zero a) smg_zero :=
+--   fun a => <i> smg_zero
+
+-- Distributivity
+-- def smg_mul_add_l : forall (a : IntSM), forall (b : IntSM), forall (c : IntSM), Path IntSM (smg_mul a (smg_add b c)) (smg_add (smg_mul a b) (smg_mul a c)) :=
+--   fun a b c => <i> smg_mul a (smg_add b c)
+--
+-- def smg_mul_add_r : forall (a : IntSM), forall (b : IntSM), forall (c : IntSM), Path IntSM (smg_mul (smg_add a b) c) (smg_add (smg_mul a c) (smg_mul b c)) :=
+--   fun a b c => <i> smg_mul (smg_add a b) c
+
+-- Zero and one
+def smg_zero : IntSM := mkIntSM false zero
+def smg_one : IntSM := mkIntSM false (suc zero)
+
 -- Main
 def main : U1 := U0

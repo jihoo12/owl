@@ -148,3 +148,39 @@ def NatCommRing : CommRing Nat add mul zero one :=
 def nat_mul_comm_by_instance : forall (a : Nat), forall (b : Nat),
   Path Nat (mul a b) (mul b a) :=
   fun a b => NatCommRing.mul_comm a b
+
+-- ────────────────────────────────────────────────────────────────────────
+-- Bundled concrete instance: sign/magnitude integers (IntSM)
+-- ────────────────────────────────────────────────────────────────────────
+--
+-- IntSM is a sign/magnitude integer: sign=false means positive (n),
+-- sign=true means negative (-(n+1)). The operations are defined in
+-- examples/int_sign_magnitude.owl.
+--
+-- Use `only` to import only IntSM and its operations, avoiding Nat conflict.
+
+import "../examples/int_sign_magnitude.owl" only [IntSM, Bool, smg_add, smg_mul, smg_zero, smg_one, smg_neg, bool_xor]
+
+-- IntSMCommRing: placeholder for future CommRing instance
+-- The lemmas (smg_add_comm, smg_add_assoc, etc.) are not yet proven.
+-- Once the ring laws are proven in int_sign_magnitude.owl, they can be uncommented.
+-- def IntSMCommRing : CommRing IntSM smg_add smg_mul smg_zero smg_one :=
+--   mkCommRing
+--     (fun a b c p q => <i> smg_add (smg_add a b) c)  -- trans (placeholder)
+--     (fun a b p => <i> smg_add a b)  -- sym (placeholder)
+--     (fun a b n p => <i> smg_add a b)  -- cong_add_l
+--     (fun a b n p => <i> smg_add a b)  -- cong_add_r
+--     (fun a b n p => <i> smg_mul a b)  -- cong_mul_l
+--     (fun a b n p => <i> smg_mul a b)  -- cong_mul_r
+--     smg_add_comm
+--     smg_add_assoc
+--     smg_add_zero_l
+--     smg_add_zero_r
+--     smg_mul_comm
+--     smg_mul_assoc
+--     smg_mul_one_l
+--     smg_mul_one_r
+--     smg_mul_zero_l
+--     smg_mul_zero_r
+--     smg_mul_add_l
+--     smg_mul_add_r
