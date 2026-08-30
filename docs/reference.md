@@ -6,6 +6,71 @@ tactic mode. This document describes the complete language.
 
 ---
 
+## Quick Start
+
+### Prerequisites
+
+- Rust toolchain (edition 2024)
+- `cargo` for building
+
+### Build and Run
+
+```sh
+cargo build                              # build the binary
+cargo run -- check examples/nat.owl      # typecheck a file
+cargo run -- eval  examples/nat.owl      # typecheck + normalize main
+cargo run -- repl                        # start interactive session
+```
+
+### A Minimal Example
+
+Create a file `hello.owl`:
+
+```owl
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+def four : Nat := add (suc (suc zero)) (suc (suc zero))
+
+def main : Nat := four
+```
+
+Run it:
+
+```sh
+cargo run -- eval hello.owl
+-- Output: main : Nat = 4
+```
+
+### Tactic Example
+
+```owl
+def id : forall (A : U0), A -> A := by intro A x; exact x
+
+def add_one : Nat -> Nat := fun n => suc n
+
+def double_add : Nat -> Nat :=
+  by intro x; apply add_one; apply add_one; exact x
+```
+
+### Key Concepts
+
+- **Dependent types**: `forall (x : A), B` or `A -> B` (non-dependent)
+- **Path types**: `Path A u v` — equality as a type, with path lambda `<i> body`
+- **Higher inductive types**: path constructors `[face0, face1]`, square constructors `[[...]]`
+- **Tactics**: `by intro; exact`, `by ring`, `by omega`, `by field with F`
+- **Modules**: `module M where ... end`, imports with `import "file.owl"`
+
+See the sections below for the complete language specification.
+
+---
+
 ## 1. Lexical Structure
 
 ### Comments
@@ -2546,7 +2611,7 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "inductive" NAME [<params>] [":" UNIV] "where" <con_list>
                   "with" NAME ":" <term> ":=" <term>
                 | "record" NAME [<params>] "where" <field_list>
-                | "def" NAME ":" <term> ":=" <term>
+                | "def" NAME ":" <term> ":=" <term> ["by_wf"]
 
 <params>      ::= ("(" NAME ":" <term> ")")*
 <con_list>    ::= <con> ("|" <con>)*
@@ -2587,6 +2652,9 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "equivFwd" <prefix_or_atom> <prefix_or_atom>
                 | "lift" <prefix_or_atom>          -- lift into higher universe
                 | "lower" <prefix_or_atom>         -- lower from higher universe
+                | "Delay" <prefix_or_atom>         -- coinductive delay type
+                | "Next" <prefix_or_atom>          -- wrap into Delay
+                | "Force" <prefix_or_atom>         -- unwrap from Delay
                 | <atom>
 
 <atom>        ::= NAME                             -- variable, constructor, i0, i1
@@ -2636,7 +2704,11 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "transitivity"
                 | "compute"
                 | "trivial"
-                | "ring"
+                | "ring" ["with" NAME]
+                | "field" "with" NAME
+                | "group" "with" NAME
+                | "omega"
+                | "eq"
 
 <face>        ::= <face_atom> ("\/" <face_atom>)*
 <face_atom>   ::= <face_lit> ("/\ " <face_lit>)*
@@ -2656,10 +2728,32 @@ natural numbers must be written with the constructors of `Nat` (`zero`,
 `suc zero`, ...) — writing `add m 0` passes the interval `i0` where a `Nat` is
 expected and fails with `Type mismatch: expected Nat got I`.
 
-**`forall` position**: `forall` / `∀` is only a term-level form (see the
-grammar: it is a `<lambda>` alternative). It cannot follow a `->`; put every
-binder before the arrow chain, e.g. `forall (a : Nat), forall (b : Nat),
-Path Nat a b -> Path Nat b a`.
+**`forall` position**: a `forall` / `∀` binder may appear at term top-level **or
+directly after a non-dependent `->`**, and it binds looser than `->`. The
+classic form — declare every binder before the arrow chain — still works:
+
+```
+forall (a : Nat), forall (b : Nat), Path Nat a b -> Path Nat b a
+```
+
+A dependent codomain after an arrow is now accepted:
+
+```
+Path Nat a b -> forall (m : Nat), Path Nat m m     -- parses as (Path Nat a b) -> (forall (m : Nat), Path Nat m m)
+```
+
+The `forall` absorbs everything to its right, so
+`A -> forall (x : B), C -> D` parses as `A -> (forall (x : B), (C -> D))`.
+
+**`by_wf` annotation**: A `def` can carry the `by_wf` annotation to disable
+the structural recursion guard, allowing well-founded recursion:
+
+```
+def double : Nat -> Nat by_wf := fun n =>
+  match n return Nat with
+  | zero => zero
+  | suc n' => suc (suc (double n'))
+```
 
 **Match scrutinee**: The `match` form accepts either a bare name (resolved
 from scope) or an arbitrary term as the scrutinee.
@@ -3109,6 +3203,19 @@ When the `--debug` or `-d` flag is used, errors include additional context:
 
 ## 18. Running Owl
 
+### Command-Line Interface
+
+```text
+owl check <file>       Typecheck a source file (libraries need no `main`).
+owl eval  <file>       Typecheck and normalize `main` (or the last definition).
+owl <file>             Alias for `owl eval <file>`.
+owl repl               Start an interactive session.
+owl help               Show usage information.
+```
+
+The binary runs on a 256 MiB-stack worker thread by default, so deep
+normal forms never overflow the stack.
+
 ### Check Mode
 
 Type-check a file without evaluating:
@@ -3117,12 +3224,63 @@ Type-check a file without evaluating:
 owl check file.owl
 ```
 
-### Run Mode
+### Eval / Run Mode
 
 Type-check and evaluate `main` (or last definition):
 
 ```
-owl run file.owl
+owl eval file.owl
+owl run file.owl     -- alias for eval
+```
+
+### REPL
+
+Start an interactive session:
+
+```
+owl repl
+```
+
+The REPL accepts one complete top-level declaration per line. Commands:
+
+- `:help` — show help
+- `:load <file>` — add a source file to the session
+- `:quit` — exit
+
+### Debug Logging
+
+Pass `--debug` (or `-d`) to any command to enable detailed trace output from
+the typechecker and NbE reduction engine. The same behaviour can be activated
+via the `OWL_DEBUG` environment variable:
+
+```
+owl --debug eval examples/nat.owl
+OWL_DEBUG=1 owl check examples/nat.owl
+```
+
+Typechecker output shows every `infer` and `check` entry with the term being
+checked and the current context depth. NbE output records every reduction
+step (beta, eliminator, transport, ...) and prints the full trace at the end
+of execution.
+
+### Environment Variables
+
+| Variable | Effect |
+|----------|--------|
+| `OWL_DEBUG=1` | Enable debug trace output (same as `--debug`) |
+| `OWL_TIMINGS=1` | Print per-definition phase timings to stderr |
+
+`OWL_TIMINGS` reports three phases per definition: tactic-resolve,
+kernel-recheck, and output-norm. Use it when checking feels slow before
+optimizing blindly.
+
+### Testing
+
+```sh
+cargo test                 # run the full test suite (~233 tests)
+cargo test <name>          # run a targeted test
+scripts/verify.sh          # full verification (build + fmt + test + rescan)
+scripts/verify.sh --quick  # quick verification (no slow suites)
 ```
 
 ### Example
@@ -3131,3 +3289,63 @@ owl run file.owl
 $ owl run examples/nat.owl
 main : Nat = 4
 ```
+
+---
+
+## 19. Standard Library
+
+Owl ships with a small standard library in `lib/`. These files are resolved
+by-name by the tactic engine and can be imported into your own files.
+
+### lib/ring_laws.owl
+
+Commutative ring laws for `by ring` over natural numbers. Provides:
+
+- Operations: `zero`, `one`, `add`, `mul`
+- Laws: `add_comm`, `add_assoc`, `add_0_l`, `add_0_r`, `mul_comm`, `mul_assoc`,
+  `mul_1_l`, `mul_1_r`, `mul_0_l`, `mul_0_r`, `mul_add_l`, `mul_add_r`
+- Structural lemmas: `trans`, `sym`, `cong_add_l`, `cong_add_r`, `cong_mul_l`, `cong_mul_r`
+
+### lib/field_laws.owl
+
+Field laws for `by field with F`. Provides:
+
+- The `Field` record bundling `CommRing` laws plus `inv`, `inv_mul`, `inv_one`,
+  `inv_mul_dist`, `inv_div`, `cong_inv`, `nz_one`, `nz_mul`
+
+### lib/algebra.owl
+
+Shared algebraic structures:
+
+- `CommRing A add mul zero one` — commutative ring record
+- `Group A mul inv one` — group record
+- `Field A add mul inv zero one` — field record (canonical home)
+- `Module A add mul zero one C M m_add m_neg m_zero smul` — module over a ring
+
+### lib/logic.owl
+
+Core logic types:
+
+```owl
+inductive Empty where
+
+def absurd : forall (A : Type), Empty -> A
+def Not : forall (A : Type), Type := fun A => A -> Empty
+```
+
+### lib/truncation.owl
+
+Truncation types for propositional truncation.
+
+### Example: Using Libraries
+
+```owl
+import "lib/ring_laws.owl"
+
+def add_comm : forall (m : Nat), forall (n : Nat),
+  Path Nat (add m n) (add n m) :=
+  by intro m n; ring
+```
+
+See `examples/ring_demo.owl`, `examples/comm_ring_demo.owl`,
+`examples/field_demo.owl`, and `examples/group_demo.owl` for worked examples.
