@@ -620,18 +620,19 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   2. Handle the case where quoting encounters a neutral whose frontier is satisfied but
      wasn't destabilized (e.g., during `quote_case_body` which runs outside the normal
      eval path).
+  *Note: defensive hardening — kernel re-checks everything, so unsatisfied-frontier
+  neutrals in quoting don't cause soundness issues. Can be added later if needed.*
 
-  *Phase 5 — Interval environment tracking (~100 lines).*
-  1. `Session::interval_bindings: Vec<(usize, I)>` — set by `IClosure::apply_interval_value`
-     when an interval variable is instantiated to a concrete value; cleared when the
-     closure returns.
-  2. `Frontier::is_satisfied` queries `session.interval_bindings`.
-  3. Ensure thread-safety via `Session` (already thread-local).
+  *Phase 5 — Interval environment tracking (~100 lines).* ✅ Done (subsumed by Phase 3).
+  1. ✅ `Session::interval_bindings: Vec<Option<I>>` — set by `IClosure::apply_interval_value`
+     when a closure is applied with a concrete interval value.
+  2. ✅ `Frontier::is_satisfied` queries `session.interval_bindings`.
+  3. ✅ Thread-safety via `Session` (already thread-local).
 
   **Verification**: After each phase, run `cargo test` (all existing tests must
   pass — the change is backward-compatible since neutrals without satisfied frontiers
-  behave exactly as before). After Phase 3: 253/253 tests pass. Phase 4 next:
-  update quoting for stabilized neutrals.
+  behave exactly as before). Phase 3 complete: 253/253 tests pass. Phase 4 is
+  defensive hardening (can be deferred). Phase 5 subsumed by Phase 3.
 
   **Estimated total**: ~1,150 lines of new code across 6 files. Risk concentrated in
   Phase 3 (destabilization) — must be validated against the full test suite and the
