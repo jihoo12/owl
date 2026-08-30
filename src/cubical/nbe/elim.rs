@@ -24,7 +24,7 @@ pub fn do_force(v: Value, globals: &Globals, global_offset: usize, session: &mut
             );
             *inner
         }
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NForce(Box::new(n))),
+        Value::VNeutral(n) => Value::VNeutral(Neutral::nforce(n)),
         other => Value::VForce(Box::new(other)),
     }
 }
@@ -46,7 +46,7 @@ pub fn do_apply(
             );
             result
         }
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NApp(Box::new(n), Box::new(a))),
+        Value::VNeutral(n) => Value::VNeutral(Neutral::napp(n, a)),
         other => Value::VApp(Box::new(other), Box::new(a)),
     }
 }
@@ -171,8 +171,9 @@ pub fn do_papp(
                 Box::new(other),
             ),
         },
-        Value::VNeutral(n) => {
-            Value::VNeutral(Neutral::NPApp(Box::new(n.clone()), Box::new(r.clone())))
+        Value::VNeutral(p) => {
+            let r_frontier = Neutral::interval_frontier(&r);
+            Value::VNeutral(Neutral::npapp(p, r.clone(), r_frontier))
         }
         // hcomp boundary reduction: (hcomp A sys base) @ 0 = base
         //                           (hcomp A sys base) @ 1 = first tube @ 1
@@ -557,7 +558,7 @@ pub fn do_fst(globals: &Globals, global_offset: usize, p: Value, session: &mut S
             );
             *a
         }
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NFst(Box::new(n))),
+        Value::VNeutral(n) => Value::VNeutral(Neutral::nfst(n)),
         other => Value::VFst(Box::new(other)),
     }
 }
@@ -572,7 +573,7 @@ pub fn do_snd(globals: &Globals, global_offset: usize, p: Value, session: &mut S
             );
             *b
         }
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NSnd(Box::new(n))),
+        Value::VNeutral(n) => Value::VNeutral(Neutral::nsnd(n)),
         other => Value::VSnd(Box::new(other)),
     }
 }
@@ -620,7 +621,7 @@ pub fn do_proj(field: &str, r: Value, session: &mut Session) -> Value {
             }
             Value::VProj(field.to_string(), Box::new(r))
         }
-        Value::VNeutral(n) => Value::VNeutral(Neutral::NProj(Box::new(n), field.to_string())),
+        Value::VNeutral(n) => Value::VNeutral(Neutral::nproj(n, field.to_string())),
         other => Value::VProj(field.to_string(), Box::new(other)),
     }
 }
@@ -795,11 +796,5 @@ fn stuck_elim(
     env: &Scope,
     global_offset: usize,
 ) -> Value {
-    Value::VNeutral(Neutral::NElim(
-        Box::new(motive),
-        cases.to_vec(),
-        Box::new(n),
-        env.clone(),
-        global_offset,
-    ))
+    Value::VNeutral(Neutral::nelim(motive, cases.to_vec(), n, env.clone(), global_offset))
 }

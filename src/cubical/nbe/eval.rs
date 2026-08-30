@@ -8,7 +8,7 @@ use super::quote::quote;
 use super::trace::record_step;
 use super::transport::{do_transport, transport_term_fallback};
 use super::util::{do_equiv_fwd, equiv_dom_value, value_to_dnf, value_to_endpoint};
-use super::value::{Closure, DNFSystem, Globals, IClosure, Neutral, Scope, Value, value_str};
+use super::value::{Closure, DNFSystem, Globals, IClosure, Neutral, NeutralInner, Scope, Value, value_str};
 use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_top};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{ElimCase, Name, System, Tactic, Term, max_var, subst};
@@ -251,7 +251,7 @@ pub fn eval_nbe(
     let depth = session.eval_depth_enter();
     if depth >= EVAL_NBE_MAX_DEPTH {
         session.eval_depth_restore(depth);
-        return Value::VNeutral(Neutral::NVar(depth));
+        return Value::VNeutral(Neutral::nvar(depth));
     }
     let result = eval_nbe_inner(env, globals, global_offset, t, session);
     session.eval_depth_restore(depth);
@@ -276,7 +276,7 @@ fn eval_nbe_inner(
                 if global_idx < g.len() {
                     g[global_idx].clone()
                 } else {
-                    Value::VNeutral(Neutral::NVar(global_idx - g.len()))
+                    Value::VNeutral(Neutral::nvar(global_idx - g.len()))
                 }
             }
         }
@@ -405,7 +405,18 @@ fn eval_nbe_inner(
                 session,
             );
             match &res {
-                Value::VTransport(_, _) | Value::VNeutral(Neutral::NTransport(_, _)) => {
+                Value::VTransport(_, _) => {
+                    let p_term = quote(env.len(), globals, global_offset, p_val, session);
+                    let x_term = quote(env.len(), globals, global_offset, x_val, session);
+                    let reduced = transport_term_fallback(p_term, x_term, session);
+                    match reduced {
+                        Term::TTransport(_, _) => res,
+                        _ => eval_nbe(env, globals, global_offset, &reduced, session),
+                    }
+                }
+                Value::VNeutral(n)
+                    if matches!(n.inner(), NeutralInner::NTransport(_, _)) =>
+                {
                     let p_term = quote(env.len(), globals, global_offset, p_val, session);
                     let x_term = quote(env.len(), globals, global_offset, x_val, session);
                     let reduced = transport_term_fallback(p_term, x_term, session);
@@ -759,7 +770,7 @@ fn eval_nbe_inner(
                     return eval_nbe(env, globals, global_offset, &solution, session);
                 }
             }
-            Value::VNeutral(Neutral::NMeta(*i))
+            Value::VNeutral(Neutral::nmeta(*i))
         }
         Term::TBy(_) => panic!("TBy should be resolved before NbE"),
         Term::TDelay(a) => {

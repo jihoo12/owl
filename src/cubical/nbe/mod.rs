@@ -98,7 +98,7 @@ pub fn nbe_eval(t: &Term, session: &mut Session) -> Term {
             let size = (mv + 1) as usize;
             let mut env = Scope::empty();
             for level in 0..size {
-                env = env.extend(Value::VNeutral(Neutral::NVar(level)));
+                env = env.extend(Value::VNeutral(Neutral::nvar(level)));
             }
             normalize(&env, &empty_globals, 0, t, session)
         }
@@ -150,7 +150,7 @@ pub fn nbe_eval_ctx(ctx_len: usize, t: &Term, session: &mut Session) -> Term {
     // `quote_case_body`. With a locals-only env, normalization is idempotent.
     let mut env = Scope::empty();
     for level in 0..n_local {
-        env = env.extend(Value::VNeutral(Neutral::NVar(level)));
+        env = env.extend(Value::VNeutral(Neutral::nvar(level)));
     }
     quote(
         n_local,

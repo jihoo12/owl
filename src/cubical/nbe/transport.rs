@@ -248,7 +248,7 @@ pub fn do_transport(
                 ),
             }
         }
-        other => Value::VNeutral(Neutral::NTransport(Box::new(other), Box::new(x))),
+        other => Value::VNeutral(Neutral::ntransport(other, x)),
     }
 }
 

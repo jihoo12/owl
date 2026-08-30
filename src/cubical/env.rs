@@ -167,7 +167,7 @@ pub fn check_with_env(
 /// shared vector lets closures see their recursive definition once its
 /// placeholder has been replaced.
 pub fn build_definition_values(env: &Env, session: &mut Session) -> Globals {
-    let placeholder = Value::VNeutral(Neutral::NVar(0));
+    let placeholder = Value::VNeutral(Neutral::nvar(0));
     let globals = std::rc::Rc::new(std::cell::RefCell::new(vec![placeholder; env.defs.len()]));
     for index in (0..env.defs.len()).rev() {
         let (_, _, value) = &env.defs[index];

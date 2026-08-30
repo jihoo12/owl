@@ -487,10 +487,14 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   hard wall: any proof lifting `nat_add a b ↔ suc/add-form` through an APN slot needs its
   path argument evaluated inside a stuck-elim context, which this kernel suppresses — each
   workaround spawned a deeper lemma whose own instantiations hit the same wall one level
-  further in. **Recommended route**: switch the library's Int to a sign/magnitude-style
-  encoding (or difference-of-naturals pairs quotiented), where add/assoc/distributivity are
+  further in. **Two routes forward**:
+  *(a) Short-term (unblock H5 now)*: Switch the library's Int to a sign/magnitude-style
+  encoding (see `examples/int_sign_magnitude.owl`), where add/assoc/distributivity are
   plain case analyses with constructor-driven reductions; then reprove the CommRing bundle
   cheaply. The current pos/negsuc Int stays for omega's definitional tier.
+  *(b) Long-term (fix the kernel)*: Implement frontier-of-instability normalization per
+  §I6 (Sterling-Angiuli 2021). This closes the theoretical gap with Cubical Agda and
+  enables ring laws over pos/negsuc Int directly. See §I6 for the full plan.
 - [x] **Sign/magnitude Int prototype** — `examples/int_sign_magnitude.owl` demonstrates `IntSM` with `sign : Bool` / `mag : Nat`. Addition, negation, multiplication defined via case analysis on signs with nested matches on magnitudes. All core definitions typecheck (uses `by_wf` for termination). Next: prove ring laws (add_assoc, mul_assoc, distributivity) with this encoding, then bundle `IntCommRing`.
 - [ ] Prove Int ring laws (add_assoc, mul_assoc, distributivity) with new encoding
 - [ ] Bundle IntCommRing instance
@@ -552,6 +556,85 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
     equality comparison calls.
 - [ ] **I5. Higher-dimensional `hcomp`** *(🟢 — defer)*: Research-level cubical TT.
   Not needed for practical algebraic geometry or the other 4 items. Mark as long-term.
+- [ ] **I6. Frontier-of-instability normalization (Sterling-Angiuli)** *(🔴 — core
+  kernel improvement that unblocks stuck-elim computation, enables pos/negsuc Int ring
+  laws, and closes the gap with Cubical Agda's normalization.)* Based on Sterling &
+  Angiuli (2021) "Normalization for Cubical Type Theory". The central idea: each neutral
+  form `e : ne_φ(A)` carries a **frontier of instability** `φ` — a predicate on free
+  interval variables indicating when the neutral "ceases to be neutral" and must compute.
+  When `φ` is satisfied (e.g., an interval variable is instantiated to `i0` or `i1`),
+  the neutral **destabilizes** and reduces. This is what Owl's kernel is missing —
+  currently, `do_elim` on a `VNeutral(n)` always creates a stuck `NElim` with no
+  information about when it should compute, and the bounded fallback in `eta_eq`
+  (cap=6) is a pragmatic workaround, not a principled solution.
+
+  **Why this matters**: Both Cubical Agda and Owl use the same `pos`/`negsuc` Int
+  encoding, but Cubical Agda's ring laws work because its normalization handles stuck
+  eliminator cases through the frontier mechanism. Owl's fail because the kernel
+  suppresses evaluation inside stuck eliminators. Without this fix, any HIT with path
+  constructors nested inside eliminators hits the same wall (see §H5's Int blocker).
+
+  **Phases:**
+
+  *Phase 1 — Frontier type and Neutral extension (low risk, ~200 lines).*
+  1. Add `Frontier` enum to `src/cubical/nbe/value.rs`: `False` (ordinary variable,
+     never computes), `IntervalEq(usize, I)` (computes when interval var at level equals
+     endpoint), `Or(Box, Box)`, `And(Box, Box)`.
+  2. `Frontier::is_satisfied(interval_env: &[Option<I>]) -> bool` checks if the frontier
+     fires given concrete interval bindings.
+  3. Extend every `Neutral` variant with a `Frontier` field: `NVar(usize, Frontier)`,
+     `NPApp(Box<Neutral>, Box<Value>, Frontier)`, `NElim(..., Frontier)`, etc.
+  4. Unit tests for `Frontier::is_satisfied` and conservative frontier computation.
+
+  *Phase 2 — Frontier computation during evaluation (~300 lines).*
+  1. `do_papp` on `VNeutral(n)`: frontier of `NPApp(n, r)` is
+     `n.frontier.or(r_frontier)` where `r_frontier` is
+     `Or(IntervalEq(level_of_r, I0), IntervalEq(level_of_r, I1))` when `r` is an
+     interval variable, `False` otherwise.
+  2. `do_elim` on `VNeutral(n)`: frontier of `NElim(...)` is `n.frontier` — the
+     eliminator computes when the scrutinee computes.
+  3. All other neutral constructors: propagate frontiers conservatively (compound
+     neutrals inherit the conjunction of sub-frontiers).
+
+  *Phase 3 — Destabilize neutrals in do_elim (~400 lines, high risk).*
+  1. Add `interval_bindings: Vec<(usize, I)>` to `Session` tracking which interval
+     variables have concrete values. Set by `IClosure::apply_interval_value` when an
+     interval variable is instantiated.
+  2. In `do_elim`'s `VNeutral(n)` branch: call `try_destabilize(globals, global_offset,
+     &n, session)`. If the frontier is satisfied, the neutral has computed — re-enter
+     `do_elim` with the computed value. If not, create stuck `NElim` as before.
+  3. `try_destabilize` recursively checks the neutral spine: `NPApp` at concrete
+     endpoint reduces via `do_papp`; `NElim` with computed scrutinee re-enters
+     `do_elim`; `NVar` never destabilizes.
+  4. **Soundness invariant**: destabilization only fires when (a) the frontier is
+     satisfied AND (b) the result is well-typed (the kernel re-checks). The frontier
+     is conservative — it may say "doesn't compute" when the neutral actually could, but
+     never the reverse.
+
+  *Phase 4 — Update quoting for stabilized neutrals (~150 lines).*
+  1. Generalize `quote_case_body` to attempt limited evaluation of case bodies when the
+     scrutinee is a variable at a known level: evaluate the body with the neutral in
+     scope, and if the result is neutral, quote normally; otherwise fall back to
+     structural re-anchoring.
+  2. Handle the case where quoting encounters a neutral whose frontier is satisfied but
+     wasn't destabilized (e.g., during `quote_case_body` which runs outside the normal
+     eval path).
+
+  *Phase 5 — Interval environment tracking (~100 lines).*
+  1. `Session::interval_bindings: Vec<(usize, I)>` — set by `IClosure::apply_interval_value`
+     when an interval variable is instantiated to a concrete value; cleared when the
+     closure returns.
+  2. `Frontier::is_satisfied` queries `session.interval_bindings`.
+  3. Ensure thread-safety via `Session` (already thread-local).
+
+  **Verification**: After each phase, run `cargo test` (all 233 existing tests must
+  pass — the change is backward-compatible since neutrals without satisfied frontiers
+  behave exactly as before). After Phase 3: prove `smg_add_zero_r` over sign/magnitude
+  Int. After Phase 5: prove `_owl_add_pos_neg` identities over pos/negsuc Int.
+
+  **Estimated total**: ~1,150 lines of new code across 6 files. Risk concentrated in
+  Phase 3 (destabilization) — must be validated against the full test suite and the
+  Int ring law proofs.
 
 ---
 
@@ -564,3 +647,4 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
 5. 🟡 **Interactive REPL proof sessions** — biggest remaining UX win, builds on existing hole/tactic machinery.
 6. 🟢 Remaining items (reflection API, custom tactics, incremental normalization, stdlib, docs) — valuable but can proceed in parallel/opportunistically once the above land.
 7. 🔴 **Algebraic geometry** — follow §H in order: H1 (generic `by ring`) has landed (see §H.1 / §B.2); proceed with H4 (instance search) → H2 (`by field`) → H5 (comm algebra) → H7 (categories/sheaves) → H8 (schemes). H6/H10 unlock as library size grows.
+8. 🔴 **Frontier-of-instability normalization** (§I6) — the long-term kernel fix for stuck-elim computation. Unblocks pos/negsuc Int ring laws, closes the gap with Cubical Agda, and enables the full cubical algebra library. Parallel track with H5's short-term sign/magnitude fix. Phases 1-2 are low-risk additive changes; Phase 3 is the high-risk core soundness change that needs thorough validation.
