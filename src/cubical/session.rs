@@ -11,6 +11,7 @@ use std::ptr;
 use std::rc::Rc;
 
 use crate::cubical::syntax::{Datatype, Name, Term};
+use crate::cubical::interval::I;
 use crate::cubical::typechecker::errors::Pos;
 
 // Re-export core NbE types.
@@ -37,6 +38,13 @@ pub struct Session {
     // ── Equality state ──────────────────────────────────────────────
     pub elim_case_recurse_depth: usize,
 
+    // ── Frontier-of-instability interval tracking ──────────────────
+    // Maps de Bruijn level → concrete interval value (if known).
+    // Populated by IClosure::apply_interval_value when a closure is
+    // applied with a concrete interval. Used by Frontier::is_satisfied
+    // to determine when neutrals can destabilize.
+    pub interval_bindings: Vec<Option<I>>,
+
     // ── Typechecker flags ───────────────────────────────────────────
     pub skip_plam_endpt: bool,
     pub skip_guard: bool,
@@ -60,6 +68,7 @@ impl Session {
             meta_names: Vec::new(),
             meta_expected: Vec::new(),
             elim_case_recurse_depth: 0,
+            interval_bindings: Vec::new(),
             skip_plam_endpt: false,
             skip_guard: false,
             current_def: None,
@@ -198,6 +207,23 @@ impl Session {
     }
     pub fn elim_depth_restore(&mut self, d: usize) {
         self.elim_case_recurse_depth = d;
+    }
+
+    // ── Frontier-of-instability interval bindings ──────────────────
+    /// Record that interval variable at de Bruijn level `level` is
+    /// bound to concrete interval `i`. Called by IClosure when a
+    /// closure is applied with a concrete interval value.
+    pub fn record_interval_binding(&mut self, level: usize, i: &I) {
+        // Extend the vec if needed (fill gaps with None = unknown).
+        while self.interval_bindings.len() <= level {
+            self.interval_bindings.push(None);
+        }
+        self.interval_bindings[level] = Some(i.clone());
+    }
+
+    /// Check if interval variable at `level` is bound to `endpoint`.
+    pub fn interval_is_concrete(&self, level: usize, endpoint: &I) -> bool {
+        matches!(self.interval_bindings.get(level), Some(Some(v)) if v == endpoint)
     }
 
     // ── Typechecker flags ──────────────────────────────────────────

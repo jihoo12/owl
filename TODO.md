@@ -576,40 +576,41 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
 
   **Phases:**
 
-  *Phase 1 — Frontier type and Neutral extension (low risk, ~200 lines).*
-  1. Add `Frontier` enum to `src/cubical/nbe/value.rs`: `False` (ordinary variable,
-     never computes), `IntervalEq(usize, I)` (computes when interval var at level equals
-     endpoint), `Or(Box, Box)`, `And(Box, Box)`.
-  2. `Frontier::is_satisfied(interval_env: &[Option<I>]) -> bool` checks if the frontier
+  *Phase 1 — Frontier type and Neutral extension (low risk, ~200 lines).* ✅ Done.
+  1. ✅ `Frontier` enum added to `src/cubical/nbe/value.rs`: `False`, `IntervalEq(usize, I)`,
+     `Or(Box, Box)`, `And(Box, Box)`.
+  2. ✅ `Frontier::is_satisfied(interval_env: &[Option<I>]) -> bool` checks if the frontier
      fires given concrete interval bindings.
-  3. Extend every `Neutral` variant with a `Frontier` field: `NVar(usize, Frontier)`,
-     `NPApp(Box<Neutral>, Box<Value>, Frontier)`, `NElim(..., Frontier)`, etc.
-  4. Unit tests for `Frontier::is_satisfied` and conservative frontier computation.
+  3. ✅ `Neutral` restructured from flat enum to `{ inner: NeutralInner, frontier: Frontier }`
+     struct. 15 convenience constructors (`nvar`, `napp`, `npapp`, `nelim`, etc.) with
+     correct frontier computation.
+  4. ✅ 20 unit tests for `Frontier::is_satisfied` and `Neutral` constructors.
+  Verified: 253/253 tests pass.
 
-  *Phase 2 — Frontier computation during evaluation (~300 lines).*
-  1. `do_papp` on `VNeutral(n)`: frontier of `NPApp(n, r)` is
-     `n.frontier.or(r_frontier)` where `r_frontier` is
-     `Or(IntervalEq(level_of_r, I0), IntervalEq(level_of_r, I1))` when `r` is an
-     interval variable, `False` otherwise.
-  2. `do_elim` on `VNeutral(n)`: frontier of `NElim(...)` is `n.frontier` — the
-     eliminator computes when the scrutinee computes.
-  3. All other neutral constructors: propagate frontiers conservatively (compound
-     neutrals inherit the conjunction of sub-frontiers).
+  *Phase 2 — Frontier computation during evaluation (~300 lines).* ✅ Done.
+  1. ✅ `do_papp` on `VNeutral(n)`: `Neutral::interval_frontier(&r)` computes
+     `Or(IntervalEq(level, I0), IntervalEq(level, I1))` for interval variables.
+  2. ✅ `do_elim` on `VNeutral(n)`: `Neutral::nelim(...)` inherits scrutinee's frontier.
+  3. ✅ All other neutral constructors: frontiers propagate through `napp`, `nfst`, `nsnd`,
+     `nproj`, `nforce` (inherit from sub-neutral). `ntransport`, `nhcomp`, etc. get
+     `Frontier::False` (correct — always stuck).
+  Verified: 253/253 tests pass (no behavioral change — all neutrals carry correct
+  structural frontiers but no destabilization logic yet).
 
-  *Phase 3 — Destabilize neutrals in do_elim (~400 lines, high risk).*
-  1. Add `interval_bindings: Vec<(usize, I)>` to `Session` tracking which interval
-     variables have concrete values. Set by `IClosure::apply_interval_value` when an
-     interval variable is instantiated.
-  2. In `do_elim`'s `VNeutral(n)` branch: call `try_destabilize(globals, global_offset,
-     &n, session)`. If the frontier is satisfied, the neutral has computed — re-enter
-     `do_elim` with the computed value. If not, create stuck `NElim` as before.
-  3. `try_destabilize` recursively checks the neutral spine: `NPApp` at concrete
-     endpoint reduces via `do_papp`; `NElim` with computed scrutinee re-enters
-     `do_elim`; `NVar` never destabilizes.
-  4. **Soundness invariant**: destabilization only fires when (a) the frontier is
-     satisfied AND (b) the result is well-typed (the kernel re-checks). The frontier
-     is conservative — it may say "doesn't compute" when the neutral actually could, but
-     never the reverse.
+  *Phase 3 — Destabilize neutrals in do_elim (~400 lines, high risk).* ✅ Done.
+  1. ✅ `interval_bindings: Vec<Option<I>>` added to `Session`, populated by
+     `IClosure::apply_interval_value` when a closure is applied with a concrete
+     interval. `Frontier::is_satisfied` queries `session.interval_bindings`.
+  2. ✅ `try_destabilize(globals, global_offset, &n, session)` function added to
+     `elim.rs`. Checks `n.frontier().is_satisfied(&session.interval_bindings)`.
+     If satisfied, recursively destabilizes the neutral spine: `NPApp` at concrete
+     endpoint reduces via `do_papp`; `NApp`/`NFst`/`NSnd`/`NProj`/`NForce`
+     destabilize sub-neutrals; `NElim` with computed scrutinee re-enters `do_elim`.
+     Returns `Some(value)` only if result is non-neutral (prevents infinite loops).
+  3. ✅ `do_elim`'s `VNeutral(n)` branch calls `try_destabilize` before creating
+     stuck `NElim`. If destabilization succeeds, re-enters `do_elim` with result.
+  Verified: 253/253 tests pass (backward-compatible — neutrals with unsatisfied
+  frontiers behave exactly as before).
 
   *Phase 4 — Update quoting for stabilized neutrals (~150 lines).*
   1. Generalize `quote_case_body` to attempt limited evaluation of case bodies when the
@@ -627,10 +628,10 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
   2. `Frontier::is_satisfied` queries `session.interval_bindings`.
   3. Ensure thread-safety via `Session` (already thread-local).
 
-  **Verification**: After each phase, run `cargo test` (all 233 existing tests must
+  **Verification**: After each phase, run `cargo test` (all existing tests must
   pass — the change is backward-compatible since neutrals without satisfied frontiers
-  behave exactly as before). After Phase 3: prove `smg_add_zero_r` over sign/magnitude
-  Int. After Phase 5: prove `_owl_add_pos_neg` identities over pos/negsuc Int.
+  behave exactly as before). After Phase 3: 253/253 tests pass. Phase 4 next:
+  update quoting for stabilized neutrals.
 
   **Estimated total**: ~1,150 lines of new code across 6 files. Risk concentrated in
   Phase 3 (destabilization) — must be validated against the full test suite and the

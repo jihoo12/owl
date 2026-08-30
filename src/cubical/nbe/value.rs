@@ -460,6 +460,12 @@ impl IClosure {
     pub fn apply_interval_value(&self, v: Value, session: &mut Session) -> Value {
         match &v {
             Value::VInterval(i) => {
+                // Record that the closure's interval variable (at de Bruijn
+                // level = current env length) is bound to concrete `i`.
+                // This feeds into Frontier::is_satisfied for destabilization.
+                let level = self.env.len();
+                session.record_interval_binding(level, i);
+
                 // The closure body references its bound interval variable as
                 // `I::Var(0)` (incrementing under nested PLams). Substitute it
                 // with the applied interval value *before* evaluating; extending

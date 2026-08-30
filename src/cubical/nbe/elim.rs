@@ -9,7 +9,7 @@ use super::hcomp::{do_comp, do_hcomp};
 use super::quote::quote;
 use super::trace::record_step;
 use super::util::value_to_endpoint;
-use super::value::{Globals, Neutral, Scope, Value, value_str};
+use super::value::{Globals, Neutral, NeutralInner, Scope, Value, value_str};
 use crate::cubical::interval::I;
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{ElimCase, Name, Term, max_var, subst};
@@ -778,7 +778,21 @@ pub fn do_elim(
                 ),
             }
         }
-        Value::VNeutral(n) => stuck_elim(motive, cases, n, env, global_offset),
+        Value::VNeutral(n) => {
+            // Phase 3: frontier-of-instability destabilization.
+            // When the neutral's frontier is satisfied (interval variables
+            // in the frontier are bound to concrete endpoints), try to
+            // reduce the neutral. If it computes to a non-neutral value,
+            // re-enter do_elim with the result.
+            if let Some(destabilized) =
+                try_destabilize(globals, global_offset, &n, session)
+            {
+                return do_elim(
+                    motive, cases, destabilized, env, globals, global_offset, session,
+                );
+            }
+            stuck_elim(motive, cases, n, env, global_offset)
+        }
         other => Value::VElim(
             Box::new(motive),
             cases.to_vec(),
@@ -786,6 +800,133 @@ pub fn do_elim(
             env.clone(),
             global_offset,
         ),
+    }
+}
+
+/// Try to destabilize a neutral whose frontier of instability is satisfied.
+///
+/// When a neutral's frontier is satisfied (the interval variables it depends
+/// on are bound to concrete endpoints), the neutral may be able to compute.
+/// This function attempts to reduce the neutral by re-evaluating its spine
+/// operations with concrete interval values.
+///
+/// Returns `Some(value)` if the neutral successfully reduced to a non-neutral
+/// value, `None` if it's still stuck.
+fn try_destabilize(
+    globals: &Globals,
+    global_offset: usize,
+    n: &Neutral,
+    session: &mut Session,
+) -> Option<Value> {
+    // Check if the frontier is satisfied.
+    if !n.frontier().is_satisfied(&session.interval_bindings) {
+        return None;
+    }
+
+    match n.inner() {
+        // NVar never computes.
+        NeutralInner::NVar(_) => None,
+
+        // NPApp(p, r): path application. If r is an interval variable that's
+        // now concrete, apply the path to the concrete endpoint.
+        NeutralInner::NPApp(p, r) => {
+            if let Value::VIntervalVar(level) = **r {
+                if let Some(Some(concrete)) = session.interval_bindings.get(level) {
+                    let p_val = Value::VNeutral((**p).clone());
+                    let r_val = Value::VInterval(concrete.clone());
+                    let result = do_papp(globals, global_offset, p_val, r_val, session);
+                    if matches!(result, Value::VNeutral(_)) {
+                        return None;
+                    }
+                    return Some(result);
+                }
+            }
+            None
+        }
+
+        // NApp(f, a): function application. Try to destabilize f.
+        NeutralInner::NApp(f, a) => {
+            let f_val = try_destabilize(globals, global_offset, f, session)
+                .unwrap_or(Value::VNeutral((**f).clone()));
+            let result = do_apply(globals, global_offset, f_val, (**a).clone(), session);
+            if matches!(result, Value::VNeutral(_)) {
+                return None;
+            }
+            Some(result)
+        }
+
+        // NFst(p): first projection. Try to destabilize p.
+        NeutralInner::NFst(p) => {
+            let p_val = try_destabilize(globals, global_offset, p, session)
+                .unwrap_or(Value::VNeutral((**p).clone()));
+            let result = do_fst(globals, global_offset, p_val, session);
+            if matches!(result, Value::VNeutral(_)) {
+                return None;
+            }
+            Some(result)
+        }
+
+        // NSnd(p): second projection. Try to destabilize p.
+        NeutralInner::NSnd(p) => {
+            let p_val = try_destabilize(globals, global_offset, p, session)
+                .unwrap_or(Value::VNeutral((**p).clone()));
+            let result = do_snd(globals, global_offset, p_val, session);
+            if matches!(result, Value::VNeutral(_)) {
+                return None;
+            }
+            Some(result)
+        }
+
+        // NProj(n, field): record field projection. Try to destabilize n.
+        NeutralInner::NProj(n, field) => {
+            let n_val = try_destabilize(globals, global_offset, n, session)
+                .unwrap_or(Value::VNeutral((**n).clone()));
+            let result = do_proj(field, n_val, session);
+            if matches!(result, Value::VNeutral(_)) {
+                return None;
+            }
+            Some(result)
+        }
+
+        // NForce(n): force Next. Try to destabilize n.
+        NeutralInner::NForce(n) => {
+            let n_val = try_destabilize(globals, global_offset, n, session)
+                .unwrap_or(Value::VNeutral((**n).clone()));
+            let result = do_force(n_val, globals, global_offset, session);
+            if matches!(result, Value::VNeutral(_)) {
+                return None;
+            }
+            Some(result)
+        }
+
+        // NElim(motive, cases, scrut, env, go): datatype elimination.
+        // Try to destabilize the scrutinee; if it computes to a constructor,
+        // re-enter do_elim.
+        NeutralInner::NElim(motive, cases, scrut, env, go) => {
+            if let Some(scrut_val) =
+                try_destabilize(globals, global_offset, scrut, session)
+            {
+                let result = do_elim(
+                    *motive.clone(),
+                    cases,
+                    scrut_val,
+                    env,
+                    globals,
+                    global_offset,
+                    session,
+                );
+                if matches!(result, Value::VNeutral(_)) {
+                    return None;
+                }
+                return Some(result);
+            }
+            None
+        }
+
+        // NSqApp, NCellApp, NTransport, NHComp, NComp, NFill, NHFill, NMeta:
+        // don't try to destabilize (these are either always stuck or need
+        // more complex handling).
+        _ => None,
     }
 }
 
