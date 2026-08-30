@@ -961,7 +961,7 @@ impl Parser {
         if self.consume_ident("ua") {
             return Ok(Term::TUa(Box::new(self.parse_prefix_or_atom()?)));
         }
-        if self.consume_ident("transport") {
+        if self.consume_ident("transport") || self.consume_ident("coe") {
             let p = self.parse_prefix_or_atom()?;
             let x = self.parse_prefix_or_atom()?;
             return Ok(Term::TTransport(Box::new(p), Box::new(x)));
@@ -1102,6 +1102,18 @@ impl Parser {
             //   1: r : Path (Path A x y) p q
             //   0: s : Path (Path A x y) p q
             return Ok(self.build_isgroupoid(a));
+        }
+        if self.consume_ident("isNType") {
+            // Parse the truncation level (must be a non-negative integer literal)
+            let level = match self.peek().kind {
+                TokenKind::Int(n) if n >= 0 => {
+                    self.pos += 1;
+                    n as u32
+                }
+                _ => return Err(self.error_here("expected non-negative integer after isNType")),
+            };
+            let a = self.parse_prefix_or_atom()?;
+            return Ok(self.build_isntype(level, a));
         }
         if self.consume_ident("hcomp") {
             let a = self.parse_prefix_or_atom()?;
@@ -2857,6 +2869,56 @@ impl Parser {
             false,
         )
     }
+
+    /// Build `isNType n A` for arbitrary non-negative `n`.
+    ///
+    /// Generates `2*(n+1)` nested Pi binders with a nested Path body:
+    /// - n=0 (isProp): `forall (_ : A), forall (_ : A), Path A x y`
+    /// - n=1 (isSet): 4 foralls, body `Path (Path A x y) p q`
+    /// - n=2 (isGroupoid): 6 foralls, body `Path (Path (Path A x y) p q) r s`
+    /// - n=k: `2*(k+1)` foralls, body is a `(k+1)`-fold nested Path.
+    fn build_isntype(&self, n: u32, a: Term) -> Term {
+        let depth = n + 1; // number of Path layers = number of pairs of binders
+
+        // Build the nested Path body.
+        // At level k (1..=depth), body at depth 2*k wraps the previous in Path.
+        // Reference element vars from the k-th pair: introduced at depths 2*(k-1) and 2*(k-1)+1.
+        let mut body: Term = shift(2 * depth as i32, 0, &a);
+        for k in 1..=depth {
+            let d = 2 * k as i32;
+            let left_depth = d - 2; // depth where left element was introduced
+            let right_depth = d - 1; // depth where right element was introduced
+            // Shift from introduction depth to body depth (2*depth)
+            let left = 2 * depth as i32 - 1 - left_depth;
+            let right = 2 * depth as i32 - 1 - right_depth;
+            body = Term::TPath(Box::new(body), Box::new(Term::TVar(left)), Box::new(Term::TVar(right)));
+        }
+
+        // Wrap with 2*depth Pi binders (innermost last).
+        // Even position j (element binder): type = A shifted by j
+        // Odd position j (path binder): type = Path(A at pair_start, left_var, right_var)
+        //   where pair_start = j-1 (the pair's starting depth), and vars are at
+        //   pair_start (left) and pair_start+1 (right), shifted to depth j.
+        let mut result = body;
+        for j in (0..2 * depth).rev() {
+            let j_i = j as i32;
+            let binder_ty = if j % 2 == 0 {
+                // Element binder at depth j
+                shift(j_i, 0, &a)
+            } else {
+                // Path binder: pair starts at depth j-1
+                let pair_start = j_i - 1;
+                let a_at_pair = shift(pair_start, 0, &a);
+                // Left and right element vars introduced at pair_start and pair_start+1
+                // Shift to current depth j: shift = j - introduction_depth
+                let left = j_i - pair_start; // = 1
+                let right = j_i - (pair_start + 1); // = 0
+                Term::TPath(Box::new(a_at_pair), Box::new(Term::TVar(left)), Box::new(Term::TVar(right)))
+            };
+            result = Term::TPi("_".to_string(), Box::new(binder_ty), Box::new(result), false);
+        }
+        result
+    }
 }
 
 fn parse_universe(name: &str) -> Option<i32> {
@@ -2957,6 +3019,7 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "by"
             | "where"
             | "comp"
+            | "coe"
             | "fill"
             | "hfill"
             | "hcomp"
@@ -2964,5 +3027,6 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "isProp"
             | "isSet"
             | "isGroupoid"
+            | "isNType"
     )
 }

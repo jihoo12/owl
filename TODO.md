@@ -507,6 +507,52 @@ Breadth-of-content work — valuable but doesn't gate the type theory or tooling
 - [ ] **H10. Ergonomics blockers at library scale** *(🟡)*: `forall` cannot follow `->` (`docs/reference.md:213` — all binders must precede the arrow chaing tail — derived schemes / higher stacks** *(🟢 — where cubical/HoTT genuinely shines over vanilla ITT: simplicial rings, homotopy limits/colimits, higher truncation. Research-level.)*
 - [ ] **H10. Ergonomics blockers at library scale** *(🟡)*: `forall` cannot follow `->` (`docs/reference.md:213` — all binders must precede the arrow chain) and the basic module/import system (§D) become painful for a growing AG library.
 
+### I. CTT/HoTT Foundation Improvements 🟡
+
+> These are kernel/foundation improvements independent of H5–H9 (which are
+> application-level). They close gaps between Owl and full cubical type theory.
+
+- [x] **I1. `Empty` in standard library** *(🟢)*: Move `Empty` + `absurd` from
+  `lib/field_laws.owl` into a new `lib/logic.owl`; update `field_laws.owl` to
+  import from `lib/logic.owl`. The field solver hardcodes `"Empty"` by name
+  (`field.rs:346`), so the name must stay the same. Trivial change, zero kernel risk.
+  *Done: `lib/logic.owl` created with `Empty`, `absurd`, `Not`; `lib/field_laws.owl`
+  imports it; all 233 tests pass.*
+- [x] **I2. `coe` primitive** *(🟢)*: Add `coe` as parser sugar over `transport`.
+  Syntax: `coe A x` desugars to `transport A x`. In cubical TT, `coe` is the
+  fundamental operation and `transport` is derived; here we invert it (transport is
+  already the primitive) and add `coe` as a convenience alias. Parser-only change
+  in `grammar.rs` + keyword registration + docs.
+  *Done: `grammar.rs` parses `coe` as `TTransport`; keyword registered; `docs/reference.md`
+  updated; `examples/coe_demo.owl` added; all 233 tests pass.*
+- [ ] **I3. General n-truncation** *(🟡)*: Two parts:
+  - *Part A (library):* ✅ `lib/truncation.owl` created with `Trunc` HIT (`inc` +
+    `trunc` path constructor) and `trunc_intro`. Typechecks. Basic `trunc_elim` and
+    `trunc_const` attempted but rejected by the kernel ( HIT eliminator case bodies
+    with variable return types need careful endpoint coherence — deferred).
+  - *Part B (parser sugar):* ✅ `isNType n A` parser sugar added in `grammar.rs`
+    (`build_isntype` function). Generates `2*(n+1)` nested Pi binders with nested
+    Path body. `isNType 0 A` (isProp level) works and typechecks. **Issue:**
+    `isNType 1` and `isNType 2` cause stack overflow during typechecking — the
+    generated terms are very deep (10+ binders with nested Path types). Need to
+    verify de Bruijn indices are correct for n≥1, and possibly increase stack
+    for the test. `examples/isntype_demo.owl` created but only n=0 verified so far.
+  - *Remaining:* debug isNType for n≥1 (check generated term structure against
+    existing `build_isset`/`build_isgroupoid`), add eliminator to truncation lib,
+    run full test suite.
+- [ ] **I4. Proof irrelevance for `Prop`** *(🔴)*: Two sub-issues:
+  - *Impredicativity:* Fix `type_level_dt` Pi formation (line 944–949 of
+    `typechecker/mod.rs`) so `Pi(x:Prop). Prop : Prop` instead of `U0`. Currently
+    `TUniv(i.max(j))` is returned unconditionally; when both domain and codomain
+    infer to level 0, return `TProp`.
+  - *Proof irrelevance:* In `check_dt`, when the expected type is `Prop` or a type
+    known to be `Prop`-valued, shortcircuit `eta_eq` to `Equal`. This is the standard
+    approach (Lean 4, Coq) — irrelevance is triggered by the expected type, not by
+    inspecting arbitrary terms. Requires careful threading of the expected type into
+    equality comparison calls.
+- [ ] **I5. Higher-dimensional `hcomp`** *(🟢 — defer)*: Research-level cubical TT.
+  Not needed for practical algebraic geometry or the other 4 items. Mark as long-term.
+
 ---
 
 ## Suggested Order of Attack

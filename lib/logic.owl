@@ -1,0 +1,10 @@
+-- Core logic types for Owl.
+--
+-- Provides the empty type (ex falso quodlibet) and basic logical connectives.
+
+inductive Empty where
+
+def absurd : forall (A : Type), Empty -> A :=
+  fun A e => match e return A with
+
+def Not : forall (A : Type), Type := fun A => A -> Empty

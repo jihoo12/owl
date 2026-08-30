@@ -1,0 +1,11 @@
+-- Test the `coe` primitive (parser sugar over `transport`).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def coe_id : Nat := coe (<i> Nat) zero
+
+def coe_suc : Nat := coe (<i> Nat) (suc zero)
+
+def main : Nat := coe_suc

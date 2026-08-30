@@ -1,0 +1,21 @@
+-- Test isNType parser sugar at multiple levels.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- isNType 0 A = isProp A
+def my_prop : Type := isNType 0 Nat
+
+-- isNType 1 A = isSet A
+def my_set : Type := isNType 1 Nat
+
+-- isNType 2 A = isGroupoid A
+def my_groupoid : Type := isNType 2 Nat
+
+-- Verify equivalence with existing sugar
+def prop_eq : Path Type (isNType 0 Nat) (isProp Nat) := <i> isProp Nat
+def set_eq : Path Type (isNType 1 Nat) (isSet Nat) := <i> isSet Nat
+def groupoid_eq : Path Type (isNType 2 Nat) (isGroupoid Nat) := <i> isGroupoid Nat
+
+def main : Type := isNType 2 Nat

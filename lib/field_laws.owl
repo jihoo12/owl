@@ -1,7 +1,7 @@
--- `by field` law bundle — the empty type and the `Field` record.
+-- `by field` law bundle — the `Field` record.
 --
--- Nonzero is encoded as `a ≠ 0 := (Path A zero a -> Empty)`; `Empty` is the
--- constructor-less datatype, eliminated only by an empty `match` (`absurd`).
+-- Nonzero is encoded as `a ≠ 0 := (Path A zero a -> Empty)`.
+-- `Empty` and `absurd` live in `lib/logic.owl` (imported below).
 --
 -- The `Field` record bundles the operations as *parameters* (record fields
 -- cannot reference earlier fields in this kernel) and the ring/field laws as
@@ -9,10 +9,7 @@
 -- projects, so `by field with F` reuses the ring polynomial machinery
 -- unchanged; the field laws add inverse reasoning.
 
-inductive Empty where
-
-def absurd : forall (A : Type), Empty -> A :=
-  fun A e => match e return A with
+import "logic.owl"
 
 record Field (A : Type) (add : A -> A -> A) (mul : A -> A -> A) (inv : A -> A) (zero : A) (one : A) where
   field trans : forall (a : A), forall (b : A), forall (c : A), Path A a b -> Path A b c -> Path A a c

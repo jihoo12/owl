@@ -1674,6 +1674,17 @@ Transport moves `x` from type `A` to type `B` along the path `p`.
 - Path decomposition: transport through a Path type produces a path lambda
 - Sigma decomposition: transport through a Sigma type produces a pair
 
+### Coercion (`coe`)
+
+```
+coe A x
+```
+
+`coe` is syntax sugar for `transport`. In cubical type theory, `coe` (coercion
+along a line of types) is the fundamental operation and `transport` is derived;
+in Owl the relationship is inverted since `transport` is the kernel primitive.
+`coe A x` is equivalent to `transport A x`.
+
 ---
 
 ## 12. Tactic Mode

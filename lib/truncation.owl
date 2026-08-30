@@ -1,0 +1,12 @@
+-- Truncation types for Owl.
+--
+-- Provides the propositional truncation `Trunc A` (a HIT that collapses all
+-- paths between elements). For general n-truncation properties, use the
+-- `isNType n A` parser sugar (desugars to nested Pi/Path types).
+
+inductive Trunc (A : Type) where
+  | inc : A -> Trunc A
+  | trunc : A -> A -> Trunc A [ inc trunc_0 , inc trunc_1 ]
+
+-- Introduction: lift an element into the truncation.
+def trunc_intro : forall (A : Type), A -> Trunc A := fun A x => inc x
