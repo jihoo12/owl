@@ -62,6 +62,13 @@ pub enum Term {
     TEquivFwd(Box<Term>, Box<Term>),
     TUa(Box<Term>),
     TTransport(Box<Term>, Box<Term>),
+    /// Generalized transport: `TTransp(family, direction, base)`.
+    /// `family : I → Type` (a type family), `direction : I`, `base : family i0`.
+    /// Result type: `family direction`.
+    /// At `i0`: returns `base` unchanged. At `i1`: full transport (decomposes
+    /// through Pi/Sigma/data like the current `transport`). For non-concrete
+    /// directions, stuck as a neutral.
+    TTransp(Box<Term>, Box<Term>, Box<Term>),
     TGlue(Box<Term>, Box<Term>, Box<Term>),
     TGlueElem(Box<Term>, Box<Term>, Box<Term>),
     TUnglue(Box<Term>, Box<Term>, Box<Term>),
@@ -512,6 +519,9 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TEquivFwd(e, x) => Term::TEquivFwd(b(shift(d, c, e)), b(shift(d, c, x))),
         Term::TUa(e) => Term::TUa(b(shift(d, c, e))),
         Term::TTransport(p, x) => Term::TTransport(b(shift(d, c, p)), b(shift(d, c, x))),
+        Term::TTransp(a, r, x) => {
+            Term::TTransp(b(shift(d, c, a)), b(shift(d, c, r)), b(shift(d, c, x)))
+        }
         Term::TGlue(a, phi, te) => {
             Term::TGlue(b(shift(d, c, a)), b(shift(d, c, phi)), b(shift(d, c, te)))
         }
@@ -700,6 +710,9 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
         Term::TEquivFwd(e, x) => Term::TEquivFwd(b(subst(j, s, e)), b(subst(j, s, x))),
         Term::TUa(e) => Term::TUa(b(subst(j, s, e))),
         Term::TTransport(p, x) => Term::TTransport(b(subst(j, s, p)), b(subst(j, s, x))),
+        Term::TTransp(a, r, x) => {
+            Term::TTransp(b(subst(j, s, a)), b(subst(j, s, r)), b(subst(j, s, x)))
+        }
         Term::TGlue(a, phi, te) => {
             Term::TGlue(b(subst(j, s, a)), b(subst(j, s, phi)), b(subst(j, s, te)))
         }
@@ -878,6 +891,7 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TEquivFwd(e, x) => max_var(e).max(max_var(x)),
         Term::TUa(e) => max_var(e),
         Term::TTransport(p, x) => max_var(p).max(max_var(x)),
+        Term::TTransp(a, r, x) => max_var(a).max(max_var(r)).max(max_var(x)),
         Term::TGlue(a, phi, te) => max_var(a).max(max_var(phi)).max(max_var(te)),
         Term::TGlueElem(phi, t, a) => max_var(phi).max(max_var(t)).max(max_var(a)),
         Term::TUnglue(phi, te, g) => max_var(phi).max(max_var(te)).max(max_var(g)),

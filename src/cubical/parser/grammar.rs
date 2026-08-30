@@ -966,6 +966,12 @@ impl Parser {
             let x = self.parse_prefix_or_atom()?;
             return Ok(Term::TTransport(Box::new(p), Box::new(x)));
         }
+        if self.consume_ident("transp") {
+            let a = self.parse_prefix_or_atom()?;
+            let r = self.parse_prefix_or_atom()?;
+            let x = self.parse_prefix_or_atom()?;
+            return Ok(Term::TTransp(Box::new(a), Box::new(r), Box::new(x)));
+        }
         if self.consume_ident("equivFwd") {
             let e = self.parse_prefix_or_atom()?;
             let x = self.parse_prefix_or_atom()?;
@@ -2891,7 +2897,11 @@ impl Parser {
             // Shift from introduction depth to body depth (2*depth)
             let left = 2 * depth as i32 - 1 - left_depth;
             let right = 2 * depth as i32 - 1 - right_depth;
-            body = Term::TPath(Box::new(body), Box::new(Term::TVar(left)), Box::new(Term::TVar(right)));
+            body = Term::TPath(
+                Box::new(body),
+                Box::new(Term::TVar(left)),
+                Box::new(Term::TVar(right)),
+            );
         }
 
         // Wrap with 2*depth Pi binders (innermost last).
@@ -2913,9 +2923,18 @@ impl Parser {
                 // Shift to current depth j: shift = j - introduction_depth
                 let left = j_i - pair_start; // = 1
                 let right = j_i - (pair_start + 1); // = 0
-                Term::TPath(Box::new(a_at_pair), Box::new(Term::TVar(left)), Box::new(Term::TVar(right)))
+                Term::TPath(
+                    Box::new(a_at_pair),
+                    Box::new(Term::TVar(left)),
+                    Box::new(Term::TVar(right)),
+                )
             };
-            result = Term::TPi("_".to_string(), Box::new(binder_ty), Box::new(result), false);
+            result = Term::TPi(
+                "_".to_string(),
+                Box::new(binder_ty),
+                Box::new(result),
+                false,
+            );
         }
         result
     }

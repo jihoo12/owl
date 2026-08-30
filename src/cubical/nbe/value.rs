@@ -158,6 +158,9 @@ pub enum Value {
     VEquivFwd(Box<Value>, Box<Value>),
     VUa(Box<Value>),
     VTransport(Box<Value>, Box<Value>),
+    /// Generalized transport: `VTransp(family, direction, base)`.
+    /// Stuck when `direction` is a non-concrete interval variable.
+    VTransp(Box<Value>, Box<Value>, Box<Value>),
     VHComp(Box<Value>, DNFSystem, Box<Value>),
     VComp(Box<Value>, DNFSystem, Box<Value>),
     VFill(Box<Value>, DNFSystem, Box<Value>),
@@ -284,6 +287,7 @@ pub enum NeutralInner {
     NSnd(Box<Neutral>),
     NElim(Box<Value>, Vec<ElimCase>, Box<Neutral>, Scope, usize),
     NTransport(Box<Value>, Box<Value>),
+    NTransp(Box<Value>, Box<Value>, Box<Value>),
     NHComp(Box<Value>, DNFSystem, Box<Value>),
     NComp(Box<Value>, DNFSystem, Box<Value>),
     NFill(Box<Value>, DNFSystem, Box<Value>),
@@ -323,7 +327,10 @@ impl Neutral {
 
     /// Set the frontier (used when rebuilding neutrals during quoting).
     pub fn with_frontier(self, frontier: Frontier) -> Self {
-        Neutral { inner: self.inner, frontier }
+        Neutral {
+            inner: self.inner,
+            frontier,
+        }
     }
 
     // ── Convenience constructors ────────────────────────────────────────
@@ -355,9 +362,18 @@ impl Neutral {
     }
 
     /// Square application stuck on neutral `p` applied to intervals `r`, `s`.
-    pub fn nsqapp(p: Neutral, r: Value, s: Value, r_frontier: Frontier, s_frontier: Frontier) -> Self {
+    pub fn nsqapp(
+        p: Neutral,
+        r: Value,
+        s: Value,
+        r_frontier: Frontier,
+        s_frontier: Frontier,
+    ) -> Self {
         let frontier = p.frontier().clone().or(r_frontier).or(s_frontier);
-        Neutral::new(NeutralInner::NSqApp(Box::new(p), Box::new(r), Box::new(s)), frontier)
+        Neutral::new(
+            NeutralInner::NSqApp(Box::new(p), Box::new(r), Box::new(s)),
+            frontier,
+        )
     }
 
     /// N-dimensional cell application stuck on neutral `p`.
@@ -383,7 +399,13 @@ impl Neutral {
 
     /// Elimination stuck on neutral scrutinee.
     /// Frontier = scrutinee's frontier (computes when scrutinee computes).
-    pub fn nelim(motive: Value, cases: Vec<ElimCase>, scrut: Neutral, env: Scope, go: usize) -> Self {
+    pub fn nelim(
+        motive: Value,
+        cases: Vec<ElimCase>,
+        scrut: Neutral,
+        env: Scope,
+        go: usize,
+    ) -> Self {
         let frontier = scrut.frontier().clone();
         Neutral::new(
             NeutralInner::NElim(Box::new(motive), cases, Box::new(scrut), env, go),
@@ -393,27 +415,50 @@ impl Neutral {
 
     /// Transport stuck on a neutral family.
     pub fn ntransport(fam: Value, x: Value) -> Self {
-        Neutral::new(NeutralInner::NTransport(Box::new(fam), Box::new(x)), Frontier::False)
+        Neutral::new(
+            NeutralInner::NTransport(Box::new(fam), Box::new(x)),
+            Frontier::False,
+        )
+    }
+
+    /// Generalized transport stuck on a neutral family or direction.
+    pub fn ntransp(fam: Value, dir: Value, x: Value) -> Self {
+        Neutral::new(
+            NeutralInner::NTransp(Box::new(fam), Box::new(dir), Box::new(x)),
+            Frontier::False,
+        )
     }
 
     /// hcomp stuck.
     pub fn nhcomp(a: Value, sys: DNFSystem, base: Value) -> Self {
-        Neutral::new(NeutralInner::NHComp(Box::new(a), sys, Box::new(base)), Frontier::False)
+        Neutral::new(
+            NeutralInner::NHComp(Box::new(a), sys, Box::new(base)),
+            Frontier::False,
+        )
     }
 
     /// comp stuck.
     pub fn ncomp(a: Value, sys: DNFSystem, base: Value) -> Self {
-        Neutral::new(NeutralInner::NComp(Box::new(a), sys, Box::new(base)), Frontier::False)
+        Neutral::new(
+            NeutralInner::NComp(Box::new(a), sys, Box::new(base)),
+            Frontier::False,
+        )
     }
 
     /// fill stuck.
     pub fn nfill(a: Value, sys: DNFSystem, base: Value) -> Self {
-        Neutral::new(NeutralInner::NFill(Box::new(a), sys, Box::new(base)), Frontier::False)
+        Neutral::new(
+            NeutralInner::NFill(Box::new(a), sys, Box::new(base)),
+            Frontier::False,
+        )
     }
 
     /// hfill stuck.
     pub fn nhfill(a: Value, sys: DNFSystem, base: Value) -> Self {
-        Neutral::new(NeutralInner::NHFill(Box::new(a), sys, Box::new(base)), Frontier::False)
+        Neutral::new(
+            NeutralInner::NHFill(Box::new(a), sys, Box::new(base)),
+            Frontier::False,
+        )
     }
 
     /// Force stuck on neutral `n`.
@@ -657,13 +702,7 @@ mod tests {
     #[test]
     fn neutral_nelim_inherits_frontier() {
         let scrut = Neutral::nvar(0);
-        let elim = Neutral::nelim(
-            Value::VUniv(0),
-            vec![],
-            scrut,
-            Scope::empty(),
-            0,
-        );
+        let elim = Neutral::nelim(Value::VUniv(0), vec![], scrut, Scope::empty(), 0);
         assert_eq!(elim.frontier(), &Frontier::False);
     }
 
@@ -674,13 +713,7 @@ mod tests {
         let r = Value::VIntervalVar(1);
         let r_frontier = Neutral::interval_frontier(&r);
         let scrut = Neutral::npapp(p, r, r_frontier);
-        let elim = Neutral::nelim(
-            Value::VUniv(0),
-            vec![],
-            scrut,
-            Scope::empty(),
-            0,
-        );
+        let elim = Neutral::nelim(Value::VUniv(0), vec![], scrut, Scope::empty(), 0);
         // Elim inherits scrutinee's frontier
         let expected = Frontier::Or(
             Box::new(Frontier::IntervalEq(1, I::I0)),

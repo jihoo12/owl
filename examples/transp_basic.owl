@@ -1,0 +1,36 @@
+-- Tests for generalized transport (transp)
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Constant family via path lambda: transp (λi. Nat) i1 x
+def via_plam : Nat := transp (<i> Nat) i1 (suc zero)
+
+-- Constant family via function lambda: exercises the eta-expansion path in do_transp
+def via_fun : Nat := transp (fun (i : I) => Nat) i1 (suc zero)
+
+-- Transport at i0 is always identity
+def at_i0 : Nat := transp (<i> Nat) i0 (suc (suc zero))
+
+-- Nested transport
+def nested : Nat :=
+  transp (<i> Nat) i1 (transp (<i> Nat) i1 (suc (suc zero)))
+
+-- Transport a pair through Sigma family
+def sigma_transport : Nat * Nat :=
+  transp (<i> Nat * Nat) i1 (zero, suc zero)
+
+-- Transport through Pi family
+def pi_transport : (Nat -> Nat) -> (Nat -> Nat) :=
+  transp (<i> Nat -> Nat -> Nat) i1 (fun f n => f n)
+
+-- Identity transport at i0 through Pi
+def pi_i0 : forall (A : Type), A -> A :=
+  fun A x => transp (<i> A) i0 x
+
+-- Transport of a function at i1
+def pi_i1 : Nat -> Nat :=
+  transp (<i> Nat -> Nat) i1 (fun n => suc n)
+
+def main : Nat := via_fun

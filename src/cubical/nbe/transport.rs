@@ -14,6 +14,72 @@ use crate::cubical::syntax::{
     Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, subst,
 };
 
+pub fn do_transp(
+    env: &Scope,
+    globals: &Globals,
+    global_offset: usize,
+    a: Value,
+    r: Value,
+    x: Value,
+    session: &mut Session,
+) -> Value {
+    use super::value::Neutral;
+
+    match r {
+        Value::VInterval(I::I0) => x,
+        Value::VInterval(I::I1) => {
+            // If the family is already a VPLam, do_transport handles it directly.
+            // If not (e.g. VAbs from `fun (i : I) => ...`, or a stuck neutral),
+            // eta-expand into a synthetic VPLam: λi. a(i) so do_transport can
+            // inspect the type structure at i0 and i1.
+            match &a {
+                Value::VPLam(_, _) | Value::VUa(_) => {
+                    do_transport(env, globals, global_offset, a, x, session)
+                }
+                _ => {
+                    let a_term = quote(env.len(), globals, global_offset, a, session);
+                    let fam = Term::PLam(
+                        "_transp_i".to_string(),
+                        Box::new(Term::TApp(
+                            Box::new(shift(1, 0, &a_term)),
+                            Box::new(Term::TVar(0)),
+                        )),
+                    );
+                    let fam_val = eval_nbe(env, globals, global_offset, &fam, session);
+                    do_transport(env, globals, global_offset, fam_val, x, session)
+                }
+            }
+        }
+        _ => {
+            if let Value::VNeutral(n) = r {
+                let a_term = quote(env.len(), globals, global_offset, a, session);
+                let r_term = quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    Value::VNeutral(n),
+                    session,
+                );
+                let x_term = quote(env.len(), globals, global_offset, x, session);
+                Value::VNeutral(Neutral::ntransp(
+                    eval_nbe(env, globals, global_offset, &a_term, session),
+                    eval_nbe(env, globals, global_offset, &r_term, session),
+                    eval_nbe(env, globals, global_offset, &x_term, session),
+                ))
+            } else {
+                let a_term = quote(env.len(), globals, global_offset, a, session);
+                let r_term = quote(env.len(), globals, global_offset, r, session);
+                let x_term = quote(env.len(), globals, global_offset, x, session);
+                Value::VNeutral(Neutral::ntransp(
+                    eval_nbe(env, globals, global_offset, &a_term, session),
+                    eval_nbe(env, globals, global_offset, &r_term, session),
+                    eval_nbe(env, globals, global_offset, &x_term, session),
+                ))
+            }
+        }
+    }
+}
+
 pub fn do_transport(
     env: &Scope,
     globals: &Globals,
@@ -328,6 +394,11 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TEquivFwd(e, x) => uses_var_at_level(e, level) || uses_var_at_level(x, level),
         Term::TUa(e) => uses_var_at_level(e, level),
         Term::TTransport(p, x) => uses_var_at_level(p, level) || uses_var_at_level(x, level),
+        Term::TTransp(a, r, x) => {
+            uses_var_at_level(a, level)
+                || uses_var_at_level(r, level)
+                || uses_var_at_level(x, level)
+        }
         Term::TGlue(a, phi, te) => {
             uses_var_at_level(a, level)
                 || uses_var_at_level(phi, level)

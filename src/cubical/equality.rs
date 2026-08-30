@@ -41,6 +41,8 @@ pub fn term_size(t: &Term) -> usize {
         | Term::TTransport(f, a)
         | Term::TPair(f, a) => 1 + term_size(f) + term_size(a),
 
+        Term::TTransp(a, r, x) => 1 + term_size(a) + term_size(r) + term_size(x),
+
         Term::TPi(_, a, b, _) | Term::TSigma(_, a, b) => 1 + term_size(a) + term_size(b),
 
         Term::TPath(a, u, v)
@@ -949,6 +951,15 @@ fn eta_eq_uncached(
     if let (Term::TTransport(p1, x1), Term::TTransport(p2, x2)) = (t1, t2) {
         return and_result(
             eta_eq_memo(fuel, ctx, p1, p2, memo, session),
+            eta_eq_memo(fuel, ctx, x1, x2, memo, session),
+        );
+    }
+    if let (Term::TTransp(a1, r1, x1), Term::TTransp(a2, r2, x2)) = (t1, t2) {
+        return and_result(
+            and_result(
+                eta_eq_memo(fuel, ctx, a1, a2, memo, session),
+                eta_eq_memo(fuel, ctx, r1, r2, memo, session),
+            ),
             eta_eq_memo(fuel, ctx, x1, x2, memo, session),
         );
     }

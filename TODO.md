@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **A1 — Generalized transport (`transp`) primitive.** ✅ Full implementation: `TTransp(A, r, x)` AST, `VTransp`/`NTransp` values, parser syntax, eval with endpoint reduction (`i0`→base, `i1`→`do_transport`, non-concrete→stuck), eta-expansion for non-VPLam families, quote/quote_neutral/quote_case_body, typechecker infer rule, per-typeformer decomposition via `do_transport` VPLam branch (Pi, Sigma, Path, data, Glue). `examples/transp_basic.owl` exercises constant-family, function-lambda, Sigma, Pi, nested transport. 253/253 tests pass.
+
 - [x] **Frontier-of-instability — Phases 1–3.** `Frontier` enum in `value.rs` (`False`, `IntervalEq`, `Or`, `And`), `Neutral` struct with `{ inner, frontier }`, 15 convenience constructors with correct frontier propagation. `try_destabilize` in `elim.rs` checks `frontier.is_satisfied(interval_bindings)` and recursively destabilizes neutrals (NPApp, NApp, NFst, NSnd, NProj, NForce, NElim). `IClosure::apply_interval_value` populates `Session::interval_bindings`. 253/253 tests pass. Phase 4 (quoting update) remains.
 
 - [x] **H4 — Implicit arguments + instance search.** `{x : A}` implicit binder syntax. Typechecker auto-fills via context/global `Env.instances` DB. `ring`/`field`/`group` tactics resolve instances.
@@ -62,21 +64,23 @@
 
 These are the fundamental features Cubical Agda has that Owl lacks. They affect soundness, expressiveness, and normalization.
 
-#### A1. Generalized transport (`transp`) 🔴
+#### A1. Generalized transport (`transp`) ✅
 
 Cubical Agda's `transp` handles **non-constant type families**: `transp : (A : I → Set ℓ) → I → A i0 → A i1`. It computes through the type former (Pi, Sigma, data, etc.) case-by-case.
 
-Owl's current `transport : Path U A B → A → B` only works with **constant families** (a single type `A`). It cannot transport along indexed type families.
+**Completed**:
+- [x] `TTransp(A, r, x)` AST with shift/subst/max_var/pretty
+- [x] `VTransp` value, `NTransp` neutral, `Neutral::ntransp` constructor
+- [x] Parser syntax: `transp A r x` (3 prefix args)
+- [x] Eval: endpoint reduction (`i0`→base, `i1`→do_transport, non-concrete→stuck)
+- [x] Eta-expansion: non-VPLam families (e.g. `fun (i : I) => ...`) are eta-expanded to synthetic VPLam for decomposition
+- [x] Quote: TTransp/VTransp/NTransp in all quote paths
+- [x] Typechecker infer: `A : I → Type, r : I, x : A i0 ⊢ A r`
+- [x] Per-typeformer decomposition at `i1` via `do_transport` VPLam branch (Pi, Sigma, Path, data, Glue)
+- [x] All exhaustive matches (equality, transport, termination, errors, driver)
+- [x] `examples/transp_basic.owl` — exercises constant-family, function-lambda, Sigma, Pi, nested transport
 
-**Impact**: Without this, indexed inductive types (vectors, length-indexed lists, etc.) cannot be transported. This is the single most impactful gap.
-
-**Plan**:
-1. Add `transp` as a new primitive (distinct from `transport`) with signature `(A : I → Type) → I → A i0 → A i1`.
-2. Implement per-typeformer reduction rules (mirroring cubicaltt/Cubical Agda): Pi, Sigma, data (constant-family case first, indexed case later).
-3. Make `transport p x` desugar to `transp (λi. A[i]) i1 x` where `p : Path U A B`.
-4. Add `coe` as sugar over `transp` (already done as `transport` alias — may need renaming).
-
-**Files**: `src/cubical/syntax/mod.rs` (new term), `src/cubical/parser/grammar.rs`, `src/cubical/nbe/eval.rs`, `src/cubical/nbe/transport.rs`, `src/cubical/typechecker/mod.rs`.
+**Files**: `syntax/mod.rs`, `parser/grammar.rs`, `nbe/eval.rs`, `nbe/transport.rs`, `nbe/quote.rs`, `nbe/value.rs`, `nbe/meta.rs`, `syntax/positivity.rs`, `typechecker/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs`, `equality.rs`, `examples/transp_basic.owl`.
 
 #### A2. Indexed inductive type transport 🔴
 
@@ -305,7 +309,7 @@ Spectrum types for stable homotopy theory. Research-level.
 
 ## Suggested Attack Order
 
-1. **A1 (generalized transport)** — the single biggest expressive-power gap. Blocks A2, indexed types, and much of the library.
+1. ~~**A1 (generalized transport)**~~ — ✅ done. AST/value/eval/quote/typecheck, eta-expansion, per-typeformer decomposition.
 2. **A3 (frontier Phase 4)** — quick win, completes the stuck-elim story, unblocks pos/negsuc Int ring laws.
 3. **B2 (absurd patterns)** — trivial parser sugar, immediate ergonomic win.
 4. **A4 (cubical identity types)** — moderate cost, good for Martin-Löf compatibility.

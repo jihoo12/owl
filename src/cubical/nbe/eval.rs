@@ -6,9 +6,11 @@ use super::elim::{do_apply, do_elim, do_force, do_fst, do_papp, do_proj, do_snd}
 use super::hcomp::{do_comp, do_fill, do_hcomp, do_hfill};
 use super::quote::quote;
 use super::trace::record_step;
-use super::transport::{do_transport, transport_term_fallback};
+use super::transport::{do_transp, do_transport, transport_term_fallback};
 use super::util::{do_equiv_fwd, equiv_dom_value, value_to_dnf, value_to_endpoint};
-use super::value::{Closure, DNFSystem, Globals, IClosure, Neutral, NeutralInner, Scope, Value, value_str};
+use super::value::{
+    Closure, DNFSystem, Globals, IClosure, Neutral, NeutralInner, Scope, Value, value_str,
+};
 use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_top};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{ElimCase, Name, System, Tactic, Term, max_var, subst};
@@ -414,9 +416,7 @@ fn eval_nbe_inner(
                         _ => eval_nbe(env, globals, global_offset, &reduced, session),
                     }
                 }
-                Value::VNeutral(n)
-                    if matches!(n.inner(), NeutralInner::NTransport(_, _)) =>
-                {
+                Value::VNeutral(n) if matches!(n.inner(), NeutralInner::NTransport(_, _)) => {
                     let p_term = quote(env.len(), globals, global_offset, p_val, session);
                     let x_term = quote(env.len(), globals, global_offset, x_val, session);
                     let reduced = transport_term_fallback(p_term, x_term, session);
@@ -427,6 +427,12 @@ fn eval_nbe_inner(
                 }
                 _ => res,
             }
+        }
+        Term::TTransp(a, r, x) => {
+            let a_val = eval_nbe(env, globals, global_offset, a, session);
+            let r_val = eval_nbe(env, globals, global_offset, r, session);
+            let x_val = eval_nbe(env, globals, global_offset, x, session);
+            do_transp(env, globals, global_offset, a_val, r_val, x_val, session)
         }
         Term::TGlue(a, phi, te) => {
             let phi = value_to_dnf(eval_nbe(env, globals, global_offset, phi, session), session);

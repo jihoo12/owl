@@ -784,11 +784,15 @@ pub fn do_elim(
             // in the frontier are bound to concrete endpoints), try to
             // reduce the neutral. If it computes to a non-neutral value,
             // re-enter do_elim with the result.
-            if let Some(destabilized) =
-                try_destabilize(globals, global_offset, &n, session)
-            {
+            if let Some(destabilized) = try_destabilize(globals, global_offset, &n, session) {
                 return do_elim(
-                    motive, cases, destabilized, env, globals, global_offset, session,
+                    motive,
+                    cases,
+                    destabilized,
+                    env,
+                    globals,
+                    global_offset,
+                    session,
                 );
             }
             stuck_elim(motive, cases, n, env, global_offset)
@@ -903,9 +907,7 @@ fn try_destabilize(
         // Try to destabilize the scrutinee; if it computes to a constructor,
         // re-enter do_elim.
         NeutralInner::NElim(motive, cases, scrut, env, go) => {
-            if let Some(scrut_val) =
-                try_destabilize(globals, global_offset, scrut, session)
-            {
+            if let Some(scrut_val) = try_destabilize(globals, global_offset, scrut, session) {
                 let result = do_elim(
                     *motive.clone(),
                     cases,
@@ -937,5 +939,11 @@ fn stuck_elim(
     env: &Scope,
     global_offset: usize,
 ) -> Value {
-    Value::VNeutral(Neutral::nelim(motive, cases.to_vec(), n, env.clone(), global_offset))
+    Value::VNeutral(Neutral::nelim(
+        motive,
+        cases.to_vec(),
+        n,
+        env.clone(),
+        global_offset,
+    ))
 }

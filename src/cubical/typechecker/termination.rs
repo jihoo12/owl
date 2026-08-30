@@ -219,6 +219,11 @@ fn check_body_guard(
             check_body_guard(d, a, binder_count, def_idx)?;
             check_body_guard(d, b, binder_count, def_idx)
         }
+        Term::TTransp(a, r, x) => {
+            check_body_guard(d, a, binder_count, def_idx)?;
+            check_body_guard(d, r, binder_count, def_idx)?;
+            check_body_guard(d, x, binder_count, def_idx)
+        }
         Term::TUa(e) => check_body_guard(d, e, binder_count, def_idx),
 
         Term::TGlue(a, phi, te) | Term::TGlueElem(a, phi, te) | Term::TUnglue(a, phi, te) => {

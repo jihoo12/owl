@@ -143,6 +143,14 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
         Term::TTransport(p, x) => {
             format!("transport ({}) {}", show_term(env, p), show_term(env, x))
         }
+        Term::TTransp(a, r, x) => {
+            format!(
+                "transp ({}) ({}) {}",
+                show_term(env, a),
+                show_term(env, r),
+                show_term(env, x)
+            )
+        }
         Term::TGlue(a, phi, te) => format!(
             "Glue {} [{}] ({})",
             show_term(env, a),

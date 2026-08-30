@@ -231,6 +231,11 @@ fn quote_inner(
             Box::new(quote(size, globals, global_offset, *p, session)),
             Box::new(quote(size, globals, global_offset, *x, session)),
         ),
+        Value::VTransp(a, r, x) => Term::TTransp(
+            Box::new(quote(size, globals, global_offset, *a, session)),
+            Box::new(quote(size, globals, global_offset, *r, session)),
+            Box::new(quote(size, globals, global_offset, *x, session)),
+        ),
         Value::VHComp(a, sys, base) => {
             let sys_term: System = sys
                 .iter()
@@ -315,11 +320,23 @@ fn quote_neutral(
     match n.inner() {
         NeutralInner::NVar(level) => level_to_var(size, *level),
         NeutralInner::NApp(f, a) => Term::TApp(
-            Box::new(quote_neutral(size, globals, global_offset, (**f).clone(), session)),
+            Box::new(quote_neutral(
+                size,
+                globals,
+                global_offset,
+                (**f).clone(),
+                session,
+            )),
             Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
         ),
         NeutralInner::NPApp(p, r) => Term::PApp(
-            Box::new(quote_neutral(size, globals, global_offset, (**p).clone(), session)),
+            Box::new(quote_neutral(
+                size,
+                globals,
+                global_offset,
+                (**p).clone(),
+                session,
+            )),
             Box::new(quote(size, globals, global_offset, (**r).clone(), session)),
         ),
         NeutralInner::NSqApp(p, r, s) => {
@@ -356,12 +373,37 @@ fn quote_neutral(
             session,
         ))),
         NeutralInner::NElim(motive, cases, scrut, env, go) => Term::TElim(
-            Box::new(quote(size, globals, global_offset, (**motive).clone(), session)),
-            quote_cases(size, globals, global_offset, env, *go, cases.clone(), session),
-            Box::new(quote_neutral(size, globals, global_offset, (**scrut).clone(), session)),
+            Box::new(quote(
+                size,
+                globals,
+                global_offset,
+                (**motive).clone(),
+                session,
+            )),
+            quote_cases(
+                size,
+                globals,
+                global_offset,
+                env,
+                *go,
+                cases.clone(),
+                session,
+            ),
+            Box::new(quote_neutral(
+                size,
+                globals,
+                global_offset,
+                (**scrut).clone(),
+                session,
+            )),
         ),
         NeutralInner::NTransport(p, x) => Term::TTransport(
             Box::new(quote(size, globals, global_offset, (**p).clone(), session)),
+            Box::new(quote(size, globals, global_offset, (**x).clone(), session)),
+        ),
+        NeutralInner::NTransp(a, r, x) => Term::TTransp(
+            Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
+            Box::new(quote(size, globals, global_offset, (**r).clone(), session)),
             Box::new(quote(size, globals, global_offset, (**x).clone(), session)),
         ),
         NeutralInner::NHComp(a, sys, base) => {
@@ -377,7 +419,13 @@ fn quote_neutral(
             Term::THComp(
                 Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
                 sys_term,
-                Box::new(quote(size, globals, global_offset, (**base).clone(), session)),
+                Box::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    (**base).clone(),
+                    session,
+                )),
             )
         }
         NeutralInner::NComp(a, sys, base) => {
@@ -393,7 +441,13 @@ fn quote_neutral(
             Term::TComp(
                 Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
                 sys_term,
-                Box::new(quote(size, globals, global_offset, (**base).clone(), session)),
+                Box::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    (**base).clone(),
+                    session,
+                )),
             )
         }
         NeutralInner::NFill(a, sys, base) => {
@@ -409,7 +463,13 @@ fn quote_neutral(
             Term::TFill(
                 Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
                 sys_term,
-                Box::new(quote(size, globals, global_offset, (**base).clone(), session)),
+                Box::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    (**base).clone(),
+                    session,
+                )),
             )
         }
         NeutralInner::NHFill(a, sys, base) => {
@@ -425,7 +485,13 @@ fn quote_neutral(
             Term::THFill(
                 Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
                 sys_term,
-                Box::new(quote(size, globals, global_offset, (**base).clone(), session)),
+                Box::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    (**base).clone(),
+                    session,
+                )),
             )
         }
         NeutralInner::NMeta(i) => Term::Meta(*i),
@@ -438,7 +504,13 @@ fn quote_neutral(
         ))),
         NeutralInner::NProj(n, field) => Term::TProj(
             field.clone(),
-            Box::new(quote_neutral(size, globals, global_offset, (**n).clone(), session)),
+            Box::new(quote_neutral(
+                size,
+                globals,
+                global_offset,
+                (**n).clone(),
+                session,
+            )),
         ),
     }
 }
@@ -876,6 +948,35 @@ fn quote_case_body(
                 env,
                 go,
                 p,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                x,
+                session,
+            )),
+        ),
+        Term::TTransp(a, r, x) => Term::TTransp(
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
+            Box::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                r,
                 session,
             )),
             Box::new(quote_case_body(

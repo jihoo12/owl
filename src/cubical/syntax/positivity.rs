@@ -193,6 +193,17 @@ fn walk_param_polarities_both(
         Term::TEquiv(f, a) | Term::TEquivFwd(f, a) | Term::TTransport(f, a) | Term::TPair(f, a) => {
             both(dts, var, di, &[f.as_ref(), a.as_ref()], depth, pset, out);
         }
+        Term::TTransp(a, r, x) => {
+            both(
+                dts,
+                var,
+                di,
+                &[a.as_ref(), r.as_ref(), x.as_ref()],
+                depth,
+                pset,
+                out,
+            );
+        }
         Term::TFst(p) | Term::TSnd(p) | Term::TUa(p) | Term::TProj(_, p) => {
             both(dts, var, di, &[p.as_ref()], depth, pset, out);
         }
@@ -421,6 +432,11 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
         | Term::TPair(f, a) => {
             check_positivity_in(target, f, negative)?;
             check_positivity_in(target, a, negative)
+        }
+        Term::TTransp(a, r, x) => {
+            check_positivity_in(target, a, negative)?;
+            check_positivity_in(target, r, negative)?;
+            check_positivity_in(target, x, negative)
         }
         Term::TFst(p) | Term::TSnd(p) => check_positivity_in(target, p, negative),
         Term::TAbs(_, body) | Term::PLam(_, body) | Term::TUa(body) => {

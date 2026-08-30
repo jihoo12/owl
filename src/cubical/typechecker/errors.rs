@@ -82,6 +82,11 @@ fn head_var_idx(t: &Term) -> Option<i32> {
                 go(a, best);
                 go(b, best);
             }
+            Term::TTransp(a, r, x) => {
+                go(a, best);
+                go(r, best);
+                go(x, best);
+            }
             Term::TGlue(a, b, c) => {
                 go(a, best);
                 go(b, best);

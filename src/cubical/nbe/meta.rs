@@ -46,6 +46,9 @@ pub fn meta_mentions(id: i32, t: &Term) -> bool {
         Term::TEquivFwd(e, x) | Term::TTransport(e, x) => {
             meta_mentions(id, e) || meta_mentions(id, x)
         }
+        Term::TTransp(a, r, x) => {
+            meta_mentions(id, a) || meta_mentions(id, r) || meta_mentions(id, x)
+        }
         Term::TUa(e) => meta_mentions(id, e),
         Term::TGlue(a, phi, te) => {
             meta_mentions(id, a) || meta_mentions(id, phi) || meta_mentions(id, te)
@@ -178,6 +181,7 @@ fn term_children_mut(t: &mut Term) -> Vec<&mut Term> {
             ]
         }
         Term::TEquivFwd(e, x) | Term::TTransport(e, x) => vec![e.as_mut(), x.as_mut()],
+        Term::TTransp(a, r, x) => vec![a.as_mut(), r.as_mut(), x.as_mut()],
         Term::TUa(e) => vec![e.as_mut()],
         Term::TGlue(a, phi, te) => vec![a.as_mut(), phi.as_mut(), te.as_mut()],
         Term::TGlueElem(phi, t, a) => vec![phi.as_mut(), t.as_mut(), a.as_mut()],
@@ -280,6 +284,7 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
             ]
         }
         Term::TEquivFwd(e, x) | Term::TTransport(e, x) => vec![e.as_ref(), x.as_ref()],
+        Term::TTransp(a, r, x) => vec![a.as_ref(), r.as_ref(), x.as_ref()],
         Term::TUa(e) => vec![e.as_ref()],
         Term::TGlue(a, phi, te) => vec![a.as_ref(), phi.as_ref(), te.as_ref()],
         Term::TGlueElem(phi, t, a) => vec![phi.as_ref(), t.as_ref(), a.as_ref()],

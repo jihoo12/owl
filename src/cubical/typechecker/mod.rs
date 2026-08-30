@@ -1199,6 +1199,28 @@ pub fn infer_dt(
             }
         }
 
+        // transp A r x : A r   where  A : I → U,  r : I,  x : A i0
+        Term::TTransp(a, r, x) => {
+            // A should be a function from I to a universe (a type family).
+            // Create a fresh interval variable to check A's domain.
+            let ctx_a = extend_ctx("i_transp".to_string(), Term::TIntervalTy, ctx);
+            let _a_body_ty = infer_dt(dts, &ctx_a, a, session)?;
+            let r_ty = infer_dt(dts, ctx, r, session)?;
+            check_interval_dt(dts, ctx, &r_ty, session)?;
+            // x : A i0
+            let x_ty = nbe_eval(
+                &Term::TApp(Box::new(shift(1, 0, a)), Box::new(Term::TInterval(I::I0))),
+                session,
+            );
+            check_dt(dts, ctx, x, &x_ty, session)?;
+            // Result type: A r
+            let result = nbe_eval(
+                &Term::TApp(Box::new(shift(1, 0, a)), Box::new(shift(1, 0, r))),
+                session,
+            );
+            Ok(result)
+        }
+
         // Glue type formation
         Term::TGlue(a_ty, phi, te) => {
             let n = type_level_dt(dts, ctx, a_ty, session)?;

@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::ptr;
 use std::rc::Rc;
 
-use crate::cubical::syntax::{Datatype, Name, Term};
 use crate::cubical::interval::I;
+use crate::cubical::syntax::{Datatype, Name, Term};
 use crate::cubical::typechecker::errors::Pos;
 
 // Re-export core NbE types.
