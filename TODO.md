@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **A2 — Indexed inductive type transport.** Fixed `transport_data_con`/`pcon`/`sqcon`/`cellcon` in `transport.rs`. The old indexed path tried to extract Pi types from `VData(d, params_at_i)`, which immediately fell through (VData is not VPi). The new approach: evaluate the closure at the formal interval variable to get `VData(d, params_at_i)`, then for each constructor arg type `T_k`, substitute each data type param variable `TVar(n + m - j)` with `quote(params_at_i[j])`. This correctly builds type families where data type parameters change along the interval. Creating a test for the non-constant path requires a `Path Type A B` with `A ≠ B`, which needs Glue/univalence — deferred. 253/253 tests pass, `cargo fmt` clean.
+
 - [x] **A1 — Generalized transport (`transp`) primitive.** ✅ Full implementation: `TTransp(A, r, x)` AST, `VTransp`/`NTransp` values, parser syntax, eval with endpoint reduction (`i0`→base, `i1`→`do_transport`, non-concrete→stuck), eta-expansion for non-VPLam families, quote/quote_neutral/quote_case_body, typechecker infer rule, per-typeformer decomposition via `do_transport` VPLam branch (Pi, Sigma, Path, data, Glue). `examples/transp_basic.owl` exercises constant-family, function-lambda, Sigma, Pi, nested transport. 253/253 tests pass.
 
 - [x] **Frontier-of-instability — Phases 1–3.** `Frontier` enum in `value.rs` (`False`, `IntervalEq`, `Or`, `And`), `Neutral` struct with `{ inner, frontier }`, 15 convenience constructors with correct frontier propagation. `try_destabilize` in `elim.rs` checks `frontier.is_satisfied(interval_bindings)` and recursively destabilizes neutrals (NPApp, NApp, NFst, NSnd, NProj, NForce, NElim). `IClosure::apply_interval_value` populates `Session::interval_bindings`. 253/253 tests pass. Phase 4 (quoting update) remains.
@@ -82,11 +84,13 @@ Cubical Agda's `transp` handles **non-constant type families**: `transp : (A : I
 
 **Files**: `syntax/mod.rs`, `parser/grammar.rs`, `nbe/eval.rs`, `nbe/transport.rs`, `nbe/quote.rs`, `nbe/value.rs`, `nbe/meta.rs`, `syntax/positivity.rs`, `typechecker/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs`, `equality.rs`, `examples/transp_basic.owl`.
 
-#### A2. Indexed inductive type transport 🔴
+#### A2. Indexed inductive type transport ✅
 
 A consequence of A1. Cubical Agda's `transp` computes through indexed types by substituting indices. Example: `transp (λi. Vec A (add n i)) i1 v` reduces when `n` is a constructor.
 
-**Plan**: Extend `do_transport` in `transport.rs` to handle `TData(d, params)` with non-trivial index families. The typeformer case for indexed data must substitute the interval variable into the indices and reduce.
+**Done**: Fixed all four transport functions (`transport_data_con`, `transport_data_pcon`, `transport_data_sqcon`, `transport_data_cellcon`). The old approach tried to extract Pi types from `VData(d, params_at_i)`, which immediately fell through. The new approach: evaluate the closure at the formal interval variable to get `VData(d, params_at_i)`, then for each constructor arg type `T_k`, substitute each data type param variable `TVar(n + m - j)` with `quote(params_at_i[j])` — the param's interval-dependent value. This correctly builds type families where the data type parameters change along the interval.
+
+**Limitation**: Creating a test that triggers the non-constant path (`is_constant = false`) requires a `Path Type A B` with `A ≠ B`, which needs Glue/univalence + an equivalence between different types — not feasible without significant new infrastructure. All 253 existing tests pass (constant-family transport is unaffected).
 
 #### A3. Frontier-of-instability — Phase 4 (quoting) 🟡
 

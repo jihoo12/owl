@@ -222,91 +222,124 @@ pub fn do_transport(
                     })
                 }
 
-                // Data type transport: transport through a constant data type family
-                // (λi. D params) where D doesn't depend on i.
-                // Transport a constructor by transporting each argument through its type.
-                (Value::VData(d0, _), Value::VData(d1, _)) if d0 == d1 => match x {
-                    Value::VCon(ref d, ref con, ref args) if d == d0 => {
-                        let result = transport_data_con(
-                            env,
-                            globals,
-                            global_offset,
-                            i_name,
-                            clos,
-                            con,
-                            args,
-                            session,
-                        );
-                        record_step(
-                            "transport-data".into(),
-                            format!("transport (λi. {}) ({} ...)", d, con),
-                            value_str(globals, global_offset, &result, session),
-                        );
-                        result
+                // Data type transport: transport through a data type family.
+                // First check if it's a constant family (same params at i0 and i1),
+                // then handle indexed types (different params at i0 vs i1).
+                (Value::VData(d0, _), Value::VData(d1, _)) if d0 == d1 => {
+                    // Check if the family is constant (same params at i0 and i1).
+                    let is_constant = {
+                        let t0 = clos.apply_i(I::I0, session);
+                        let t1 = clos.apply_i(I::I1, session);
+                        quote(0, globals, global_offset, t0, session)
+                            == quote(0, globals, global_offset, t1, session)
+                    };
+                    match x {
+                        Value::VCon(ref d, ref con, ref args) if d == d0 => {
+                            let result = transport_data_con(
+                                env,
+                                globals,
+                                global_offset,
+                                i_name,
+                                clos,
+                                con,
+                                args,
+                                !is_constant,
+                                session,
+                            );
+                            record_step(
+                                if is_constant {
+                                    "transport-data"
+                                } else {
+                                    "transport-data-indexed"
+                                }
+                                .into(),
+                                format!("transport (λi. {}) ({} ...)", d, con),
+                                value_str(globals, global_offset, &result, session),
+                            );
+                            result
+                        }
+                        Value::VPCon(ref d, ref con, ref args, ref r) if d == d0 => {
+                            let result = transport_data_pcon(
+                                env,
+                                globals,
+                                global_offset,
+                                i_name,
+                                clos,
+                                con,
+                                args,
+                                r,
+                                !is_constant,
+                                session,
+                            );
+                            record_step(
+                                if is_constant {
+                                    "transport-data-pcon"
+                                } else {
+                                    "transport-data-pcon-indexed"
+                                }
+                                .into(),
+                                format!("transport (λi. {}) ({} ...)", d, con),
+                                value_str(globals, global_offset, &result, session),
+                            );
+                            result
+                        }
+                        Value::VSqCon(ref d, ref con, ref args, ref r, ref s) if d == d0 => {
+                            let result = transport_data_sqcon(
+                                env,
+                                globals,
+                                global_offset,
+                                i_name,
+                                clos,
+                                con,
+                                args,
+                                r,
+                                s,
+                                !is_constant,
+                                session,
+                            );
+                            record_step(
+                                if is_constant {
+                                    "transport-data-sqcon"
+                                } else {
+                                    "transport-data-sqcon-indexed"
+                                }
+                                .into(),
+                                format!("transport (λi. {}) ({} ...)", d, con),
+                                value_str(globals, global_offset, &result, session),
+                            );
+                            result
+                        }
+                        Value::VCellCon(ref d, ref con, ref args, ref ivars) if d == d0 => {
+                            let result = transport_data_cellcon(
+                                env,
+                                globals,
+                                global_offset,
+                                i_name,
+                                clos,
+                                con,
+                                args,
+                                ivars,
+                                !is_constant,
+                                session,
+                            );
+                            record_step(
+                                if is_constant {
+                                    "transport-data-cellcon"
+                                } else {
+                                    "transport-data-cellcon-indexed"
+                                }
+                                .into(),
+                                format!("transport (λi. {}) ({} ...)", d, con),
+                                value_str(globals, global_offset, &result, session),
+                            );
+                            result
+                        }
+                        _ => Value::VTransport(
+                            Box::new(Value::VPLam("_".to_string(), clos.clone())),
+                            Box::new(x),
+                        ),
                     }
-                    Value::VPCon(ref d, ref con, ref args, ref r) if d == d0 => {
-                        let result = transport_data_pcon(
-                            env,
-                            globals,
-                            global_offset,
-                            i_name,
-                            clos,
-                            con,
-                            args,
-                            r,
-                            session,
-                        );
-                        record_step(
-                            "transport-data-pcon".into(),
-                            format!("transport (λi. {}) ({} ...)", d, con),
-                            value_str(globals, global_offset, &result, session),
-                        );
-                        result
-                    }
-                    Value::VSqCon(ref d, ref con, ref args, ref r, ref s) if d == d0 => {
-                        let result = transport_data_sqcon(
-                            env,
-                            globals,
-                            global_offset,
-                            i_name,
-                            clos,
-                            con,
-                            args,
-                            r,
-                            s,
-                            session,
-                        );
-                        record_step(
-                            "transport-data-sqcon".into(),
-                            format!("transport (λi. {}) ({} ...)", d, con),
-                            value_str(globals, global_offset, &result, session),
-                        );
-                        result
-                    }
-                    Value::VCellCon(ref d, ref con, ref args, ref ivars) if d == d0 => {
-                        let result = transport_data_cellcon(
-                            env,
-                            globals,
-                            global_offset,
-                            i_name,
-                            clos,
-                            con,
-                            args,
-                            ivars,
-                            session,
-                        );
-                        record_step(
-                            "transport-data-cellcon".into(),
-                            format!("transport (λi. {}) ({} ...)", d, con),
-                            value_str(globals, global_offset, &result, session),
-                        );
-                        result
-                    }
-                    _ => Value::VTransport(
-                        Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                        Box::new(x),
-                    ),
-                },
+                }
 
                 _ => Value::VTransport(
                     Box::new(Value::VPLam("_".to_string(), clos.clone())),
@@ -624,7 +657,12 @@ fn transport_sigma_pair(
     Value::VPair(Box::new(a_prime), Box::new(b_prime))
 }
 
-/// Transport a constructor `con c a₁ ... aₙ` through a constant data type family.
+/// Transport a constructor `con c a₁ ... aₙ` through a data type family.
+///
+/// When `eval_at_i1` is false (constant family), builds type families from the
+/// constructor signature at i0. When true (indexed family), builds type families
+/// from the signature evaluated at i1, so that indices at the target endpoint
+/// are correctly reflected.
 ///
 /// Strategy: build the constructor's full Pi type from the Datatype definition,
 /// transport the entire function through the family, then apply to the original
@@ -640,6 +678,7 @@ fn transport_data_con(
     clos: &IClosure,
     con_name: &str,
     args: &[Value],
+    eval_at_i1: bool,
     session: &mut Session,
 ) -> Value {
     let dts = session.current_dts();
@@ -676,59 +715,133 @@ fn transport_data_con(
         return Value::VCon(d_name.clone(), con_name.into(), vec![]);
     }
 
-    // Build the constructor's Pi type: Π(a₁:A₁). Π(a₂:A₂(a₁)). ... D
-    // Then transport it through the family and apply to original args.
+    // Build type families for each argument.
+    // For constant families (eval_at_i1=false), use the constructor signature directly.
+    // For indexed families (eval_at_i1=true), evaluate the data type at the formal
+    // interval variable and extract argument types from the resulting Pi type at i1.
     let mut result_args: Vec<Value> = Vec::new();
-    let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
 
-    // We need to transport each argument through its type.
-    // The type of argument k may depend on args[0..k].
-    // We build the type family (λi. Aₖ) for each k, substituting already-transported args.
-    for k in 0..n {
-        // Build the k-th type with already-transported args substituted in
-        let ty_k = substed_tys[k].clone();
-        // Shift to account for the Pi binders we'll abstract over
-        let mut ty_shifted = ty_k;
-        for j in (0..=k).rev() {
-            ty_shifted = shift(1, j as i32, &ty_shifted);
-        }
-        // Replace bound vars (0..k) with already-transported args as terms
-        for j in 0..k {
-            let arg_term = quote(
-                env.len(),
-                globals,
-                global_offset,
-                result_args[j].clone(),
-                session,
-            );
-            ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
-        }
-        // ty_shifted now has: outermost binder for interval i, then variable 0 is arg k
-        // Wrap as (λi. ty_shifted) with var 0 being the interval
-        let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
-        let transported = eval_nbe(
-            env,
-            globals,
-            global_offset,
-            &Term::TTransport(
-                Box::new(ty_fam),
-                Box::new(quote(
+    if eval_at_i1 {
+        // Indexed family: the data type's params change along the interval.
+        // Evaluate the closure at the formal interval variable to get
+        // VData(d, params_at_i) where each params_at_i[j] is the param's
+        // interval-dependent value (may reference the interval variable).
+        let (formal_env, dt_at_var) =
+            eval_body_at_formal_interval(env, globals, global_offset, clos, session);
+        let params_at_i = match &dt_at_var {
+            Value::VData(_, params) => params.clone(),
+            _ => vec![],
+        };
+
+        // Build type families for each constructor arg.
+        // The constructor sig arg_tys are Terms in constructor scope:
+        //   de Bruijn 0..n-1 = constructor args (innermost first)
+        //   de Bruijn n..n+m-1 = data type params (innermost first)
+        // After PLam shift (shift by 1), the interval variable sits at de Bruijn 0,
+        // constructor args at 1..n, data type params at n+1..n+m.
+        // Substitute each param variable TVar(n + m - j) with its interval-dependent value.
+        for k in 0..n {
+            let ty_k = con_sig.arg_tys[k].clone();
+            let mut ty_shifted = ty_k;
+
+            // Shift for the PLam binder
+            for j in (0..=k).rev() {
+                ty_shifted = shift(1, j as i32, &ty_shifted);
+            }
+
+            // Substitute data type params with their interval-dependent values.
+            // After the PLam shift, param j (0-indexed in push order) is at
+            // de Bruijn n + m - j (since params were pushed innermost-first).
+            let num_params = dt.params.len();
+            for j in 0..num_params {
+                let pos = (n + num_params - j) as i32;
+                if let Some(p_val) = params_at_i.get(j) {
+                    let p_term = quote(
+                        formal_env.len(),
+                        globals,
+                        global_offset,
+                        p_val.clone(),
+                        session,
+                    );
+                    ty_shifted = subst(pos, &p_term, &ty_shifted);
+                }
+            }
+
+            // Substitute already-transported earlier args
+            for j in 0..k {
+                let arg_term = quote(
                     env.len(),
                     globals,
                     global_offset,
-                    args[k].clone(),
+                    result_args[j].clone(),
                     session,
-                )),
-            ),
-            session,
-        );
-        result_args.push(transported);
+                );
+                ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+            }
+
+            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let transported = eval_nbe(
+                env,
+                globals,
+                global_offset,
+                &Term::TTransport(
+                    Box::new(ty_fam),
+                    Box::new(quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        args[k].clone(),
+                        session,
+                    )),
+                ),
+                session,
+            );
+            result_args.push(transported);
+        }
+    } else {
+        // Constant family: use the constructor signature directly
+        let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
+        for k in 0..n {
+            let ty_k = substed_tys[k].clone();
+            let mut ty_shifted = ty_k;
+            for j in (0..=k).rev() {
+                ty_shifted = shift(1, j as i32, &ty_shifted);
+            }
+            for j in 0..k {
+                let arg_term = quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    result_args[j].clone(),
+                    session,
+                );
+                ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+            }
+            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let transported = eval_nbe(
+                env,
+                globals,
+                global_offset,
+                &Term::TTransport(
+                    Box::new(ty_fam),
+                    Box::new(quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        args[k].clone(),
+                        session,
+                    )),
+                ),
+                session,
+            );
+            result_args.push(transported);
+        }
     }
 
     Value::VCon(d_name.clone(), con_name.into(), result_args)
 }
 
-/// Transport a path constructor `pcon c a₁ ... aₙ r` through a constant data type family.
+/// Transport a path constructor `pcon c a₁ ... aₙ r` through a data type family.
 /// Same strategy as transport_data_con, but also keeps the interval argument r unchanged.
 fn transport_data_pcon(
     env: &Scope,
@@ -739,6 +852,7 @@ fn transport_data_pcon(
     con_name: &str,
     args: &[Value],
     r: &Value,
+    eval_at_i1: bool,
     session: &mut Session,
 ) -> Value {
     let dts = session.current_dts();
@@ -791,42 +905,101 @@ fn transport_data_pcon(
     }
 
     let mut result_args: Vec<Value> = Vec::new();
-    let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
 
-    for k in 0..n {
-        let ty_k = substed_tys[k].clone();
-        let mut ty_shifted = ty_k;
-        for j in (0..=k).rev() {
-            ty_shifted = shift(1, j as i32, &ty_shifted);
-        }
-        for j in 0..k {
-            let arg_term = quote(
-                env.len(),
-                globals,
-                global_offset,
-                result_args[j].clone(),
-                session,
-            );
-            ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
-        }
-        let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
-        let transported = eval_nbe(
-            env,
-            globals,
-            global_offset,
-            &Term::TTransport(
-                Box::new(ty_fam),
-                Box::new(quote(
+    if eval_at_i1 {
+        // Indexed family: substitute param variables with interval-dependent values.
+        let (formal_env, dt_at_var) =
+            eval_body_at_formal_interval(env, globals, global_offset, clos, session);
+        let params_at_i = match &dt_at_var {
+            Value::VData(_, params) => params.clone(),
+            _ => vec![],
+        };
+        let num_params = dt.params.len();
+        for k in 0..n {
+            let ty_k = con_sig.arg_tys[k].clone();
+            let mut ty_shifted = ty_k;
+            for j in (0..=k).rev() {
+                ty_shifted = shift(1, j as i32, &ty_shifted);
+            }
+            for j in 0..num_params {
+                let pos = (n + num_params - j) as i32;
+                if let Some(p_val) = params_at_i.get(j) {
+                    let p_term = quote(
+                        formal_env.len(),
+                        globals,
+                        global_offset,
+                        p_val.clone(),
+                        session,
+                    );
+                    ty_shifted = subst(pos, &p_term, &ty_shifted);
+                }
+            }
+            for j in 0..k {
+                let arg_term = quote(
                     env.len(),
                     globals,
                     global_offset,
-                    args[k].clone(),
+                    result_args[j].clone(),
                     session,
-                )),
-            ),
-            session,
-        );
-        result_args.push(transported);
+                );
+                ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+            }
+            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let transported = eval_nbe(
+                env,
+                globals,
+                global_offset,
+                &Term::TTransport(
+                    Box::new(ty_fam),
+                    Box::new(quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        args[k].clone(),
+                        session,
+                    )),
+                ),
+                session,
+            );
+            result_args.push(transported);
+        }
+    } else {
+        let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
+        for k in 0..n {
+            let ty_k = substed_tys[k].clone();
+            let mut ty_shifted = ty_k;
+            for j in (0..=k).rev() {
+                ty_shifted = shift(1, j as i32, &ty_shifted);
+            }
+            for j in 0..k {
+                let arg_term = quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    result_args[j].clone(),
+                    session,
+                );
+                ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+            }
+            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let transported = eval_nbe(
+                env,
+                globals,
+                global_offset,
+                &Term::TTransport(
+                    Box::new(ty_fam),
+                    Box::new(quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        args[k].clone(),
+                        session,
+                    )),
+                ),
+                session,
+            );
+            result_args.push(transported);
+        }
     }
 
     Value::VPCon(
@@ -837,7 +1010,7 @@ fn transport_data_pcon(
     )
 }
 
-/// Transport a square constructor `sqcon c a₁ ... aₙ r s` through a constant data type family.
+/// Transport a square constructor `sqcon c a₁ ... aₙ r s` through a data type family.
 fn transport_data_sqcon(
     env: &Scope,
     globals: &Globals,
@@ -848,6 +1021,7 @@ fn transport_data_sqcon(
     args: &[Value],
     r: &Value,
     s: &Value,
+    eval_at_i1: bool,
     session: &mut Session,
 ) -> Value {
     let dts = session.current_dts();
@@ -909,42 +1083,100 @@ fn transport_data_sqcon(
     }
 
     let mut result_args: Vec<Value> = Vec::new();
-    let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
 
-    for k in 0..n {
-        let ty_k = substed_tys[k].clone();
-        let mut ty_shifted = ty_k;
-        for j in (0..=k).rev() {
-            ty_shifted = shift(1, j as i32, &ty_shifted);
-        }
-        for j in 0..k {
-            let arg_term = quote(
-                env.len(),
-                globals,
-                global_offset,
-                result_args[j].clone(),
-                session,
-            );
-            ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
-        }
-        let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
-        let transported = eval_nbe(
-            env,
-            globals,
-            global_offset,
-            &Term::TTransport(
-                Box::new(ty_fam),
-                Box::new(quote(
+    if eval_at_i1 {
+        let (formal_env, dt_at_var) =
+            eval_body_at_formal_interval(env, globals, global_offset, clos, session);
+        let params_at_i = match &dt_at_var {
+            Value::VData(_, params) => params.clone(),
+            _ => vec![],
+        };
+        let num_params = dt.params.len();
+        for k in 0..n {
+            let ty_k = con_sig.arg_tys[k].clone();
+            let mut ty_shifted = ty_k;
+            for j in (0..=k).rev() {
+                ty_shifted = shift(1, j as i32, &ty_shifted);
+            }
+            for j in 0..num_params {
+                let pos = (n + num_params - j) as i32;
+                if let Some(p_val) = params_at_i.get(j) {
+                    let p_term = quote(
+                        formal_env.len(),
+                        globals,
+                        global_offset,
+                        p_val.clone(),
+                        session,
+                    );
+                    ty_shifted = subst(pos, &p_term, &ty_shifted);
+                }
+            }
+            for j in 0..k {
+                let arg_term = quote(
                     env.len(),
                     globals,
                     global_offset,
-                    args[k].clone(),
+                    result_args[j].clone(),
                     session,
-                )),
-            ),
-            session,
-        );
-        result_args.push(transported);
+                );
+                ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+            }
+            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let transported = eval_nbe(
+                env,
+                globals,
+                global_offset,
+                &Term::TTransport(
+                    Box::new(ty_fam),
+                    Box::new(quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        args[k].clone(),
+                        session,
+                    )),
+                ),
+                session,
+            );
+            result_args.push(transported);
+        }
+    } else {
+        let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
+        for k in 0..n {
+            let ty_k = substed_tys[k].clone();
+            let mut ty_shifted = ty_k;
+            for j in (0..=k).rev() {
+                ty_shifted = shift(1, j as i32, &ty_shifted);
+            }
+            for j in 0..k {
+                let arg_term = quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    result_args[j].clone(),
+                    session,
+                );
+                ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+            }
+            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let transported = eval_nbe(
+                env,
+                globals,
+                global_offset,
+                &Term::TTransport(
+                    Box::new(ty_fam),
+                    Box::new(quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        args[k].clone(),
+                        session,
+                    )),
+                ),
+                session,
+            );
+            result_args.push(transported);
+        }
     }
 
     Value::VSqCon(
@@ -956,7 +1188,7 @@ fn transport_data_sqcon(
     )
 }
 
-/// Transport an n-dimensional cell constructor through a constant data type family.
+/// Transport an n-dimensional cell constructor through a data type family.
 /// Same strategy as transport_data_pcon/sqcon, but keeps all interval args unchanged.
 fn transport_data_cellcon(
     env: &Scope,
@@ -967,6 +1199,7 @@ fn transport_data_cellcon(
     con_name: &str,
     args: &[Value],
     ivars: &[Value],
+    eval_at_i1: bool,
     session: &mut Session,
 ) -> Value {
     let dts = session.current_dts();
@@ -1019,42 +1252,100 @@ fn transport_data_cellcon(
     }
 
     let mut result_args: Vec<Value> = Vec::new();
-    let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
 
-    for k in 0..n {
-        let ty_k = substed_tys[k].clone();
-        let mut ty_shifted = ty_k;
-        for j in (0..=k).rev() {
-            ty_shifted = shift(1, j as i32, &ty_shifted);
-        }
-        for j in 0..k {
-            let arg_term = quote(
-                env.len(),
-                globals,
-                global_offset,
-                result_args[j].clone(),
-                session,
-            );
-            ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
-        }
-        let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
-        let transported = eval_nbe(
-            env,
-            globals,
-            global_offset,
-            &Term::TTransport(
-                Box::new(ty_fam),
-                Box::new(quote(
+    if eval_at_i1 {
+        let (formal_env, dt_at_var) =
+            eval_body_at_formal_interval(env, globals, global_offset, clos, session);
+        let params_at_i = match &dt_at_var {
+            Value::VData(_, params) => params.clone(),
+            _ => vec![],
+        };
+        let num_params = dt.params.len();
+        for k in 0..n {
+            let ty_k = con_sig.arg_tys[k].clone();
+            let mut ty_shifted = ty_k;
+            for j in (0..=k).rev() {
+                ty_shifted = shift(1, j as i32, &ty_shifted);
+            }
+            for j in 0..num_params {
+                let pos = (n + num_params - j) as i32;
+                if let Some(p_val) = params_at_i.get(j) {
+                    let p_term = quote(
+                        formal_env.len(),
+                        globals,
+                        global_offset,
+                        p_val.clone(),
+                        session,
+                    );
+                    ty_shifted = subst(pos, &p_term, &ty_shifted);
+                }
+            }
+            for j in 0..k {
+                let arg_term = quote(
                     env.len(),
                     globals,
                     global_offset,
-                    args[k].clone(),
+                    result_args[j].clone(),
                     session,
-                )),
-            ),
-            session,
-        );
-        result_args.push(transported);
+                );
+                ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+            }
+            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let transported = eval_nbe(
+                env,
+                globals,
+                global_offset,
+                &Term::TTransport(
+                    Box::new(ty_fam),
+                    Box::new(quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        args[k].clone(),
+                        session,
+                    )),
+                ),
+                session,
+            );
+            result_args.push(transported);
+        }
+    } else {
+        let substed_tys: Vec<Term> = con_sig.arg_tys.clone();
+        for k in 0..n {
+            let ty_k = substed_tys[k].clone();
+            let mut ty_shifted = ty_k;
+            for j in (0..=k).rev() {
+                ty_shifted = shift(1, j as i32, &ty_shifted);
+            }
+            for j in 0..k {
+                let arg_term = quote(
+                    env.len(),
+                    globals,
+                    global_offset,
+                    result_args[j].clone(),
+                    session,
+                );
+                ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
+            }
+            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let transported = eval_nbe(
+                env,
+                globals,
+                global_offset,
+                &Term::TTransport(
+                    Box::new(ty_fam),
+                    Box::new(quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        args[k].clone(),
+                        session,
+                    )),
+                ),
+                session,
+            );
+            result_args.push(transported);
+        }
     }
 
     Value::VCellCon(d_name.clone(), con_name.into(), result_args, ivars.to_vec())
