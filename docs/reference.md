@@ -144,6 +144,7 @@ The following words are reserved and cannot be used as variable names:
 | `snd`         | Second projection from a pair              |
 | `ua`          | Univalence axiom                           |
 | `transport`   | Transport along a path                     |
+| `transp`      | Generalized transport (non-constant families) |
 | `equivFwd`    | Apply forward map of an equivalence        |
 | `forall` / `∀` | Dependent function type former          |
 | `Σ`           | Dependent pair type former (Unicode only)  |
@@ -152,6 +153,7 @@ The following words are reserved and cannot be used as variable names:
 | `Next`        | Coinductive delay constructor              |
 | `Force`       | Coinductive delay destructor               |
 | `by_wf`       | Well-founded recursion annotation          |
+| `isNType`     | n-truncation level sugar (parser)          |
 | `as`          | As-pattern in match cases (contextual)     |
 
 ### Symbols and Operators
@@ -1424,6 +1426,34 @@ Note: `Path A u v` is equivalent to `PathP (<i> A) u v` when `A` is a
 constant type. The `Path` keyword accepts either a plain type or a type
 family; `PathP` explicitly signals that the first argument is a family.
 
+### n-Truncation Level Sugar (`isNType`)
+
+```
+isNType n A
+```
+
+Parser sugar for testing n-truncation levels of a type `A`. Desugars to
+nested Pi/Path types expressing that all (n+1)-dimensional paths are
+reflexive:
+
+| Level | Sugar | Meaning |
+| ----- | ----- | ------- |
+| 0 | `isNType 0 A` | `isProp A`: all elements are equal |
+| 1 | `isNType 1 A` | `isSet A`: all paths between paths are equal |
+| 2 | `isNType 2 A` | `isGroupoid A`: all 2-paths between paths are equal |
+
+**Example:**
+
+```
+def is_prop_nat : isNType 0 Nat :=
+  fun x y => <i> zero
+
+def is_set_nat : isNType 1 Nat :=
+  fun x y p q i j => zero
+```
+
+See `examples/isntype_demo.owl`.
+
 ### Interval Algebra
 
 Interval expressions support:
@@ -1749,6 +1779,42 @@ coe A x
 along a line of types) is the fundamental operation and `transport` is derived;
 in Owl the relationship is inverted since `transport` is the kernel primitive.
 `coe A x` is equivalent to `transport A x`.
+
+### Generalized Transport (`transp`)
+
+```
+transp A r x
+```
+
+where:
+- `A : I -> Type` — a type family over the interval
+- `r : I` — a starting face
+- `x : A r`
+
+`transp` is the primitive from which `transport` is derived. It handles
+**non-constant type families** — type families where the type changes along the
+interval (not just `Path U A B`). It computes through each type former
+(Pi, Sigma, Path, data, Glue) case-by-case.
+
+**Endpoint reductions**:
+- `transp A i0 x = x` (at `r = i0`, returns the input unchanged)
+- `transp A i1 x = transport A x` (at `r = i1`, reduces to standard transport)
+
+**Decomposition**: `transp` computes through type formers at `i1`:
+- Pi: `transp (fun i -> Pi (x : A i). B i) r f = fun x -> transp (...) r (f (transp (...) i0 x))`
+- Sigma: each component transported independently
+- Path: transported path lambda
+- Data type: each constructor argument transported through its interval-dependent type
+- Glue: standard Glue transport rules
+
+**Example**:
+
+```
+def transp_example : Nat :=
+  transp (<i> Nat) i1 (suc zero)
+```
+
+See `examples/transp_basic.owl` and `examples/indexed_transp_test.owl`.
 
 ---
 
@@ -2655,11 +2721,13 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "Delay" <prefix_or_atom>         -- coinductive delay type
                 | "Next" <prefix_or_atom>          -- wrap into Delay
                 | "Force" <prefix_or_atom>         -- unwrap from Delay
+                | "transp" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>  -- generalized transport
                 | <atom>
 
 <atom>        ::= NAME                             -- variable, constructor, i0, i1
                 | INT                              -- 0 = i0, 1 = i1, other = error
                 | "(" <term> ")"                   -- parenthesized
+                | "isNType" INT <prefix_or_atom>   -- n-truncation level sugar
                 | "Path" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
                 | "PathP" <prefix_or_atom> <prefix_or_atom> <prefix_or_atom>
                 | "hcomp" <prefix_or_atom> (<system> | <prefix_or_atom> <prefix_or_atom>) <prefix_or_atom>
@@ -3315,27 +3383,50 @@ Field laws for `by field with F`. Provides:
 
 ### lib/algebra.owl
 
-Shared algebraic structures:
+Shared algebraic structures consumed by the tactic family:
 
-- `CommRing A add mul zero one` — commutative ring record
+- `CommRing A add mul zero one` — commutative ring record (operations as parameters,
+  laws as fields)
 - `Group A mul inv one` — group record
 - `Field A add mul inv zero one` — field record (canonical home)
-- `Module A add mul zero one C M m_add m_neg m_zero smul` — module over a ring
+- `Module A add mul zero one C M m_add m_neg m_zero smul` — R-module record
+- `NatCommRing` — bundled `CommRing` instance for natural numbers
 
 ### lib/logic.owl
 
 Core logic types:
 
-```owl
-inductive Empty where
-
-def absurd : forall (A : Type), Empty -> A
-def Not : forall (A : Type), Type := fun A => A -> Empty
-```
+- `Empty` — the empty type (no constructors)
+- `absurd : forall (A : Type), Empty -> A` — ex falso quodlibet
+- `Not : forall (A : Type), Type := fun A => A -> Empty` — negation
 
 ### lib/truncation.owl
 
-Truncation types for propositional truncation.
+Truncation types for propositional truncation:
+
+- `Trunc A` — propositional truncation HIT (`inc` + `trunc` path constructor)
+- `trunc_intro : forall (A : Type), A -> Trunc A` — convenience wrapper Provides the `Trunc A` HIT
+(inc + trunc path constructor) and `trunc_intro : A -> Trunc A`.
+
+### lib/algebra.owl — Shared Algebraic Structures
+
+Consolidates the bundled algebraic structures consumed by the tactic family:
+
+- `CommRing A add mul zero one` — commutative ring record with all ring laws
+- `Group A mul inv one` — group record with inverse/associativity laws
+- `Field A add mul inv zero one` — field record (canonical home of field laws)
+- `Module A add mul zero one C M m_add m_neg m_zero smul` — R-module record
+- `NatCommRing` — bundled `CommRing` instance for natural numbers
+
+```owl
+record CommRing (A : Type) (add : A -> A -> A) (mul : A -> A -> A)
+                (zero : A) (one : A) where
+  field trans : ...
+  field sym : ...
+  field add_comm : ...
+  -- plus cong_*, add_assoc, add_0_l/r, mul_comm, mul_assoc,
+  --     mul_1_l/r, mul_0_l/r, mul_add_l/r
+```
 
 ### Example: Using Libraries
 

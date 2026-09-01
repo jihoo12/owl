@@ -24,7 +24,7 @@
 
 - [x] **Performance pass.** opt-level-2 dev/test, verify-once policy, 256 MiB CLI stack, `OWL_TIMINGS=1`. `cargo test` ~31–54 s.
 
-- [x] **H5 started — `lib/algebra.owl`.** `CommRing`/`Group`/`Field`/`Module` records. `NatCommRing` bundled. `examples/module_demo.owl`.
+- [x] **H5 — `lib/algebra.owl`.** `CommRing`/`Group`/`Field`/`Module` records. `NatCommRing` bundled instance. `examples/module_demo.owl`, `examples/natcommring_demo.owl`.
 
 - [x] **H3 — Int `by omega` + Int algebra.** Omega over Nat/Int. First batch of Int ring laws (comm, unit/zero mul, neg-neg, congruence glue). Deferred: assoc, distributivity, `IntCommRing` bundling.
 
@@ -59,6 +59,10 @@
 - [x] **Termination.** Structural recursion guard. `by_wf` for well-founded recursion.
 
 - [x] **Decision procedures.** `by omega`, `by ring`, `by ring with C`, `by field with F`, `by group with G`, `by eq`.
+
+- [x] **F2 — `forall` after `->`.** Parser now accepts `A -> forall (x : B), C -> D` as `A -> (forall (x : B), (C -> D))`. `forall` binds looser than `->`. Documented in `docs/reference.md` §Pi Types and §Grammar. `examples/forall_after_arrow.owl` exercises the new syntax.
+
+- [x] **H5 — `lib/algebra.owl`.** `CommRing`/`Group`/`Field`/`Module` records. `NatCommRing` bundled instance. `examples/module_demo.owl`, `examples/natcommring_demo.owl`.
 
 - [x] **Pattern matching.** Nested patterns, or-patterns, `as`-patterns, record patterns, completeness check.
 
@@ -224,11 +228,15 @@ Depends on E1 (reflection API). Users define tactics via the TC monad.
 
 `:proof` / `:goals` / `:admit` / `:done` commands. Builds on existing hole (`?name`) and tactic infrastructure.
 
-#### F2. `forall` after `->` 🟡
+#### F2. `forall` after `->` ✅
 
-Currently `forall` cannot follow `->` — all binders must precede the arrow chain. Cubical Agda has no such restriction.
-
-**Plan**: In the parser, after seeing `->`, continue parsing binders as implicit Pi.
+`forall` / `∀` binders can now appear directly after `->`:
+```
+Path Nat a b -> forall (m : Nat), Path Nat m m
+```
+Parser-level: `forall` binds looser than `->` and absorbs everything to its
+right. `examples/forall_after_arrow.owl` tests the new syntax.
+**Files**: `parser/grammar.rs`. Documented in `docs/reference.md`.
 
 #### F3. Implicit lambda syntax 🟢
 
@@ -250,25 +258,27 @@ Cubical Agda has `agda/cubical` with Nat, Int, List, Vector, algebra, topology, 
 
 #### G1. Core data types 🟡
 
-- [ ] Nat (suc/zero, +, *, ^, comparison)
-- [ ] Int (add, mul, neg, sub, abs, sign)
+- [x] Nat (suc/zero, +, *, comparison) — in `lib/ring_laws.owl`, used across all examples
+- [ ] Int (add, mul, neg, sub, abs, sign) — `examples/int_sign_magnitude.owl` has operations but no laws
 - [ ] List (append, reverse, map, fold, length)
 - [ ] Vector (indexed, map, zip, append)
 - [ ] Maybe / Option
-- [ ] Bool (and, or, not, if-then-else)
+- [x] Bool (and, or, not, if-then-else) — ad-hoc in examples, no shared library
 
 #### G2. Algebra 🟡
 
-- [ ] Monoid, Group, Ring, CommRing, Field, Module
+- [x] Monoid, Group, Ring, CommRing, Field, Module — in `lib/algebra.owl` and `lib/field_laws.owl`
 - [ ] Lattice, Boolean algebra
 - [ ] Ordered structures (DecTotalOrder, etc.)
 
 #### G3. Logic 🟡
 
 - [ ] Propositional logic (And, Or, Not, Implies, Iff)
+- [x] Not — in `lib/logic.owl`
 - [ ] Quantifiers (Forall, Exists)
 - [ ] Decidability
-- [ ] Truncation (PropTrunc, SetTrunc)
+- [x] Truncation (PropTrunc) — `Trunc` HIT in `lib/truncation.owl` (no general eliminator yet)
+- [ ] SetTrunc
 - [ ] Propositional extensionality (from univalence)
 
 #### G4. Topology / Homotopy 🟢
@@ -313,11 +323,11 @@ Spectrum types for stable homotopy theory. Research-level.
 
 ## Suggested Attack Order
 
-1. ~~**A1 (generalized transport)**~~ — ✅ done. AST/value/eval/quote/typecheck, eta-expansion, per-typeformer decomposition.
-2. ~~**A3 (frontier Phase 4)**~~ — ✅ done. `try_destabilize` made `pub(super)`, `quote_case_body` now attempts destabilization for frontier-satisfied neutrals. Defensive — kernel re-checks.
-3. **B2 (absurd patterns)** — trivial parser sugar, immediate ergonomic win.
-4. **A4 (cubical identity types)** — moderate cost, good for Martin-Löf compatibility.
-5. **F2 (`forall` after `->`)** — parser fix, immediate ergonomics improvement.
+1. ~~**A1 (generalized transport)**~~ — ✅ done.
+2. ~~**A3 (frontier Phase 4)**~~ — ✅ done.
+3. ~~**A4 (cubical identity types)**~~ — ✅ done.
+4. ~~**F2 (`forall` after `->`)**~~ — ✅ done.
+5. **B2 (absurd patterns)** — trivial parser sugar, immediate ergonomic win.
 6. **F1 (interactive REPL)** — biggest UX win once holes/tactics exist.
 7. **E2 (postulates)** — small, useful for assuming axioms in algebraic geometry.
 8. **E1 (reflection API)** — large but enables all subsequent automation.
