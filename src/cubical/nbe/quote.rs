@@ -11,10 +11,9 @@ use crate::cubical::syntax::{ElimCase, System, Term};
 /// values produce a finite (stuck) term instead of overflowing the stack. The
 /// placeholder is an unbound `TVar(size)` (far beyond any real context), which
 /// surfaces as an error downstream rather than silently passing. The cap must be
-/// low enough to fit the debug-build stack frames on the smallest thread stack
-/// the normalizer may run on (test threads default to 2 MiB).
-
-const QUOTE_MAX_DEPTH: usize = 200;
+/// Maximum quote depth before returning a variable reference. Matches the
+/// eval_nbe cap to prevent stack overflow on deep quote→eval→quote cycles.
+const QUOTE_MAX_DEPTH: usize = 2000;
 
 pub fn quote(
     size: usize,

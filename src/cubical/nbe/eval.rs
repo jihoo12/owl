@@ -237,11 +237,12 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
 /// (e.g. `def f : Nat -> Nat := fun n => f n`): evaluating the global value
 /// re-resolves the self-reference to the same lambda forever, growing the
 /// recursion unboundedly. Cap the evaluation depth so such inputs produce a
-/// finite (stuck) value instead of overflowing the stack. Every divergent path
-/// — direct self-application, mutual recursion, and self-references reached via
-/// `Closure::apply` / `IClosure` — recurses through `eval_nbe`, so the single
-/// guard below covers them all. Legitimate normal forms stay far below the cap.
-const EVAL_NBE_MAX_DEPTH: usize = 200;
+/// Maximum eval depth before returning a stuck neutral. This prevents stack
+/// overflow on divergent terms (self-application, infinite recursions) while
+/// allowing legitimate deep normal forms. The cap is generous (2000) to avoid
+/// truncating real proofs; the 256 MiB CLI stack and 64 MiB test stacks
+/// provide additional headroom.
+const EVAL_NBE_MAX_DEPTH: usize = 2000;
 
 pub fn eval_nbe(
     env: &Scope,
