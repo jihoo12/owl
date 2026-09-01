@@ -857,7 +857,7 @@ pub fn do_elim(
 ///
 /// Returns `Some(value)` if the neutral successfully reduced to a non-neutral
 /// value, `None` if it's still stuck.
-fn try_destabilize(
+pub(super) fn try_destabilize(
     globals: &Globals,
     global_offset: usize,
     n: &Neutral,

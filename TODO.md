@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **A3 — Frontier-of-instability Phase 4 (quoting).** ✅ Made `try_destabilize` `pub(super)` in `elim.rs`. In `quote_case_body`, the `_ => quote(...)` fallback now checks if the value is a `VNeutral` with a satisfied frontier and attempts destabilization before quoting. This hardens quoting for stuck elim case bodies that capture interval-bound neutrals. Defensive — kernel re-checks everything. 256/256 tests pass, `cargo fmt` clean.
+
 - [x] **NbE eval depth guard + Arc-based O(1) clone + TApp spine trampoline.** `EVAL_NBE_MAX_DEPTH=2000` in `eval.rs` prevents stack overflow. All `Term`/`Value`/`Neutral`/`I`/`Frontier` subterms migrated from `Box` to `Arc` — `Term::clone()` is now O(1) (atomic refcount). `meta.rs` zonk rewritten as recursive rebuild (no in-place mutation). TApp evaluation collects the left spine iteratively: `TApp(TApp(TApp(f, a1), a2), a3)` → head=f, spine=[a1,a2,a3], then iteratively apply. This eliminates O(n) stack depth for deep application chains. Deep TApp chains (2,500+ applications) work on a 2 MiB stack thread. 256/256 tests pass, `cargo fmt` clean.
 
 - [x] **A2 — Indexed inductive type transport.** Fixed `transport_data_con`/`pcon`/`sqcon`/`cellcon` in `transport.rs`. The old indexed path tried to extract Pi types from `VData(d, params_at_i)`, which immediately fell through (VData is not VPi). The new approach: evaluate the closure at the formal interval variable to get `VData(d, params_at_i)`, then for each constructor arg type `T_k`, substitute each data type param variable `TVar(n + m - j)` with `quote(params_at_i[j])`. This correctly builds type families where data type parameters change along the interval. Creating a test for the non-constant path requires a `Path Type A B` with `A ≠ B`, which needs Glue/univalence — deferred. 253/253 tests pass, `cargo fmt` clean.
@@ -94,13 +96,7 @@ A consequence of A1. Cubical Agda's `transp` computes through indexed types by s
 
 **Test**: `examples/indexed_transp_test.owl` exercises the non-constant path (`is_constant = false`) by constructing `Bool ≃ Bool'` via `mkEquiv`, using `ua` to build a `Path U0 Bool Bool'`, then transporting `cons tt nil : List Bool` through `List (ua bool_bool' @ i)` to produce `List Bool'`. Also added `VUa` PApp endpoint reduction (`ua e @ 0 = equiv_dom(e)`, `ua e @ 1 = equiv_cod(e)`) in `elim.rs` so that `is_constant` correctly detects non-constant families. All 254 tests pass.
 
-#### A3. Frontier-of-instability — Phase 4 (quoting) 🟡
-
-Phase 3 (destabilization in `do_elim`) is done. Phase 4 hardens quoting: when quoting encounters a neutral whose frontier is satisfied but wasn't destabilized, attempt limited evaluation.
-
-**Plan**: In `quote_case_body`, when a `TVar` resolves to a neutral with a satisfied frontier, try destabilizing before structural re-anchoring. Defensive — kernel re-checks everything.
-
-**Files**: `src/cubical/nbe/quote.rs`.
+- [x] **A3 — Frontier-of-instability Phase 4 (quoting).** ✅ Made `try_destabilize` `pub(super)` in `elim.rs`. In `quote_case_body`, the `_ => quote(...)` fallback now checks if the value is a `VNeutral` with a satisfied frontier and attempts destabilization before quoting. Defensive — kernel re-checks everything. `src/cubical/nbe/quote.rs`, `src/cubical/nbe/elim.rs`. 256/256 tests pass.
 
 #### A4. Cubical identity types (`Id`) 🟡
 
@@ -316,7 +312,7 @@ Spectrum types for stable homotopy theory. Research-level.
 ## Suggested Attack Order
 
 1. ~~**A1 (generalized transport)**~~ — ✅ done. AST/value/eval/quote/typecheck, eta-expansion, per-typeformer decomposition.
-2. **A3 (frontier Phase 4)** — quick win, completes the stuck-elim story, unblocks pos/negsuc Int ring laws.
+2. ~~**A3 (frontier Phase 4)**~~ — ✅ done. `try_destabilize` made `pub(super)`, `quote_case_body` now attempts destabilization for frontier-satisfied neutrals. Defensive — kernel re-checks.
 3. **B2 (absurd patterns)** — trivial parser sugar, immediate ergonomic win.
 4. **A4 (cubical identity types)** — moderate cost, good for Martin-Löf compatibility.
 5. **F2 (`forall` after `->`)** — parser fix, immediate ergonomics improvement.

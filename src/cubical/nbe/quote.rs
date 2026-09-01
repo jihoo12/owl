@@ -1,5 +1,6 @@
 //! Quoting: values back to normalised `Term`s.
 
+use super::elim::try_destabilize;
 use super::value::{Globals, Neutral, NeutralInner, Scope, Value};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{ElimCase, System, Term};
@@ -911,7 +912,19 @@ fn quote_case_body(
                             session,
                         )),
                     ),
-                    _ => quote(size, globals, global_offset, v.clone(), session),
+                    _ => {
+                        // Phase 4: if this value is a neutral with a satisfied
+                        // frontier, attempt destabilization before quoting.
+                        // This is defensive — the kernel re-checks everything.
+                        if let Value::VNeutral(ref n) = v {
+                            if let Some(destabilized) =
+                                try_destabilize(globals, global_offset, n, session)
+                            {
+                                return quote(size, globals, global_offset, destabilized, session);
+                            }
+                        }
+                        quote(size, globals, global_offset, v.clone(), session)
+                    }
                 }
             } else {
                 Term::TVar((size + go + i - env.len()) as i32)
