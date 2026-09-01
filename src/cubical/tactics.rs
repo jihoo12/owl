@@ -3,6 +3,7 @@ use crate::cubical::nbe::{nbe_eval, nbe_eval_ctx};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Name, Term, beta, shift, show_term};
 use crate::cubical::typechecker::{Ctx, TypeError, err_pos, infer_dt};
+use std::sync::Arc;
 
 use super::equality::definitionally_equal_ctx_r;
 fn names_from_ctx(ctx: &Ctx) -> Vec<Name> {
@@ -206,7 +207,7 @@ impl<'a> TacticEngine<'a> {
                             .into(),
                     )
                 })?;
-                self.result = Some(Term::TPair(Box::new(fst_result), Box::new(snd_result)));
+                self.result = Some(Term::TPair(Arc::new(fst_result), Arc::new(snd_result)));
             }
 
             // ── constructor (first arg proved → next arg) ─────────────
@@ -288,13 +289,13 @@ impl<'a> TacticEngine<'a> {
                 };
                 // p1 : Path A x y  →  y = p1 @ i1
                 let y = Term::PApp(
-                    Box::new(p1.clone()),
-                    Box::new(Term::TInterval(crate::cubical::interval::I::I1)),
+                    Arc::new(p1.clone()),
+                    Arc::new(Term::TInterval(crate::cubical::interval::I::I1)),
                 );
                 let y_nf = nbe_eval(&y, session);
                 // Second goal: Path A y z
                 self.goal_ty =
-                    Term::TPath(Box::new(a_ty.clone()), Box::new(y_nf), Box::new(z.clone()));
+                    Term::TPath(Arc::new(a_ty.clone()), Arc::new(y_nf), Arc::new(z.clone()));
                 self.pending_goal = Some(PendingGoal::TransitivitySecond {
                     p1,
                     x: x.clone(),
@@ -316,8 +317,8 @@ impl<'a> TacticEngine<'a> {
                 // Compose: substitute p1 @ i1 for the intermediate variable
                 // in p2.  p2 has the intermediate at de Bruijn index 0.
                 let sub = Term::PApp(
-                    Box::new(p1),
-                    Box::new(Term::TInterval(crate::cubical::interval::I::I1)),
+                    Arc::new(p1),
+                    Arc::new(Term::TInterval(crate::cubical::interval::I::I1)),
                 );
                 let composed = beta(&p2, &sub);
                 self.result = Some(nbe_eval(&composed, session));
@@ -371,7 +372,7 @@ impl<'a> TacticEngine<'a> {
                     // Build motive: fun x => GoalType
                     // x is at index 0 in the motive body.
                     let motive_body = shift(1, 0, &self.goal_ty);
-                    let motive = Term::TAbs("_x".to_string(), Box::new(motive_body));
+                    let motive = Term::TAbs("_x".to_string(), Arc::new(motive_body));
 
                     // The scrutinee is the variable that was destructed.
                     // It's the innermost in the tactic_ctx (index 0).
@@ -410,7 +411,7 @@ impl<'a> TacticEngine<'a> {
                     // placed the variable at index 0.
                     let scrutinee = Term::TVar(0);
 
-                    let elim = Term::TElim(Box::new(motive), cases, Box::new(scrutinee));
+                    let elim = Term::TElim(Arc::new(motive), cases, Arc::new(scrutinee));
                     self.result = Some(nbe_eval(&elim, session));
                 } else {
                     // More goals to prove: pop the next one.
@@ -594,7 +595,7 @@ impl<'a> TacticEngine<'a> {
                             EtaResult::Equal => {
                                 let i_name = "_i".to_string();
                                 let body = shift(1, 0, &u);
-                                self.result = Some(Term::PLam(i_name, Box::new(body)));
+                                self.result = Some(Term::PLam(i_name, Arc::new(body)));
                                 Ok(())
                             }
                             EtaResult::NotEqual => Err(TypeError::Other(format!(
@@ -629,7 +630,7 @@ impl<'a> TacticEngine<'a> {
                 let goal_nf = nbe_eval(&self.goal_ty, session);
                 match goal_nf {
                     Term::TPath(a, u, v) => {
-                        self.goal_ty = Term::TPath(a, Box::new(*v), Box::new(*u));
+                        self.goal_ty = Term::TPath(a, v, u);
                         Ok(())
                     }
                     other => {
@@ -651,7 +652,7 @@ impl<'a> TacticEngine<'a> {
                 match goal_nf {
                     Term::TSigma(_x, a_ty, b_ty) => {
                         self.pending_goal = Some(PendingGoal::SplitFirst {
-                            snd_ty_template: *b_ty,
+                            snd_ty_template: (*b_ty).clone(),
                         });
                         self.goal_ty = nbe_eval(&a_ty, session);
                         Ok(())
@@ -977,7 +978,7 @@ impl<'a> TacticEngine<'a> {
 
                         // First subgoal: Path A x _trans_y
                         let x_shifted = shift(1, 0, &x);
-                        self.goal_ty = Term::TPath(a, Box::new(x_shifted), Box::new(Term::TVar(0)));
+                        self.goal_ty = Term::TPath(a, Arc::new(x_shifted), Arc::new(Term::TVar(0)));
                         self.shift_stored_for_intros(1);
 
                         self.pending_goal = Some(PendingGoal::TransitivityFirst {
@@ -1027,7 +1028,7 @@ impl<'a> TacticEngine<'a> {
                         match definitionally_equal_ctx_r(&combined_ctx, &u_nf, &v_nf, session) {
                             EtaResult::Equal => {
                                 let body = shift(1, 0, &u);
-                                self.result = Some(Term::PLam("_i".to_string(), Box::new(body)));
+                                self.result = Some(Term::PLam("_i".to_string(), Arc::new(body)));
                                 Ok(())
                             }
                             _ => Err(TypeError::Other(format!(
@@ -1184,12 +1185,12 @@ impl<'a> TacticEngine<'a> {
 
         // ── apply pending function applications (outermost first) ─────────
         for app in self.pending_apps.iter().rev() {
-            term = Term::TApp(Box::new(app.clone()), Box::new(term));
+            term = Term::TApp(Arc::new(app.clone()), Arc::new(term));
         }
 
         // ── wrap in TAbs for each intro'd name ───────────────────────────
         for name in self.intro_names.iter().rev() {
-            term = Term::TAbs(name.clone(), Box::new(term));
+            term = Term::TAbs(name.clone(), Arc::new(term));
         }
 
         Ok(term)

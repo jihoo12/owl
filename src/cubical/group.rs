@@ -28,6 +28,7 @@ use crate::cubical::ring::{EqP, app, inst, refl2};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError, check_dt, infer_dt};
+use std::sync::Arc;
 
 /// A letter of a word: a generator (`neg = false`) or its formal inverse.
 /// Atoms are kept in normal form so equality checks stay syntactic.
@@ -109,7 +110,7 @@ impl Group {
         };
 
         let proj = |field: &str| -> Result<Term, TypeError> {
-            Ok(Term::TProj(field.to_string(), Box::new(g.clone())))
+            Ok(Term::TProj(field.to_string(), Arc::new(g.clone())))
         };
         Ok(Group {
             ctx_len: ctx.len(),
@@ -680,7 +681,7 @@ pub fn prove(
         match goal_nf {
             Term::TPath(a, u, v) => {
                 let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
-                (*u, *v, a_nf)
+                ((*u).clone(), (*v).clone(), a_nf)
             }
             other => {
                 return Err(TypeError::Other(format!(
@@ -720,9 +721,9 @@ pub fn prove(
     // driver's process_def re-check is the soundness backstop.
     if crate::cubical::debug::is_active() {
         let goal_l = Term::TPath(
-            Box::new(carrier.clone()),
-            Box::new(u.clone()),
-            Box::new(pu.b.clone()),
+            Arc::new(carrier.clone()),
+            Arc::new(u.clone()),
+            Arc::new(pu.b.clone()),
         );
         let prev_skip = crate::cubical::typechecker::termination::should_skip_guard(session);
         crate::cubical::typechecker::termination::set_skip_guard(true, session);
@@ -741,9 +742,9 @@ pub fn prove(
             )));
         }
         let goal_r = Term::TPath(
-            Box::new(carrier.clone()),
-            Box::new(v.clone()),
-            Box::new(pv.b.clone()),
+            Arc::new(carrier.clone()),
+            Arc::new(v.clone()),
+            Arc::new(pv.b.clone()),
         );
         let prev_skip = crate::cubical::typechecker::termination::should_skip_guard(session);
         crate::cubical::typechecker::termination::set_skip_guard(true, session);

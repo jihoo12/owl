@@ -156,7 +156,10 @@ available directly. See `rust-analyzer-db.md` for the full command list. The
 - **Deep normal forms overflow the 2 MiB test stack** — see §4. The `owl` CLI
   itself runs the driver on a 256 MiB-stack worker thread (`src/main.rs`), so
   command-line checks never need `ulimit` tricks; only libtest threads need the
-  64 MiB spawn pattern.
+  64 MiB spawn pattern. However, TApp chains (deep left-recursive applications)
+  are now handled iteratively via a spine collector in `eval_nbe_inner` — with
+  `Arc`-based `Term::clone()` being O(1), the spine is collected without stack
+  growth, so deep application chains work even on 2 MiB stacks.
 - **Tactic proofs are verified once** (the mandatory `process_def`
   re-check). The solvers' internal `check_dt` diagnostics run only under
   `--debug`; on a kernel rejection of a tactic-generated body the driver hints

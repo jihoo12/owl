@@ -1,6 +1,12 @@
 //! Term evaluation: NbE from `Term`s to `Value`s.
+//!
+//! Evaluation is recursive (eval → Closure::apply → eval) but bounded by
+//! `EVAL_NBE_MAX_DEPTH` to prevent stack overflow on divergent terms.
+//! Legitimate deep normal forms rely on the 256 MiB CLI stack or the
+//! 64 MiB stacks used by example-guard tests.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use super::elim::{do_apply, do_elim, do_force, do_fst, do_papp, do_proj, do_snd};
 use super::hcomp::{do_comp, do_fill, do_hcomp, do_hfill};
@@ -23,14 +29,14 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
         match i {
             I::Var(k) if *k == target => val.clone(),
             I::Meet(a, b) => I::Meet(
-                Box::new(go_i(a, target, val)),
-                Box::new(go_i(b, target, val)),
+                Arc::new(go_i(a, target, val)),
+                Arc::new(go_i(b, target, val)),
             ),
             I::Join(a, b) => I::Join(
-                Box::new(go_i(a, target, val)),
-                Box::new(go_i(b, target, val)),
+                Arc::new(go_i(a, target, val)),
+                Arc::new(go_i(b, target, val)),
             ),
-            I::Neg(a) => I::Neg(Box::new(go_i(a, target, val))),
+            I::Neg(a) => I::Neg(Arc::new(go_i(a, target, val))),
             other => other.clone(),
         }
     }
@@ -42,101 +48,101 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                 let subst_lit = |l: &Literal| -> I {
                     match l {
                         Literal::Pos(k) => go_i(&I::Var(*k), target, val),
-                        Literal::NegVar(k) => I::Neg(Box::new(go_i(&I::Var(*k), target, val))),
+                        Literal::NegVar(k) => I::Neg(Arc::new(go_i(&I::Var(*k), target, val))),
                     }
                 };
                 let subst_cube = |c: &BTreeSet<Literal>| -> I {
                     c.iter().fold(I::I1, |acc, l| {
-                        I::Meet(Box::new(subst_lit(l)), Box::new(acc))
+                        I::Meet(Arc::new(subst_lit(l)), Arc::new(acc))
                     })
                 };
                 let combined = cubes.iter().fold(I::I0, |acc, c| {
-                    I::Join(Box::new(subst_cube(c)), Box::new(acc))
+                    I::Join(Arc::new(subst_cube(c)), Arc::new(acc))
                 });
                 Term::TInterval(combined)
             }
             Term::TApp(f, a) => {
-                Term::TApp(Box::new(go(f, target, val)), Box::new(go(a, target, val)))
+                Term::TApp(Arc::new(go(f, target, val)), Arc::new(go(a, target, val)))
             }
-            Term::TAbs(x, b) => Term::TAbs(x.clone(), Box::new(go(b, target, val))),
+            Term::TAbs(x, b) => Term::TAbs(x.clone(), Arc::new(go(b, target, val))),
             Term::TPi(x, a, b, implicit) => Term::TPi(
                 x.clone(),
-                Box::new(go(a, target, val)),
-                Box::new(go(b, target, val)),
+                Arc::new(go(a, target, val)),
+                Arc::new(go(b, target, val)),
                 *implicit,
             ),
             Term::TPath(a, u, v) => Term::TPath(
-                Box::new(go(a, target, val)),
-                Box::new(go(u, target, val)),
-                Box::new(go(v, target, val)),
+                Arc::new(go(a, target, val)),
+                Arc::new(go(u, target, val)),
+                Arc::new(go(v, target, val)),
             ),
-            Term::PLam(x, b) => Term::PLam(x.clone(), Box::new(go(b, target + 1, val))),
+            Term::PLam(x, b) => Term::PLam(x.clone(), Arc::new(go(b, target + 1, val))),
             Term::PApp(p, r) => {
-                Term::PApp(Box::new(go(p, target, val)), Box::new(go(r, target, val)))
+                Term::PApp(Arc::new(go(p, target, val)), Arc::new(go(r, target, val)))
             }
             Term::THComp(a, sys, base) => Term::THComp(
-                Box::new(go(a, target, val)),
+                Arc::new(go(a, target, val)),
                 sys.iter()
                     .map(|(phi, t)| (go(phi, target, val), go(t, target, val)))
                     .collect(),
-                Box::new(go(base, target, val)),
+                Arc::new(go(base, target, val)),
             ),
             Term::TComp(a, sys, base) => Term::TComp(
-                Box::new(go(a, target, val)),
+                Arc::new(go(a, target, val)),
                 sys.iter()
                     .map(|(phi, t)| (go(phi, target, val), go(t, target, val)))
                     .collect(),
-                Box::new(go(base, target, val)),
+                Arc::new(go(base, target, val)),
             ),
             Term::TFill(a, sys, base) => Term::TFill(
-                Box::new(go(a, target, val)),
+                Arc::new(go(a, target, val)),
                 sys.iter()
                     .map(|(phi, t)| (go(phi, target, val), go(t, target, val)))
                     .collect(),
-                Box::new(go(base, target, val)),
+                Arc::new(go(base, target, val)),
             ),
             Term::THFill(a, sys, base) => Term::THFill(
-                Box::new(go(a, target, val)),
+                Arc::new(go(a, target, val)),
                 sys.iter()
                     .map(|(phi, t)| (go(phi, target, val), go(t, target, val)))
                     .collect(),
-                Box::new(go(base, target, val)),
+                Arc::new(go(base, target, val)),
             ),
             Term::TEquiv(a, b) => {
-                Term::TEquiv(Box::new(go(a, target, val)), Box::new(go(b, target, val)))
+                Term::TEquiv(Arc::new(go(a, target, val)), Arc::new(go(b, target, val)))
             }
             Term::TMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
-                Box::new(go(a, target, val)),
-                Box::new(go(b, target, val)),
-                Box::new(go(f, target, val)),
-                Box::new(go(g, target, val)),
-                Box::new(go(eta, target, val)),
-                Box::new(go(eps, target, val)),
+                Arc::new(go(a, target, val)),
+                Arc::new(go(b, target, val)),
+                Arc::new(go(f, target, val)),
+                Arc::new(go(g, target, val)),
+                Arc::new(go(eta, target, val)),
+                Arc::new(go(eps, target, val)),
             ),
             Term::TEquivFwd(e, x) => {
-                Term::TEquivFwd(Box::new(go(e, target, val)), Box::new(go(x, target, val)))
+                Term::TEquivFwd(Arc::new(go(e, target, val)), Arc::new(go(x, target, val)))
             }
-            Term::TUa(e) => Term::TUa(Box::new(go(e, target, val))),
+            Term::TUa(e) => Term::TUa(Arc::new(go(e, target, val))),
             Term::TTransport(p, x) => {
-                Term::TTransport(Box::new(go(p, target, val)), Box::new(go(x, target, val)))
+                Term::TTransport(Arc::new(go(p, target, val)), Arc::new(go(x, target, val)))
             }
             Term::TGlue(a, ph, te) => Term::TGlue(
-                Box::new(go(a, target, val)),
-                Box::new(go(ph, target, val)),
-                Box::new(go(te, target, val)),
+                Arc::new(go(a, target, val)),
+                Arc::new(go(ph, target, val)),
+                Arc::new(go(te, target, val)),
             ),
             Term::TGlueElem(ph, x, a) => Term::TGlueElem(
-                Box::new(go(ph, target, val)),
-                Box::new(go(x, target, val)),
-                Box::new(go(a, target, val)),
+                Arc::new(go(ph, target, val)),
+                Arc::new(go(x, target, val)),
+                Arc::new(go(a, target, val)),
             ),
             Term::TUnglue(ph, te, g) => Term::TUnglue(
-                Box::new(go(ph, target, val)),
-                Box::new(go(te, target, val)),
-                Box::new(go(g, target, val)),
+                Arc::new(go(ph, target, val)),
+                Arc::new(go(te, target, val)),
+                Arc::new(go(g, target, val)),
             ),
             Term::TPartial(ph, a) => {
-                Term::TPartial(Box::new(go(ph, target, val)), Box::new(go(a, target, val)))
+                Term::TPartial(Arc::new(go(ph, target, val)), Arc::new(go(a, target, val)))
             }
             Term::TSystemType(sys) => Term::TSystemType(
                 sys.iter()
@@ -145,14 +151,14 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
             ),
             Term::TSigma(x, a, b) => Term::TSigma(
                 x.clone(),
-                Box::new(go(a, target, val)),
-                Box::new(go(b, target, val)),
+                Arc::new(go(a, target, val)),
+                Arc::new(go(b, target, val)),
             ),
             Term::TPair(a, b) => {
-                Term::TPair(Box::new(go(a, target, val)), Box::new(go(b, target, val)))
+                Term::TPair(Arc::new(go(a, target, val)), Arc::new(go(b, target, val)))
             }
-            Term::TFst(p) => Term::TFst(Box::new(go(p, target, val))),
-            Term::TSnd(p) => Term::TSnd(Box::new(go(p, target, val))),
+            Term::TFst(p) => Term::TFst(Arc::new(go(p, target, val))),
+            Term::TSnd(p) => Term::TSnd(Arc::new(go(p, target, val))),
             Term::TData(d, params) => Term::TData(
                 d.clone(),
                 params.iter().map(|a| go(a, target, val)).collect(),
@@ -166,14 +172,14 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                 data.clone(),
                 con.clone(),
                 args.iter().map(|a| go(a, target, val)).collect(),
-                Box::new(go(r, target, val)),
+                Arc::new(go(r, target, val)),
             ),
             Term::TSqCon(data, con, args, r, s) => Term::TSqCon(
                 data.clone(),
                 con.clone(),
                 args.iter().map(|a| go(a, target, val)).collect(),
-                Box::new(go(r, target, val)),
-                Box::new(go(s, target, val)),
+                Arc::new(go(r, target, val)),
+                Arc::new(go(s, target, val)),
             ),
             Term::TCellCon(data, con, args, ivars) => Term::TCellCon(
                 data.clone(),
@@ -182,7 +188,7 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                 ivars.iter().map(|a| go(a, target, val)).collect(),
             ),
             Term::TElim(motive, cases, scrut) => Term::TElim(
-                Box::new(go(motive, target, val)),
+                Arc::new(go(motive, target, val)),
                 cases
                     .iter()
                     .map(|c| ElimCase {
@@ -194,21 +200,21 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                         refinements: c.refinements.clone(),
                     })
                     .collect(),
-                Box::new(go(scrut, target, val)),
+                Arc::new(go(scrut, target, val)),
             ),
             Term::TProj(field, record) => {
-                Term::TProj(field.clone(), Box::new(go(record, target, val)))
+                Term::TProj(field.clone(), Arc::new(go(record, target, val)))
             }
             Term::TRecordUpdate(record, fields) => Term::TRecordUpdate(
-                Box::new(go(record, target, val)),
+                Arc::new(go(record, target, val)),
                 fields
                     .iter()
                     .map(|(f, t)| (f.clone(), go(t, target, val)))
                     .collect(),
             ),
-            Term::TDelay(a) => Term::TDelay(Box::new(go(a, target, val))),
-            Term::TNext(a) => Term::TNext(Box::new(go(a, target, val))),
-            Term::TForce(a) => Term::TForce(Box::new(go(a, target, val))),
+            Term::TDelay(a) => Term::TDelay(Arc::new(go(a, target, val))),
+            Term::TNext(a) => Term::TNext(Arc::new(go(a, target, val))),
+            Term::TForce(a) => Term::TForce(Arc::new(go(a, target, val))),
             Term::TBy(tactics) => Term::TBy(
                 tactics
                     .iter()
@@ -274,7 +280,7 @@ fn eval_nbe_inner(
             if i < env.len() {
                 env.lookup(i).clone()
             } else {
-                let g = globals.borrow();
+                let g = globals.lock().unwrap();
                 let global_idx = global_offset + (i - env.len());
                 if global_idx < g.len() {
                     g[global_idx].clone()
@@ -283,13 +289,25 @@ fn eval_nbe_inner(
                 }
             }
         }
-        Term::TApp(f, a) => do_apply(
-            globals,
-            global_offset,
-            eval_nbe(env, globals, global_offset, f, session),
-            eval_nbe(env, globals, global_offset, a, session),
-            session,
-        ),
+        Term::TApp(f, a) => {
+            // Collect the spine of TApp nodes to avoid O(n) stack depth.
+            // TApp(TApp(TApp(f, a1), a2), a3) → head=f, spine=[a1, a2, a3]
+            // With Arc, cloning terms for the spine is O(1) per clone.
+            let mut spine: Vec<Arc<Term>> = Vec::new();
+            spine.push(a.clone());
+            let mut head = f.clone();
+            while let Term::TApp(inner_f, inner_a) = &*head {
+                spine.push(inner_a.clone());
+                head = inner_f.clone();
+            }
+            spine.reverse();
+            let mut result = eval_nbe(env, globals, global_offset, &head, session);
+            for arg in &spine {
+                let arg_val = eval_nbe(env, globals, global_offset, arg, session);
+                result = do_apply(globals, global_offset, result, arg_val, session);
+            }
+            result
+        }
         Term::TAbs(x, b) => Value::VLam(
             x.clone(),
             Closure {
@@ -303,16 +321,16 @@ fn eval_nbe_inner(
         Term::TProp => Value::VProp,
         Term::TSSet => Value::VSSet,
         Term::TLift(a, lvl) => Value::VLift(
-            Box::new(eval_nbe(env, globals, global_offset, a, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, a, session)),
             *lvl,
         ),
         Term::TLower(a) => {
-            Value::VLower(Box::new(eval_nbe(env, globals, global_offset, a, session)))
+            Value::VLower(Arc::new(eval_nbe(env, globals, global_offset, a, session)))
         }
         Term::TIntervalTy => Value::VIntervalTy,
         Term::TPi(x, a, b, implicit) => Value::VPi(
             x.clone(),
-            Box::new(eval_nbe(env, globals, global_offset, a, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, a, session)),
             Closure {
                 env: env.clone(),
                 globals: globals.clone(),
@@ -324,9 +342,9 @@ fn eval_nbe_inner(
         Term::TInterval(i) => Value::VInterval(i.clone()),
         Term::TCube(c) => Value::VCube(c.clone()),
         Term::TPath(a, u, v) => Value::VPath(
-            Box::new(eval_nbe(env, globals, global_offset, a, session)),
-            Box::new(eval_nbe(env, globals, global_offset, u, session)),
-            Box::new(eval_nbe(env, globals, global_offset, v, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, a, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, u, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, v, session)),
         ),
         Term::PLam(x, b) => Value::VPLam(
             x.clone(),
@@ -377,16 +395,16 @@ fn eval_nbe_inner(
             session,
         ),
         Term::TEquiv(a, b) => Value::VEquiv(
-            Box::new(eval_nbe(env, globals, global_offset, a, session)),
-            Box::new(eval_nbe(env, globals, global_offset, b, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, a, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, b, session)),
         ),
         Term::TMkEquiv(a, b, f, g, eta, eps) => Value::VMkEquiv(
-            Box::new(eval_nbe(env, globals, global_offset, a, session)),
-            Box::new(eval_nbe(env, globals, global_offset, b, session)),
-            Box::new(eval_nbe(env, globals, global_offset, f, session)),
-            Box::new(eval_nbe(env, globals, global_offset, g, session)),
-            Box::new(eval_nbe(env, globals, global_offset, eta, session)),
-            Box::new(eval_nbe(env, globals, global_offset, eps, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, a, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, b, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, f, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, g, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, eta, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, eps, session)),
         ),
         Term::TEquivFwd(e, x) => do_equiv_fwd(
             globals,
@@ -395,7 +413,7 @@ fn eval_nbe_inner(
             eval_nbe(env, globals, global_offset, x, session),
             session,
         ),
-        Term::TUa(e) => Value::VUa(Box::new(eval_nbe(env, globals, global_offset, e, session))),
+        Term::TUa(e) => Value::VUa(Arc::new(eval_nbe(env, globals, global_offset, e, session))),
         Term::TTransport(p, x) => {
             let p_val = eval_nbe(env, globals, global_offset, p, session);
             let x_val = eval_nbe(env, globals, global_offset, x, session);
@@ -450,9 +468,9 @@ fn eval_nbe_inner(
                 eval_nbe(env, globals, global_offset, a, session)
             } else {
                 Value::VGlue(
-                    Box::new(eval_nbe(env, globals, global_offset, a, session)),
+                    Arc::new(eval_nbe(env, globals, global_offset, a, session)),
                     phi,
-                    Box::new(te),
+                    Arc::new(te),
                 )
             }
         }
@@ -463,7 +481,7 @@ fn eval_nbe_inner(
             if phi_dnf == dnf_top() {
                 a_val
             } else {
-                Value::VPartial(Box::new(a_val), Box::new(Value::VCube(phi_dnf)))
+                Value::VPartial(Arc::new(a_val), Arc::new(Value::VCube(phi_dnf)))
             }
         }
         Term::TSystemType(sys) => {
@@ -490,8 +508,8 @@ fn eval_nbe_inner(
             } else {
                 Value::VGlueElem(
                     phi_dnf,
-                    Box::new(eval_nbe(env, globals, global_offset, t, session)),
-                    Box::new(a_val),
+                    Arc::new(eval_nbe(env, globals, global_offset, t, session)),
+                    Arc::new(a_val),
                 )
             }
         }
@@ -505,14 +523,14 @@ fn eval_nbe_inner(
                 g_val
             } else {
                 match &g_val {
-                    Value::VGlueElem(g_phi, _, a) if *g_phi == phi => *a.clone(),
-                    _ => Value::VUnglue(phi, Box::new(te), Box::new(g_val)),
+                    Value::VGlueElem(g_phi, _, a) if *g_phi == phi => a.as_ref().clone(),
+                    _ => Value::VUnglue(phi, Arc::new(te), Arc::new(g_val)),
                 }
             }
         }
         Term::TSigma(x, a, b) => Value::VSigma(
             x.clone(),
-            Box::new(eval_nbe(env, globals, global_offset, a, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, a, session)),
             Closure {
                 env: env.clone(),
                 globals: globals.clone(),
@@ -521,8 +539,8 @@ fn eval_nbe_inner(
             },
         ),
         Term::TPair(a, b) => Value::VPair(
-            Box::new(eval_nbe(env, globals, global_offset, a, session)),
-            Box::new(eval_nbe(env, globals, global_offset, b, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, a, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, b, session)),
         ),
         Term::TFst(p) => do_fst(
             globals,
@@ -564,7 +582,7 @@ fn eval_nbe_inner(
                     }
                 }
             }
-            Value::VRecordUpdate(Box::new(r_val), updates_val)
+            Value::VRecordUpdate(Arc::new(r_val), updates_val)
         }
         Term::TData(d, params) => Value::VData(
             d.clone(),
@@ -631,7 +649,7 @@ fn eval_nbe_inner(
                     .iter()
                     .map(|a| eval_nbe(env, globals, global_offset, a, session))
                     .collect();
-                Value::VPCon(data.clone(), con.clone(), args_v, Box::new(r_v))
+                Value::VPCon(data.clone(), con.clone(), args_v, Arc::new(r_v))
             }
         }
         Term::TSqCon(data, con, args, r, s) => {
@@ -670,7 +688,7 @@ fn eval_nbe_inner(
                             &sig.face_j1
                         };
                         let face_inst = subst_args(face);
-                        reduced = Some(Term::PApp(Box::new(face_inst), s.clone()));
+                        reduced = Some(Term::PApp(Arc::new(face_inst), s.clone()));
                     } else if let Some(endpoint) = value_to_endpoint(&s_v) {
                         let face = if endpoint == I::I0 {
                             &sig.face_i0
@@ -696,8 +714,8 @@ fn eval_nbe_inner(
                     args.iter()
                         .map(|a| eval_nbe(env, globals, global_offset, a, session))
                         .collect(),
-                    Box::new(r_v),
-                    Box::new(s_v),
+                    Arc::new(r_v),
+                    Arc::new(s_v),
                 )
             }
         }
@@ -738,7 +756,7 @@ fn eval_nbe_inner(
                         t = subst(k as i32, &args[arity - 1 - k], &t);
                     }
                     for iv in &ivars[1..] {
-                        t = Term::PApp(Box::new(t), Box::new(iv.clone()));
+                        t = Term::PApp(Arc::new(t), Arc::new(iv.clone()));
                     }
                     reduced = Some(t);
                 }
@@ -781,9 +799,9 @@ fn eval_nbe_inner(
         }
         Term::TBy(_) => panic!("TBy should be resolved before NbE"),
         Term::TDelay(a) => {
-            Value::VDelay(Box::new(eval_nbe(env, globals, global_offset, a, session)))
+            Value::VDelay(Arc::new(eval_nbe(env, globals, global_offset, a, session)))
         }
-        Term::TNext(a) => Value::VNext(Box::new(eval_nbe(env, globals, global_offset, a, session))),
+        Term::TNext(a) => Value::VNext(Arc::new(eval_nbe(env, globals, global_offset, a, session))),
         Term::TForce(a) => do_force(
             eval_nbe(env, globals, global_offset, a, session),
             globals,

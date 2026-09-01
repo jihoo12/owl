@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Interval Syntax
@@ -12,9 +13,9 @@ pub enum I {
     I0,
     I1,
     Var(i32),
-    Meet(Box<I>, Box<I>),
-    Join(Box<I>, Box<I>),
-    Neg(Box<I>),
+    Meet(Arc<I>, Arc<I>),
+    Join(Arc<I>, Arc<I>),
+    Neg(Arc<I>),
 }
 
 impl fmt::Display for I {
@@ -220,8 +221,8 @@ mod tests {
     #[test]
     fn meet_drops_contradictory_cube() {
         let dnf = eval_interval(&I::Meet(
-            Box::new(I::Var(0)),
-            Box::new(I::Neg(Box::new(I::Var(0)))),
+            Arc::new(I::Var(0)),
+            Arc::new(I::Neg(Arc::new(I::Var(0)))),
         ));
 
         assert_eq!(dnf, dnf_bot());
@@ -251,7 +252,7 @@ mod tests {
     #[test]
     fn leq_meet_implies_one_operand() {
         // (i0 ∧ i1) ⇒ i0
-        let meet = eval_interval(&I::Meet(Box::new(I::Var(0)), Box::new(I::Var(1))));
+        let meet = eval_interval(&I::Meet(Arc::new(I::Var(0)), Arc::new(I::Var(1))));
         let v0 = eval_interval(&I::Var(0));
         assert!(dnf_leq(&meet, &v0));
     }
@@ -260,7 +261,7 @@ mod tests {
     fn leq_join_of_implies_each() {
         // i0 ⇒ (i0 ∨ i1)
         let v0 = eval_interval(&I::Var(0));
-        let join = eval_interval(&I::Join(Box::new(I::Var(0)), Box::new(I::Var(1))));
+        let join = eval_interval(&I::Join(Arc::new(I::Var(0)), Arc::new(I::Var(1))));
         assert!(dnf_leq(&v0, &join));
     }
 
@@ -303,15 +304,15 @@ mod tests {
     #[test]
     fn equiv_meet_commutative() {
         // (i0 ∧ i1) ⇔ (i1 ∧ i0)
-        let ab = eval_interval(&I::Meet(Box::new(I::Var(0)), Box::new(I::Var(1))));
-        let ba = eval_interval(&I::Meet(Box::new(I::Var(1)), Box::new(I::Var(0))));
+        let ab = eval_interval(&I::Meet(Arc::new(I::Var(0)), Arc::new(I::Var(1))));
+        let ba = eval_interval(&I::Meet(Arc::new(I::Var(1)), Arc::new(I::Var(0))));
         assert!(dnf_equiv(&ab, &ba));
     }
 
     #[test]
     fn equiv_join_commutative() {
-        let ab = eval_interval(&I::Join(Box::new(I::Var(0)), Box::new(I::Var(1))));
-        let ba = eval_interval(&I::Join(Box::new(I::Var(1)), Box::new(I::Var(0))));
+        let ab = eval_interval(&I::Join(Arc::new(I::Var(0)), Arc::new(I::Var(1))));
+        let ba = eval_interval(&I::Join(Arc::new(I::Var(1)), Arc::new(I::Var(0))));
         assert!(dnf_equiv(&ab, &ba));
     }
 
@@ -320,13 +321,13 @@ mod tests {
     #[test]
     fn demorgan_neg_meet() {
         // ¬(i0 ∧ i1) = ¬i0 ∨ ¬i1
-        let neg_meet = eval_interval(&I::Neg(Box::new(I::Meet(
-            Box::new(I::Var(0)),
-            Box::new(I::Var(1)),
+        let neg_meet = eval_interval(&I::Neg(Arc::new(I::Meet(
+            Arc::new(I::Var(0)),
+            Arc::new(I::Var(1)),
         ))));
         let join_negs = eval_interval(&I::Join(
-            Box::new(I::Neg(Box::new(I::Var(0)))),
-            Box::new(I::Neg(Box::new(I::Var(1)))),
+            Arc::new(I::Neg(Arc::new(I::Var(0)))),
+            Arc::new(I::Neg(Arc::new(I::Var(1)))),
         ));
         assert!(dnf_equiv(&neg_meet, &join_negs));
     }
@@ -334,13 +335,13 @@ mod tests {
     #[test]
     fn demorgan_neg_join() {
         // ¬(i0 ∨ i1) = ¬i0 ∧ ¬i1
-        let neg_join = eval_interval(&I::Neg(Box::new(I::Join(
-            Box::new(I::Var(0)),
-            Box::new(I::Var(1)),
+        let neg_join = eval_interval(&I::Neg(Arc::new(I::Join(
+            Arc::new(I::Var(0)),
+            Arc::new(I::Var(1)),
         ))));
         let meet_negs = eval_interval(&I::Meet(
-            Box::new(I::Neg(Box::new(I::Var(0)))),
-            Box::new(I::Neg(Box::new(I::Var(1)))),
+            Arc::new(I::Neg(Arc::new(I::Var(0)))),
+            Arc::new(I::Neg(Arc::new(I::Var(1)))),
         ));
         assert!(dnf_equiv(&neg_join, &meet_negs));
     }
@@ -351,7 +352,7 @@ mod tests {
     fn neg_idempotent() {
         // ¬¬i0 = i0
         let v0 = eval_interval(&I::Var(0));
-        let double_neg = eval_interval(&I::Neg(Box::new(I::Neg(Box::new(I::Var(0))))));
+        let double_neg = eval_interval(&I::Neg(Arc::new(I::Neg(Arc::new(I::Var(0))))));
         assert!(dnf_equiv(&v0, &double_neg));
     }
 
@@ -362,8 +363,8 @@ mod tests {
         // i0 ∧ (i0 ∨ i1) = i0
         let v0 = eval_interval(&I::Var(0));
         let result = eval_interval(&I::Meet(
-            Box::new(I::Var(0)),
-            Box::new(I::Join(Box::new(I::Var(0)), Box::new(I::Var(1)))),
+            Arc::new(I::Var(0)),
+            Arc::new(I::Join(Arc::new(I::Var(0)), Arc::new(I::Var(1)))),
         ));
         assert!(dnf_equiv(&v0, &result));
     }
@@ -372,8 +373,8 @@ mod tests {
     fn absorption_join_meet() {
         // i0 ∨ (i0 ∧ i1) = i0
         let result = eval_interval(&I::Join(
-            Box::new(I::Var(0)),
-            Box::new(I::Meet(Box::new(I::Var(0)), Box::new(I::Var(1)))),
+            Arc::new(I::Var(0)),
+            Arc::new(I::Meet(Arc::new(I::Var(0)), Arc::new(I::Var(1)))),
         ));
         let v0 = eval_interval(&I::Var(0));
         assert!(dnf_equiv(&v0, &result));

@@ -8,7 +8,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ptr;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use crate::cubical::interval::I;
 use crate::cubical::syntax::{Datatype, Name, Term};
@@ -18,7 +18,7 @@ use crate::cubical::typechecker::errors::Pos;
 pub use crate::cubical::nbe::Value;
 
 /// A shared reference to the global definition values.
-pub type Globals = Rc<RefCell<Vec<Value>>>;
+pub type Globals = Arc<Mutex<Vec<Value>>>;
 
 /// All implicit state consolidated into one struct.
 pub struct Session {

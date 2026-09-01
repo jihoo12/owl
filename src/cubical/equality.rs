@@ -6,6 +6,7 @@
 //   crate::eval::{is_top_dnf, is_bot_dnf}
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::cubical::nbe::{meta_mentions, nbe_eval, nbe_eval_ctx, try_solve_meta};
 use crate::cubical::session::Session;
@@ -246,7 +247,7 @@ fn infer_ty(ctx: &Ctx, t: &Term, session: &mut Session) -> Option<Term> {
         },
         Term::TElim(motive, _, scrut) => Some(nbe_eval_ctx(
             ctx.len(),
-            &Term::TApp(Box::new((**motive).clone()), Box::new((**scrut).clone())),
+            &Term::TApp(Arc::new((**motive).clone()), Arc::new((**scrut).clone())),
             session,
         )),
         _ => None,
@@ -279,7 +280,7 @@ fn infer_neutral_ty(ctx: &Ctx, t: &Term, session: &mut Session) -> Option<Term> 
         },
         Term::TElim(motive, _, scrut) => Some(nbe_eval_ctx(
             ctx.len(),
-            &Term::TApp(Box::new((**motive).clone()), Box::new((**scrut).clone())),
+            &Term::TApp(Arc::new((**motive).clone()), Arc::new((**scrut).clone())),
             session,
         )),
         _ => None,
@@ -305,7 +306,7 @@ pub fn infer_lam_dom(ctx: &Ctx, neutral: &Term, session: &mut Session) -> Option
 fn build_papp_chain(d: &str, c: &str, args: &[Term], first_ivar: Option<&Term>) -> Term {
     let base = Term::TCon(d.to_string(), c.to_string(), args.to_vec());
     match first_ivar {
-        Some(r) => Term::PApp(Box::new(base), Box::new(r.clone())),
+        Some(r) => Term::PApp(Arc::new(base), Arc::new(r.clone())),
         None => base,
     }
 }
@@ -442,7 +443,7 @@ fn eta_eq_uncached(
                     &ctx2,
                     &nbe_eval_ctx(
                         ctx2.len(),
-                        &Term::TApp(Box::new(shift(1, 0, t1)), Box::new(Term::TVar(0))),
+                        &Term::TApp(Arc::new(shift(1, 0, t1)), Arc::new(Term::TVar(0))),
                         session,
                     ),
                     &nbe_eval_ctx(ctx2.len(), b2, session),
@@ -466,7 +467,7 @@ fn eta_eq_uncached(
                     &nbe_eval_ctx(ctx2.len(), b1, session),
                     &nbe_eval_ctx(
                         ctx2.len(),
-                        &Term::TApp(Box::new(shift(1, 0, t2)), Box::new(Term::TVar(0))),
+                        &Term::TApp(Arc::new(shift(1, 0, t2)), Arc::new(Term::TVar(0))),
                         session,
                     ),
                     memo,
@@ -503,7 +504,7 @@ fn eta_eq_uncached(
             &ctx2,
             &nbe_eval_ctx(
                 ctx2.len(),
-                &Term::PApp(Box::new(shift(1, 0, t1)), Box::new(Term::TVar(0))),
+                &Term::PApp(Arc::new(shift(1, 0, t1)), Arc::new(Term::TVar(0))),
                 session,
             ),
             &nbe_eval_ctx(ctx2.len(), b2, session),
@@ -522,7 +523,7 @@ fn eta_eq_uncached(
             &nbe_eval_ctx(ctx2.len(), b1, session),
             &nbe_eval_ctx(
                 ctx2.len(),
-                &Term::PApp(Box::new(shift(1, 0, t2)), Box::new(Term::TVar(0))),
+                &Term::PApp(Arc::new(shift(1, 0, t2)), Arc::new(Term::TVar(0))),
                 session,
             ),
             memo,
@@ -563,25 +564,25 @@ fn eta_eq_uncached(
     }
     if let (Term::TSqCon(d1, c1, args1, r1, s1), _) = (t1, t2) {
         let papp_form = build_papp_chain(d1, c1, args1, Some(r1));
-        let papp_form = Term::PApp(Box::new(papp_form), Box::new((**s1).clone()));
+        let papp_form = Term::PApp(Arc::new(papp_form), Arc::new((**s1).clone()));
         return eta_eq_memo(fuel, ctx, &papp_form, t2, memo, session);
     }
     if let (_, Term::TSqCon(d2, c2, args2, r2, s2)) = (t1, t2) {
         let papp_form = build_papp_chain(d2, c2, args2, Some(r2));
-        let papp_form = Term::PApp(Box::new(papp_form), Box::new((**s2).clone()));
+        let papp_form = Term::PApp(Arc::new(papp_form), Arc::new((**s2).clone()));
         return eta_eq_memo(fuel, ctx, t1, &papp_form, memo, session);
     }
     if let (Term::TCellCon(d1, c1, args1, ivars1), _) = (t1, t2) {
         let papp_form = build_papp_chain(d1, c1, args1, None);
         let papp_form = ivars1.iter().fold(papp_form, |f, iv| {
-            Term::PApp(Box::new(f), Box::new(iv.clone()))
+            Term::PApp(Arc::new(f), Arc::new(iv.clone()))
         });
         return eta_eq_memo(fuel, ctx, &papp_form, t2, memo, session);
     }
     if let (_, Term::TCellCon(d2, c2, args2, ivars2)) = (t1, t2) {
         let papp_form = build_papp_chain(d2, c2, args2, None);
         let papp_form = ivars2.iter().fold(papp_form, |f, iv| {
-            Term::PApp(Box::new(f), Box::new(iv.clone()))
+            Term::PApp(Arc::new(f), Arc::new(iv.clone()))
         });
         return eta_eq_memo(fuel, ctx, t1, &papp_form, memo, session);
     }
@@ -598,14 +599,14 @@ fn eta_eq_uncached(
     if let (Term::TPath(ty1, u1, v1), Term::TPath(ty2, u2, v2)) = (t1, t2) {
         // Normalize type families: if one is PLam and the other isn't,
         // wrap the non-PLam side in a constant PLam so they structurally match.
-        let (ty1_eff, ty2_eff): (Box<Term>, Box<Term>) = match (ty1.as_ref(), ty2.as_ref()) {
+        let (ty1_eff, ty2_eff): (Arc<Term>, Arc<Term>) = match (ty1.as_ref(), ty2.as_ref()) {
             (Term::PLam(_, _), Term::PLam(_, _)) => ((*ty1).clone(), (*ty2).clone()),
             (Term::PLam(_, _), _) => (
                 (*ty1).clone(),
-                Box::new(Term::PLam("_".to_string(), Box::new((**ty2).clone()))),
+                Arc::new(Term::PLam("_".to_string(), Arc::new((**ty2).clone()))),
             ),
             (_, Term::PLam(_, _)) => (
-                Box::new(Term::PLam("_".to_string(), Box::new((**ty1).clone()))),
+                Arc::new(Term::PLam("_".to_string(), Arc::new((**ty1).clone()))),
                 (*ty2).clone(),
             ),
             _ => ((*ty1).clone(), (*ty2).clone()),
@@ -644,7 +645,7 @@ fn eta_eq_uncached(
                 fuel - 1,
                 ctx,
                 a1,
-                &nbe_eval_ctx(ctx.len(), &Term::TFst(Box::new(t2.clone())), session),
+                &nbe_eval_ctx(ctx.len(), &Term::TFst(Arc::new(t2.clone())), session),
                 memo,
                 session,
             ),
@@ -652,7 +653,7 @@ fn eta_eq_uncached(
                 fuel - 1,
                 ctx,
                 b1,
-                &nbe_eval_ctx(ctx.len(), &Term::TSnd(Box::new(t2.clone())), session),
+                &nbe_eval_ctx(ctx.len(), &Term::TSnd(Arc::new(t2.clone())), session),
                 memo,
                 session,
             ),
@@ -663,7 +664,7 @@ fn eta_eq_uncached(
             eta_eq_memo(
                 fuel - 1,
                 ctx,
-                &nbe_eval_ctx(ctx.len(), &Term::TFst(Box::new(t1.clone())), session),
+                &nbe_eval_ctx(ctx.len(), &Term::TFst(Arc::new(t1.clone())), session),
                 a2,
                 memo,
                 session,
@@ -671,7 +672,7 @@ fn eta_eq_uncached(
             eta_eq_memo(
                 fuel - 1,
                 ctx,
-                &nbe_eval_ctx(ctx.len(), &Term::TSnd(Box::new(t1.clone())), session),
+                &nbe_eval_ctx(ctx.len(), &Term::TSnd(Arc::new(t1.clone())), session),
                 b2,
                 memo,
                 session,

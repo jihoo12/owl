@@ -4,9 +4,8 @@
 //! documented in `mod.rs`.
 #![allow(clippy::enum_variant_names)]
 
-use std::cell::RefCell;
 use std::fmt;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use super::eval::{eval_nbe, subst_interval_var};
 use super::quote::quote;
@@ -24,7 +23,7 @@ pub struct Scope {
     /// Most recently bound values (innermost at index 0).
     local: Vec<Value>,
     /// Older bindings shared via Rc.
-    parent: Option<Rc<Scope>>,
+    parent: Option<Arc<Scope>>,
     /// Total number of bindings.
     len: usize,
 }
@@ -42,7 +41,7 @@ impl Scope {
     pub fn extend(&self, v: Value) -> Scope {
         Scope {
             local: vec![v],
-            parent: Some(Rc::new(self.clone())),
+            parent: Some(Arc::new(self.clone())),
             len: self.len + 1,
         }
     }
@@ -55,7 +54,7 @@ impl Scope {
         let vlen = values.len();
         Scope {
             local: values,
-            parent: Some(Rc::new(self.clone())),
+            parent: Some(Arc::new(self.clone())),
             len: self.len + vlen,
         }
     }
@@ -96,7 +95,7 @@ pub type DNFSystem = Vec<(DNF, Value)>;
 /// A shared reference to the global definition values.
 /// All closures created during evaluation share the same `Globals` so that
 /// recursive self-references resolve correctly after placeholder replacement.
-pub type Globals = Rc<RefCell<Vec<Value>>>;
+pub type Globals = Arc<Mutex<Vec<Value>>>;
 
 pub(super) fn value_str(
     globals: &Globals,
@@ -115,63 +114,63 @@ pub(super) fn value_str(
 pub enum Value {
     VNeutral(Neutral),
     VLam(Name, Closure),
-    VApp(Box<Value>, Box<Value>),
-    VPi(Name, Box<Value>, Closure, bool),
-    VSigma(Name, Box<Value>, Closure),
-    VPair(Box<Value>, Box<Value>),
-    VPath(Box<Value>, Box<Value>, Box<Value>),
+    VApp(Arc<Value>, Arc<Value>),
+    VPi(Name, Arc<Value>, Closure, bool),
+    VSigma(Name, Arc<Value>, Closure),
+    VPair(Arc<Value>, Arc<Value>),
+    VPath(Arc<Value>, Arc<Value>, Arc<Value>),
     VPLam(Name, IClosure),
-    VPApp(Box<Value>, Box<Value>),
+    VPApp(Arc<Value>, Arc<Value>),
     VUniv(Level),
     VProp,
     VSSet,
-    VLift(Box<Value>, Level),
-    VLower(Box<Value>),
+    VLift(Arc<Value>, Level),
+    VLower(Arc<Value>),
     VIntervalTy,
     VInterval(I),
     VIntervalVar(usize),
     VCube(DNF),
     VData(Name, Vec<Value>),
     VCon(Name, Name, Vec<Value>),
-    VPCon(Name, Name, Vec<Value>, Box<Value>),
-    VSqCon(Name, Name, Vec<Value>, Box<Value>, Box<Value>),
+    VPCon(Name, Name, Vec<Value>, Arc<Value>),
+    VSqCon(Name, Name, Vec<Value>, Arc<Value>, Arc<Value>),
     /// N-dimensional cell constructor value: `VCellCon(dt, con, args, ivars)`.
     VCellCon(Name, Name, Vec<Value>, Vec<Value>),
     /// Stuck eliminator. The trailing `Scope` is the evaluation environment
     /// at the eliminator's creation site; it is used when re-quoting the
     /// stored raw case bodies (see `quote_case_body`).
-    VElim(Box<Value>, Vec<ElimCase>, Box<Value>, Scope, usize),
-    VGlue(Box<Value>, DNF, Box<Value>),
-    VPartial(Box<Value>, Box<Value>),
+    VElim(Arc<Value>, Vec<ElimCase>, Arc<Value>, Scope, usize),
+    VGlue(Arc<Value>, DNF, Arc<Value>),
+    VPartial(Arc<Value>, Arc<Value>),
     VSystemType(DNFSystem),
-    VGlueElem(DNF, Box<Value>, Box<Value>),
-    VUnglue(DNF, Box<Value>, Box<Value>),
-    VEquiv(Box<Value>, Box<Value>),
+    VGlueElem(DNF, Arc<Value>, Arc<Value>),
+    VUnglue(DNF, Arc<Value>, Arc<Value>),
+    VEquiv(Arc<Value>, Arc<Value>),
     VMkEquiv(
-        Box<Value>,
-        Box<Value>,
-        Box<Value>,
-        Box<Value>,
-        Box<Value>,
-        Box<Value>,
+        Arc<Value>,
+        Arc<Value>,
+        Arc<Value>,
+        Arc<Value>,
+        Arc<Value>,
+        Arc<Value>,
     ),
-    VEquivFwd(Box<Value>, Box<Value>),
-    VUa(Box<Value>),
-    VTransport(Box<Value>, Box<Value>),
+    VEquivFwd(Arc<Value>, Arc<Value>),
+    VUa(Arc<Value>),
+    VTransport(Arc<Value>, Arc<Value>),
     /// Generalized transport: `VTransp(family, direction, base)`.
     /// Stuck when `direction` is a non-concrete interval variable.
-    VTransp(Box<Value>, Box<Value>, Box<Value>),
-    VHComp(Box<Value>, DNFSystem, Box<Value>),
-    VComp(Box<Value>, DNFSystem, Box<Value>),
-    VFill(Box<Value>, DNFSystem, Box<Value>),
-    VHFill(Box<Value>, DNFSystem, Box<Value>),
-    VFst(Box<Value>),
-    VSnd(Box<Value>),
-    VProj(Name, Box<Value>),
-    VRecordUpdate(Box<Value>, Vec<(Name, Value)>),
-    VDelay(Box<Value>),
-    VNext(Box<Value>),
-    VForce(Box<Value>),
+    VTransp(Arc<Value>, Arc<Value>, Arc<Value>),
+    VHComp(Arc<Value>, DNFSystem, Arc<Value>),
+    VComp(Arc<Value>, DNFSystem, Arc<Value>),
+    VFill(Arc<Value>, DNFSystem, Arc<Value>),
+    VHFill(Arc<Value>, DNFSystem, Arc<Value>),
+    VFst(Arc<Value>),
+    VSnd(Arc<Value>),
+    VProj(Name, Arc<Value>),
+    VRecordUpdate(Arc<Value>, Vec<(Name, Value)>),
+    VDelay(Arc<Value>),
+    VNext(Arc<Value>),
+    VForce(Arc<Value>),
 }
 
 #[derive(Debug, Clone)]
@@ -207,9 +206,9 @@ pub enum Frontier {
     /// given endpoint (`I0` or `I1`).
     IntervalEq(usize, I),
     /// Computes when either sub-frontier fires.
-    Or(Box<Frontier>, Box<Frontier>),
+    Or(Arc<Frontier>, Arc<Frontier>),
     /// Computes when both sub-frontiers fire.
-    And(Box<Frontier>, Box<Frontier>),
+    And(Arc<Frontier>, Arc<Frontier>),
 }
 
 impl fmt::Display for Frontier {
@@ -247,7 +246,7 @@ impl Frontier {
         match (&self, &other) {
             (Frontier::False, _) => other,
             (_, Frontier::False) => self,
-            _ => Frontier::Or(Box::new(self), Box::new(other)),
+            _ => Frontier::Or(Arc::new(self), Arc::new(other)),
         }
     }
 
@@ -255,7 +254,7 @@ impl Frontier {
     pub fn and(self, other: Frontier) -> Frontier {
         match (&self, &other) {
             (Frontier::False, _) | (_, Frontier::False) => Frontier::False,
-            _ => Frontier::And(Box::new(self), Box::new(other)),
+            _ => Frontier::And(Arc::new(self), Arc::new(other)),
         }
     }
 
@@ -278,24 +277,24 @@ pub struct Neutral {
 #[derive(Debug, Clone)]
 pub enum NeutralInner {
     NVar(usize),
-    NApp(Box<Neutral>, Box<Value>),
-    NPApp(Box<Neutral>, Box<Value>),
-    NSqApp(Box<Neutral>, Box<Value>, Box<Value>),
+    NApp(Arc<Neutral>, Arc<Value>),
+    NPApp(Arc<Neutral>, Arc<Value>),
+    NSqApp(Arc<Neutral>, Arc<Value>, Arc<Value>),
     /// N-dimensional cell application: `NCellApp(neutral, [r1, r2, ..., rn])`.
-    NCellApp(Box<Neutral>, Vec<Value>),
-    NFst(Box<Neutral>),
-    NSnd(Box<Neutral>),
-    NElim(Box<Value>, Vec<ElimCase>, Box<Neutral>, Scope, usize),
-    NTransport(Box<Value>, Box<Value>),
-    NTransp(Box<Value>, Box<Value>, Box<Value>),
-    NHComp(Box<Value>, DNFSystem, Box<Value>),
-    NComp(Box<Value>, DNFSystem, Box<Value>),
-    NFill(Box<Value>, DNFSystem, Box<Value>),
-    NHFill(Box<Value>, DNFSystem, Box<Value>),
+    NCellApp(Arc<Neutral>, Vec<Value>),
+    NFst(Arc<Neutral>),
+    NSnd(Arc<Neutral>),
+    NElim(Arc<Value>, Vec<ElimCase>, Arc<Neutral>, Scope, usize),
+    NTransport(Arc<Value>, Arc<Value>),
+    NTransp(Arc<Value>, Arc<Value>, Arc<Value>),
+    NHComp(Arc<Value>, DNFSystem, Arc<Value>),
+    NComp(Arc<Value>, DNFSystem, Arc<Value>),
+    NFill(Arc<Value>, DNFSystem, Arc<Value>),
+    NHFill(Arc<Value>, DNFSystem, Arc<Value>),
     NMeta(i32),
-    NForce(Box<Neutral>),
+    NForce(Arc<Neutral>),
     /// Record field projection stuck on a neutral record value.
-    NProj(Box<Neutral>, Name),
+    NProj(Arc<Neutral>, Name),
 }
 
 impl Neutral {
@@ -350,7 +349,7 @@ impl Neutral {
     /// Frontier = f's frontier (the application computes when f computes).
     pub fn napp(f: Neutral, a: Value) -> Self {
         let frontier = f.frontier.clone();
-        Neutral::new(NeutralInner::NApp(Box::new(f), Box::new(a)), frontier)
+        Neutral::new(NeutralInner::NApp(Arc::new(f), Arc::new(a)), frontier)
     }
 
     /// Path application stuck on neutral `p` applied to interval `r`.
@@ -358,7 +357,7 @@ impl Neutral {
     /// OR when r is a concrete endpoint.
     pub fn npapp(p: Neutral, r: Value, r_frontier: Frontier) -> Self {
         let frontier = p.frontier().clone().or(r_frontier);
-        Neutral::new(NeutralInner::NPApp(Box::new(p), Box::new(r)), frontier)
+        Neutral::new(NeutralInner::NPApp(Arc::new(p), Arc::new(r)), frontier)
     }
 
     /// Square application stuck on neutral `p` applied to intervals `r`, `s`.
@@ -371,7 +370,7 @@ impl Neutral {
     ) -> Self {
         let frontier = p.frontier().clone().or(r_frontier).or(s_frontier);
         Neutral::new(
-            NeutralInner::NSqApp(Box::new(p), Box::new(r), Box::new(s)),
+            NeutralInner::NSqApp(Arc::new(p), Arc::new(r), Arc::new(s)),
             frontier,
         )
     }
@@ -382,19 +381,19 @@ impl Neutral {
         for f in ivars_frontiers {
             frontier = frontier.or(f);
         }
-        Neutral::new(NeutralInner::NCellApp(Box::new(p), ivars), frontier)
+        Neutral::new(NeutralInner::NCellApp(Arc::new(p), ivars), frontier)
     }
 
     /// Fst projection stuck on neutral `p`.
     pub fn nfst(p: Neutral) -> Self {
         let frontier = p.frontier().clone();
-        Neutral::new(NeutralInner::NFst(Box::new(p)), frontier)
+        Neutral::new(NeutralInner::NFst(Arc::new(p)), frontier)
     }
 
     /// Snd projection stuck on neutral `p`.
     pub fn nsnd(p: Neutral) -> Self {
         let frontier = p.frontier().clone();
-        Neutral::new(NeutralInner::NSnd(Box::new(p)), frontier)
+        Neutral::new(NeutralInner::NSnd(Arc::new(p)), frontier)
     }
 
     /// Elimination stuck on neutral scrutinee.
@@ -408,7 +407,7 @@ impl Neutral {
     ) -> Self {
         let frontier = scrut.frontier().clone();
         Neutral::new(
-            NeutralInner::NElim(Box::new(motive), cases, Box::new(scrut), env, go),
+            NeutralInner::NElim(Arc::new(motive), cases, Arc::new(scrut), env, go),
             frontier,
         )
     }
@@ -416,7 +415,7 @@ impl Neutral {
     /// Transport stuck on a neutral family.
     pub fn ntransport(fam: Value, x: Value) -> Self {
         Neutral::new(
-            NeutralInner::NTransport(Box::new(fam), Box::new(x)),
+            NeutralInner::NTransport(Arc::new(fam), Arc::new(x)),
             Frontier::False,
         )
     }
@@ -424,7 +423,7 @@ impl Neutral {
     /// Generalized transport stuck on a neutral family or direction.
     pub fn ntransp(fam: Value, dir: Value, x: Value) -> Self {
         Neutral::new(
-            NeutralInner::NTransp(Box::new(fam), Box::new(dir), Box::new(x)),
+            NeutralInner::NTransp(Arc::new(fam), Arc::new(dir), Arc::new(x)),
             Frontier::False,
         )
     }
@@ -432,7 +431,7 @@ impl Neutral {
     /// hcomp stuck.
     pub fn nhcomp(a: Value, sys: DNFSystem, base: Value) -> Self {
         Neutral::new(
-            NeutralInner::NHComp(Box::new(a), sys, Box::new(base)),
+            NeutralInner::NHComp(Arc::new(a), sys, Arc::new(base)),
             Frontier::False,
         )
     }
@@ -440,7 +439,7 @@ impl Neutral {
     /// comp stuck.
     pub fn ncomp(a: Value, sys: DNFSystem, base: Value) -> Self {
         Neutral::new(
-            NeutralInner::NComp(Box::new(a), sys, Box::new(base)),
+            NeutralInner::NComp(Arc::new(a), sys, Arc::new(base)),
             Frontier::False,
         )
     }
@@ -448,7 +447,7 @@ impl Neutral {
     /// fill stuck.
     pub fn nfill(a: Value, sys: DNFSystem, base: Value) -> Self {
         Neutral::new(
-            NeutralInner::NFill(Box::new(a), sys, Box::new(base)),
+            NeutralInner::NFill(Arc::new(a), sys, Arc::new(base)),
             Frontier::False,
         )
     }
@@ -456,7 +455,7 @@ impl Neutral {
     /// hfill stuck.
     pub fn nhfill(a: Value, sys: DNFSystem, base: Value) -> Self {
         Neutral::new(
-            NeutralInner::NHFill(Box::new(a), sys, Box::new(base)),
+            NeutralInner::NHFill(Arc::new(a), sys, Arc::new(base)),
             Frontier::False,
         )
     }
@@ -464,13 +463,13 @@ impl Neutral {
     /// Force stuck on neutral `n`.
     pub fn nforce(n: Neutral) -> Self {
         let frontier = n.frontier().clone();
-        Neutral::new(NeutralInner::NForce(Box::new(n)), frontier)
+        Neutral::new(NeutralInner::NForce(Arc::new(n)), frontier)
     }
 
     /// Record field projection stuck on neutral `n`.
     pub fn nproj(n: Neutral, field: Name) -> Self {
         let frontier = n.frontier().clone();
-        Neutral::new(NeutralInner::NProj(Box::new(n), field), frontier)
+        Neutral::new(NeutralInner::NProj(Arc::new(n), field), frontier)
     }
 
     /// Helper to compute the frontier for interval variable `r`.
@@ -478,8 +477,8 @@ impl Neutral {
     pub fn interval_frontier(r: &Value) -> Frontier {
         match r {
             Value::VIntervalVar(level) => Frontier::Or(
-                Box::new(Frontier::IntervalEq(*level, I::I0)),
-                Box::new(Frontier::IntervalEq(*level, I::I1)),
+                Arc::new(Frontier::IntervalEq(*level, I::I0)),
+                Arc::new(Frontier::IntervalEq(*level, I::I1)),
             ),
             _ => Frontier::False,
         }
@@ -579,8 +578,8 @@ mod tests {
     #[test]
     fn frontier_or() {
         let f = Frontier::Or(
-            Box::new(Frontier::IntervalEq(0, I::I0)),
-            Box::new(Frontier::IntervalEq(0, I::I1)),
+            Arc::new(Frontier::IntervalEq(0, I::I0)),
+            Arc::new(Frontier::IntervalEq(0, I::I1)),
         );
         // Either i0=0 or i0=1 → satisfied when either holds
         assert!(f.is_satisfied(&[Some(I::I0)]));
@@ -593,8 +592,8 @@ mod tests {
     #[test]
     fn frontier_and() {
         let f = Frontier::And(
-            Box::new(Frontier::IntervalEq(0, I::I0)),
-            Box::new(Frontier::IntervalEq(1, I::I1)),
+            Arc::new(Frontier::IntervalEq(0, I::I0)),
+            Arc::new(Frontier::IntervalEq(1, I::I1)),
         );
         // Both must hold
         assert!(f.is_satisfied(&[Some(I::I0), Some(I::I1)]));
@@ -606,8 +605,8 @@ mod tests {
     #[test]
     fn frontier_or_short_circuits() {
         let f = Frontier::Or(
-            Box::new(Frontier::IntervalEq(0, I::I0)),
-            Box::new(Frontier::False),
+            Arc::new(Frontier::IntervalEq(0, I::I0)),
+            Arc::new(Frontier::False),
         );
         // First branch fires
         assert!(f.is_satisfied(&[Some(I::I0)]));
@@ -618,8 +617,8 @@ mod tests {
     #[test]
     fn frontier_and_short_circuits() {
         let f = Frontier::And(
-            Box::new(Frontier::False),
-            Box::new(Frontier::IntervalEq(0, I::I0)),
+            Arc::new(Frontier::False),
+            Arc::new(Frontier::IntervalEq(0, I::I0)),
         );
         // First branch is False → entire And is False
         assert!(!f.is_satisfied(&[Some(I::I0)]));
@@ -665,8 +664,8 @@ mod tests {
         let pp = Neutral::npapp(p, r, r_frontier);
         // Frontier should be False ∨ (i1=0 ∨ i1=1) = (i1=0 ∨ i1=1)
         let expected = Frontier::Or(
-            Box::new(Frontier::IntervalEq(1, I::I0)),
-            Box::new(Frontier::IntervalEq(1, I::I1)),
+            Arc::new(Frontier::IntervalEq(1, I::I0)),
+            Arc::new(Frontier::IntervalEq(1, I::I1)),
         );
         assert_eq!(pp.frontier(), &expected);
     }
@@ -686,8 +685,8 @@ mod tests {
         let v = Value::VIntervalVar(3);
         let f = Neutral::interval_frontier(&v);
         let expected = Frontier::Or(
-            Box::new(Frontier::IntervalEq(3, I::I0)),
-            Box::new(Frontier::IntervalEq(3, I::I1)),
+            Arc::new(Frontier::IntervalEq(3, I::I0)),
+            Arc::new(Frontier::IntervalEq(3, I::I1)),
         );
         assert_eq!(f, expected);
     }
@@ -716,8 +715,8 @@ mod tests {
         let elim = Neutral::nelim(Value::VUniv(0), vec![], scrut, Scope::empty(), 0);
         // Elim inherits scrutinee's frontier
         let expected = Frontier::Or(
-            Box::new(Frontier::IntervalEq(1, I::I0)),
-            Box::new(Frontier::IntervalEq(1, I::I1)),
+            Arc::new(Frontier::IntervalEq(1, I::I0)),
+            Arc::new(Frontier::IntervalEq(1, I::I1)),
         );
         assert_eq!(elim.frontier(), &expected);
     }

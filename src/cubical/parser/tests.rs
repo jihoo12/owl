@@ -4,6 +4,7 @@ use super::*;
 use crate::cubical::interval::I;
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Tactic, Term, show_term};
+use std::sync::Arc;
 
 fn run_str_test(
     src: &str,
@@ -23,7 +24,7 @@ fn parses_lambda_identity() {
     with_session(|session| {
         assert_eq!(
             parse_term("fun x => x", session).unwrap(),
-            Term::TAbs("x".to_string(), Box::new(Term::TVar(0)))
+            Term::TAbs("x".to_string(), Arc::new(Term::TVar(0)))
         );
     });
 }
@@ -35,8 +36,8 @@ fn parses_dependent_pi() {
             parse_term("∀ (x : U0), x", session).unwrap(),
             Term::TPi(
                 "x".to_string(),
-                Box::new(Term::TUniv(0)),
-                Box::new(Term::TVar(0)),
+                Arc::new(Term::TUniv(0)),
+                Arc::new(Term::TVar(0)),
                 false
             )
         );
@@ -51,15 +52,15 @@ fn parses_forall_after_arrow() {
         match term {
             Term::TPi(dom_b, dom, cod, _) => {
                 assert_eq!(dom_b, "_");
-                assert_eq!(*dom, Term::TUniv(0));
-                match *cod {
+                assert_eq!(&*dom, &Term::TUniv(0));
+                match &*cod {
                     Term::TPi(x, bx, body, _) => {
                         assert_eq!(x, "x");
-                        assert_eq!(*bx, Term::TUniv(1));
-                        match *body {
+                        assert_eq!(&**bx, &Term::TUniv(1));
+                        match &**body {
                             Term::TPi(_, bd, b, _) => {
-                                assert_eq!(*bd, Term::TUniv(1));
-                                assert_eq!(*b, Term::TUniv(0));
+                                assert_eq!(&**bd, &Term::TUniv(1));
+                                assert_eq!(&**b, &Term::TUniv(0));
                             }
                             _ => panic!("expected inner Pi, got {:?}", body),
                         }
@@ -77,7 +78,7 @@ fn parses_path_lambda() {
     with_session(|session| {
         assert_eq!(
             parse_term("<i> i0", session).unwrap(),
-            Term::PLam("i".to_string(), Box::new(Term::TInterval(I::I0)))
+            Term::PLam("i".to_string(), Arc::new(Term::TInterval(I::I0)))
         );
     });
 }
@@ -90,7 +91,7 @@ fn parses_path_application() {
         let term = parser.parse_term().unwrap();
         assert_eq!(
             term,
-            Term::PApp(Box::new(Term::TVar(0)), Box::new(Term::TInterval(I::I0)))
+            Term::PApp(Arc::new(Term::TVar(0)), Arc::new(Term::TInterval(I::I0)))
         );
     });
 }
@@ -228,11 +229,11 @@ fn parses_parameterized_module_declaration() {
                     ty,
                     &Term::TPi(
                         "A".into(),
-                        Box::new(Term::TUniv(0)),
-                        Box::new(Term::TPi(
+                        Arc::new(Term::TUniv(0)),
+                        Arc::new(Term::TPi(
                             "_".into(),
-                            Box::new(Term::TVar(0)),
-                            Box::new(Term::TVar(1)),
+                            Arc::new(Term::TVar(0)),
+                            Arc::new(Term::TVar(1)),
                             false
                         )),
                         false
@@ -242,7 +243,7 @@ fn parses_parameterized_module_declaration() {
                     val,
                     &Term::TAbs(
                         "A".into(),
-                        Box::new(Term::TAbs("x".into(), Box::new(Term::TVar(0))))
+                        Arc::new(Term::TAbs("x".into(), Arc::new(Term::TVar(0))))
                     )
                 );
             }
@@ -575,7 +576,7 @@ fn parses_match() {
                 assert_eq!(*scrut, Term::TVar(3));
                 assert_eq!(
                     *motive,
-                    Term::TAbs("n".to_string(), Box::new(Term::TVar(3)))
+                    Term::TAbs("n".to_string(), Arc::new(Term::TVar(3)))
                 );
                 assert_eq!(cases.len(), 2);
                 assert_eq!(cases[0].con, "zero");
@@ -599,7 +600,7 @@ fn parses_match_dependent_return_type() {
             Term::TElim(motive, _, _) => {
                 assert_eq!(
                     *motive,
-                    Term::TAbs("n".to_string(), Box::new(Term::TVar(0)))
+                    Term::TAbs("n".to_string(), Arc::new(Term::TVar(0)))
                 );
             }
             _ => panic!("expected match to desugar to eliminator"),
@@ -641,8 +642,8 @@ fn parses_let() {
         assert_eq!(
             term,
             Term::TApp(
-                Box::new(Term::TAbs("x".to_string(), Box::new(Term::TVar(0)))),
-                Box::new(Term::TVar(0))
+                Arc::new(Term::TAbs("x".to_string(), Arc::new(Term::TVar(0)))),
+                Arc::new(Term::TVar(0))
             )
         );
     });

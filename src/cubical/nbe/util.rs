@@ -1,7 +1,6 @@
 //! Small helpers shared across the nbe submodules.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use super::elim::do_apply;
 use super::quote::quote;
@@ -22,7 +21,7 @@ pub(super) fn do_equiv_fwd(
 ) -> Value {
     match e {
         Value::VMkEquiv(_, _, f, _, _, _) => {
-            let result = do_apply(globals, global_offset, *f, x, session);
+            let result = do_apply(globals, global_offset, f.as_ref().clone(), x, session);
             record_step(
                 "equiv-fwd".into(),
                 "equivFwd (mkEquiv _ _ f _ _ _) _".into(),
@@ -30,7 +29,7 @@ pub(super) fn do_equiv_fwd(
             );
             result
         }
-        other => Value::VEquivFwd(Box::new(other), Box::new(x)),
+        other => Value::VEquivFwd(Arc::new(other), Arc::new(x)),
     }
 }
 
@@ -38,16 +37,16 @@ pub(super) fn do_equiv_fwd(
 
 pub(super) fn equiv_dom_value(v: Value) -> Value {
     match v {
-        Value::VMkEquiv(a, _, _, _, _, _) | Value::VEquiv(a, _) => *a,
-        Value::VPair(a, _) => *a,
+        Value::VMkEquiv(a, _, _, _, _, _) | Value::VEquiv(a, _) => a.as_ref().clone(),
+        Value::VPair(a, _) => a.as_ref().clone(),
         other => other,
     }
 }
 
 pub(super) fn equiv_cod_value(v: Value) -> Value {
     match v {
-        Value::VMkEquiv(_, b, _, _, _, _) | Value::VEquiv(_, b) => *b,
-        Value::VPair(_, b) => *b,
+        Value::VMkEquiv(_, b, _, _, _, _) | Value::VEquiv(_, b) => b.as_ref().clone(),
+        Value::VPair(_, b) => b.as_ref().clone(),
         other => other,
     }
 }
@@ -59,7 +58,7 @@ pub(super) fn value_to_dnf(v: Value, session: &mut Session) -> DNF {
         Value::VCube(d) => d,
         Value::VInterval(i) => eval_interval(&i),
         Value::VIntervalVar(level) => eval_interval(&I::Var(level as i32)),
-        other => match quote(0, &Rc::new(RefCell::new(Vec::new())), 0, other, session) {
+        other => match quote(0, &Arc::new(Mutex::new(Vec::new())), 0, other, session) {
             Term::TCube(d) => d,
             Term::TInterval(i) => eval_interval(&i),
             _ => dnf_bot(),

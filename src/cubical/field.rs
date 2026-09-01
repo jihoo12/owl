@@ -36,6 +36,7 @@ use crate::cubical::ring::{
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError, check_dt, infer_dt};
+use std::sync::Arc;
 
 /// Resolved references to the field operations and the ring machinery.  The
 /// ring laws are resolved by `Ring::resolve` on the bundled `Field` record
@@ -102,7 +103,7 @@ impl Field {
     ) -> Result<Field, TypeError> {
         let ring = Ring::resolve(dts, ctx, Some(field_term), session)?;
         let proj = |field: &str| -> Result<Term, TypeError> {
-            Ok(Term::TProj(field.to_string(), Box::new(field_term.clone())))
+            Ok(Term::TProj(field.to_string(), Arc::new(field_term.clone())))
         };
         Ok(Field {
             ring,
@@ -261,7 +262,7 @@ fn as_inv(f: &Field, t: &Term, session: &mut Session) -> Option<Term> {
         Term::TApp(g, x) => {
             let inv_nf = nbe_eval_ctx(f.ring.ctx_len, &f.inv, session);
             if nbe_eval_ctx(f.ring.ctx_len, &g, session) == inv_nf {
-                Some(*x)
+                Some(x.as_ref().clone())
             } else {
                 None
             }
@@ -931,7 +932,7 @@ pub fn prove(
         match goal_nf {
             Term::TPath(a, u, v) => {
                 let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
-                (*u, *v, a_nf)
+                (u.as_ref().clone(), v.as_ref().clone(), a_nf)
             }
             other => {
                 return Err(TypeError::Other(format!(

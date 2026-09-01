@@ -22,10 +22,11 @@ use crate::cubical::ring::inst;
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError};
+use std::sync::Arc;
 
 /// Path reflection: `<i> x`.
 fn pref(x: &Term) -> Term {
-    Term::PLam("_i".into(), Box::new(shift(1, 0, x)))
+    Term::PLam("_i".into(), Arc::new(shift(1, 0, x)))
 }
 
 /// Inline path symmetry: `p : Path X x y` gives `<i> p @ ~i : Path X y x`.
@@ -34,9 +35,9 @@ fn psym(p: &Term) -> Term {
     // interval argument is its negation.
     Term::PLam(
         "_i".into(),
-        Box::new(Term::PApp(
-            Box::new(shift(1, 0, p)),
-            Box::new(Term::TInterval(I::Neg(Box::new(I::Var(0))))),
+        Arc::new(Term::PApp(
+            Arc::new(shift(1, 0, p)),
+            Arc::new(Term::TInterval(I::Neg(Arc::new(I::Var(0))))),
         )),
     )
 }
@@ -63,8 +64,8 @@ fn collect_edges(ctx: &Ctx, session: &mut Session) -> Vec<Edge> {
         if let Term::TPath(_carrier, x, y) = nbe_eval_ctx(ctx.len(), &ty_shifted, session) {
             edges.push(Edge {
                 hyp: Term::TVar(i as i32),
-                from: *x,
-                to: *y,
+                from: x.as_ref().clone(),
+                to: y.as_ref().clone(),
             });
         }
     }
@@ -139,7 +140,7 @@ pub fn prove(
     session: &mut Session,
 ) -> Result<Term, TypeError> {
     let (u, v, _carrier) = match nbe_eval_ctx(ctx.len(), goal_ty, session) {
-        Term::TPath(a, x, y) => (*x, *y, *a),
+        Term::TPath(a, x, y) => (x.as_ref().clone(), y.as_ref().clone(), a.as_ref().clone()),
         other => {
             return Err(TypeError::Other(format!(
                 "eq: goal is not a path (got '{}')",
@@ -249,13 +250,13 @@ fn is_trans_shape(ty: &Term) -> Option<usize> {
     loop {
         match cur {
             Term::TPi(_, d, body, _) => {
-                if let Term::TPath(_, x, y) = *d.clone() {
-                    captures.push((depth, *x, *y));
+                if let Term::TPath(_, x, y) = d.as_ref().clone() {
+                    captures.push((depth, x.as_ref().clone(), y.as_ref().clone()));
                 } else if captures.is_empty() {
                     leading += 1;
                 }
                 depth += 1;
-                cur = *body;
+                cur = body.as_ref().clone();
             }
             other => {
                 if captures.len() != 2 {

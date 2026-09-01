@@ -3,6 +3,7 @@
 use super::value::{Globals, Neutral, NeutralInner, Scope, Value};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{ElimCase, System, Term};
+use std::sync::Arc;
 
 /// Quoting can also diverge independently of `eval_nbe`: re-quoting a lambda
 /// whose body re-references the same global value grows the quote recursion one
@@ -43,7 +44,7 @@ fn quote_inner(
         Value::VNeutral(n) => quote_neutral(size, globals, global_offset, n, session),
         Value::VLam(x, clos) => Term::TAbs(
             x,
-            Box::new(quote(
+            Arc::new(quote(
                 size + 1,
                 globals,
                 global_offset,
@@ -52,13 +53,31 @@ fn quote_inner(
             )),
         ),
         Value::VApp(f, a) => Term::TApp(
-            Box::new(quote(size, globals, global_offset, *f, session)),
-            Box::new(quote(size, globals, global_offset, *a, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                f.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VPi(x, a, b, implicit) => Term::TPi(
             x,
-            Box::new(quote(size, globals, global_offset, *a, session)),
-            Box::new(quote(
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
                 size + 1,
                 globals,
                 global_offset,
@@ -69,8 +88,14 @@ fn quote_inner(
         ),
         Value::VSigma(x, a, b) => Term::TSigma(
             x,
-            Box::new(quote(size, globals, global_offset, *a, session)),
-            Box::new(quote(
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
                 size + 1,
                 globals,
                 global_offset,
@@ -79,17 +104,53 @@ fn quote_inner(
             )),
         ),
         Value::VPair(a, b) => Term::TPair(
-            Box::new(quote(size, globals, global_offset, *a, session)),
-            Box::new(quote(size, globals, global_offset, *b, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                b.as_ref().clone(),
+                session,
+            )),
         ),
-        Value::VFst(p) => Term::TFst(Box::new(quote(size, globals, global_offset, *p, session))),
-        Value::VSnd(p) => Term::TSnd(Box::new(quote(size, globals, global_offset, *p, session))),
+        Value::VFst(p) => Term::TFst(Arc::new(quote(
+            size,
+            globals,
+            global_offset,
+            p.as_ref().clone(),
+            session,
+        ))),
+        Value::VSnd(p) => Term::TSnd(Arc::new(quote(
+            size,
+            globals,
+            global_offset,
+            p.as_ref().clone(),
+            session,
+        ))),
         Value::VProj(field, r) => Term::TProj(
             field,
-            Box::new(quote(size, globals, global_offset, *r, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                r.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VRecordUpdate(r, updates) => Term::TRecordUpdate(
-            Box::new(quote(size, globals, global_offset, *r, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                r.as_ref().clone(),
+                session,
+            )),
             updates
                 .iter()
                 .map(|(f, e)| {
@@ -101,13 +162,31 @@ fn quote_inner(
                 .collect(),
         ),
         Value::VPath(a, u, v) => Term::TPath(
-            Box::new(quote(size, globals, global_offset, *a, session)),
-            Box::new(quote(size, globals, global_offset, *u, session)),
-            Box::new(quote(size, globals, global_offset, *v, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                u.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                v.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VPLam(x, clos) => Term::PLam(
             x,
-            Box::new(quote(
+            Arc::new(quote(
                 size + 1,
                 globals,
                 global_offset,
@@ -116,19 +195,41 @@ fn quote_inner(
             )),
         ),
         Value::VPApp(p, r) => Term::PApp(
-            Box::new(quote(size, globals, global_offset, *p, session)),
-            Box::new(quote(size, globals, global_offset, *r, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                p.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                r.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VUniv(n) => Term::TUniv(n),
         Value::VProp => Term::TProp,
         Value::VSSet => Term::TSSet,
         Value::VLift(a, lvl) => Term::TLift(
-            Box::new(quote(size, globals, global_offset, *a, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
             lvl,
         ),
-        Value::VLower(a) => {
-            Term::TLower(Box::new(quote(size, globals, global_offset, *a, session)))
-        }
+        Value::VLower(a) => Term::TLower(Arc::new(quote(
+            size,
+            globals,
+            global_offset,
+            a.as_ref().clone(),
+            session,
+        ))),
         Value::VIntervalTy => Term::TIntervalTy,
         Value::VInterval(i) => Term::TInterval(i),
         Value::VIntervalVar(level) => level_to_var(size, level),
@@ -153,7 +254,13 @@ fn quote_inner(
             args.into_iter()
                 .map(|a| quote(size, globals, global_offset, a, session))
                 .collect(),
-            Box::new(quote(size, globals, global_offset, *r, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                r.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VSqCon(d, c, args, r, s) => Term::TSqCon(
             d,
@@ -161,8 +268,20 @@ fn quote_inner(
             args.into_iter()
                 .map(|a| quote(size, globals, global_offset, a, session))
                 .collect(),
-            Box::new(quote(size, globals, global_offset, *r, session)),
-            Box::new(quote(size, globals, global_offset, *s, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                r.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                s.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VCellCon(d, c, args, ivars) => Term::TCellCon(
             d,
@@ -176,18 +295,54 @@ fn quote_inner(
                 .collect(),
         ),
         Value::VElim(motive, cases, scrut, env, go) => Term::TElim(
-            Box::new(quote(size, globals, global_offset, *motive, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                motive.as_ref().clone(),
+                session,
+            )),
             quote_cases(size, globals, global_offset, &env, go, cases, session),
-            Box::new(quote(size, globals, global_offset, *scrut, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                scrut.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VGlue(a, phi, te) => Term::TGlue(
-            Box::new(quote(size, globals, global_offset, *a, session)),
-            Box::new(Term::TCube(phi)),
-            Box::new(quote(size, globals, global_offset, *te, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
+            Arc::new(Term::TCube(phi)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                te.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VPartial(a, phi) => Term::TPartial(
-            Box::new(quote(size, globals, global_offset, *phi, session)),
-            Box::new(quote(size, globals, global_offset, *a, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                phi.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VSystemType(sys) => Term::TSystemType(
             sys.into_iter()
@@ -200,40 +355,160 @@ fn quote_inner(
                 .collect(),
         ),
         Value::VGlueElem(phi, t, a) => Term::TGlueElem(
-            Box::new(Term::TCube(phi)),
-            Box::new(quote(size, globals, global_offset, *t, session)),
-            Box::new(quote(size, globals, global_offset, *a, session)),
+            Arc::new(Term::TCube(phi)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                t.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VUnglue(phi, te, g) => Term::TUnglue(
-            Box::new(Term::TCube(phi)),
-            Box::new(quote(size, globals, global_offset, *te, session)),
-            Box::new(quote(size, globals, global_offset, *g, session)),
+            Arc::new(Term::TCube(phi)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                te.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                g.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VEquiv(a, b) => Term::TEquiv(
-            Box::new(quote(size, globals, global_offset, *a, session)),
-            Box::new(quote(size, globals, global_offset, *b, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                b.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
-            Box::new(quote(size, globals, global_offset, *a, session)),
-            Box::new(quote(size, globals, global_offset, *b, session)),
-            Box::new(quote(size, globals, global_offset, *f, session)),
-            Box::new(quote(size, globals, global_offset, *g, session)),
-            Box::new(quote(size, globals, global_offset, *eta, session)),
-            Box::new(quote(size, globals, global_offset, *eps, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                b.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                f.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                g.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                eta.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                eps.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VEquivFwd(e, x) => Term::TEquivFwd(
-            Box::new(quote(size, globals, global_offset, *e, session)),
-            Box::new(quote(size, globals, global_offset, *x, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                e.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                x.as_ref().clone(),
+                session,
+            )),
         ),
-        Value::VUa(e) => Term::TUa(Box::new(quote(size, globals, global_offset, *e, session))),
+        Value::VUa(e) => Term::TUa(Arc::new(quote(
+            size,
+            globals,
+            global_offset,
+            e.as_ref().clone(),
+            session,
+        ))),
         Value::VTransport(p, x) => Term::TTransport(
-            Box::new(quote(size, globals, global_offset, *p, session)),
-            Box::new(quote(size, globals, global_offset, *x, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                p.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                x.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VTransp(a, r, x) => Term::TTransp(
-            Box::new(quote(size, globals, global_offset, *a, session)),
-            Box::new(quote(size, globals, global_offset, *r, session)),
-            Box::new(quote(size, globals, global_offset, *x, session)),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                a.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                r.as_ref().clone(),
+                session,
+            )),
+            Arc::new(quote(
+                size,
+                globals,
+                global_offset,
+                x.as_ref().clone(),
+                session,
+            )),
         ),
         Value::VHComp(a, sys, base) => {
             let sys_term: System = sys
@@ -246,9 +521,21 @@ fn quote_inner(
                 })
                 .collect();
             Term::THComp(
-                Box::new(quote(size, globals, global_offset, *a, session)),
+                Arc::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    a.as_ref().clone(),
+                    session,
+                )),
                 sys_term,
-                Box::new(quote(size, globals, global_offset, *base, session)),
+                Arc::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    base.as_ref().clone(),
+                    session,
+                )),
             )
         }
         Value::VComp(a, sys, base) => {
@@ -262,9 +549,21 @@ fn quote_inner(
                 })
                 .collect();
             Term::TComp(
-                Box::new(quote(size, globals, global_offset, *a, session)),
+                Arc::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    a.as_ref().clone(),
+                    session,
+                )),
                 sys_term,
-                Box::new(quote(size, globals, global_offset, *base, session)),
+                Arc::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    base.as_ref().clone(),
+                    session,
+                )),
             )
         }
         Value::VFill(a, sys, base) => {
@@ -278,9 +577,21 @@ fn quote_inner(
                 })
                 .collect();
             Term::TFill(
-                Box::new(quote(size, globals, global_offset, *a, session)),
+                Arc::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    a.as_ref().clone(),
+                    session,
+                )),
                 sys_term,
-                Box::new(quote(size, globals, global_offset, *base, session)),
+                Arc::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    base.as_ref().clone(),
+                    session,
+                )),
             )
         }
         Value::VHFill(a, sys, base) => {
@@ -294,18 +605,44 @@ fn quote_inner(
                 })
                 .collect();
             Term::THFill(
-                Box::new(quote(size, globals, global_offset, *a, session)),
+                Arc::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    a.as_ref().clone(),
+                    session,
+                )),
                 sys_term,
-                Box::new(quote(size, globals, global_offset, *base, session)),
+                Arc::new(quote(
+                    size,
+                    globals,
+                    global_offset,
+                    base.as_ref().clone(),
+                    session,
+                )),
             )
         }
-        Value::VDelay(a) => {
-            Term::TDelay(Box::new(quote(size, globals, global_offset, *a, session)))
-        }
-        Value::VNext(a) => Term::TNext(Box::new(quote(size, globals, global_offset, *a, session))),
-        Value::VForce(a) => {
-            Term::TForce(Box::new(quote(size, globals, global_offset, *a, session)))
-        }
+        Value::VDelay(a) => Term::TDelay(Arc::new(quote(
+            size,
+            globals,
+            global_offset,
+            a.as_ref().clone(),
+            session,
+        ))),
+        Value::VNext(a) => Term::TNext(Arc::new(quote(
+            size,
+            globals,
+            global_offset,
+            a.as_ref().clone(),
+            session,
+        ))),
+        Value::VForce(a) => Term::TForce(Arc::new(quote(
+            size,
+            globals,
+            global_offset,
+            a.as_ref().clone(),
+            session,
+        ))),
     }
 }
 
@@ -319,52 +656,52 @@ fn quote_neutral(
     match n.inner() {
         NeutralInner::NVar(level) => level_to_var(size, *level),
         NeutralInner::NApp(f, a) => Term::TApp(
-            Box::new(quote_neutral(
+            Arc::new(quote_neutral(
                 size,
                 globals,
                 global_offset,
                 (**f).clone(),
                 session,
             )),
-            Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
+            Arc::new(quote(size, globals, global_offset, (**a).clone(), session)),
         ),
         NeutralInner::NPApp(p, r) => Term::PApp(
-            Box::new(quote_neutral(
+            Arc::new(quote_neutral(
                 size,
                 globals,
                 global_offset,
                 (**p).clone(),
                 session,
             )),
-            Box::new(quote(size, globals, global_offset, (**r).clone(), session)),
+            Arc::new(quote(size, globals, global_offset, (**r).clone(), session)),
         ),
         NeutralInner::NSqApp(p, r, s) => {
             let pq = quote_neutral(size, globals, global_offset, (**p).clone(), session);
             let rq = quote(size, globals, global_offset, (**r).clone(), session);
             let sq = quote(size, globals, global_offset, (**s).clone(), session);
             Term::PApp(
-                Box::new(Term::PApp(Box::new(pq), Box::new(rq))),
-                Box::new(sq),
+                Arc::new(Term::PApp(Arc::new(pq), Arc::new(rq))),
+                Arc::new(sq),
             )
         }
         NeutralInner::NCellApp(p, ivars) => {
             let mut result = quote_neutral(size, globals, global_offset, (**p).clone(), session);
             for iv in ivars.iter().rev() {
                 result = Term::PApp(
-                    Box::new(result),
-                    Box::new(quote(size, globals, global_offset, iv.clone(), session)),
+                    Arc::new(result),
+                    Arc::new(quote(size, globals, global_offset, iv.clone(), session)),
                 );
             }
             result
         }
-        NeutralInner::NFst(p) => Term::TFst(Box::new(quote_neutral(
+        NeutralInner::NFst(p) => Term::TFst(Arc::new(quote_neutral(
             size,
             globals,
             global_offset,
             (**p).clone(),
             session,
         ))),
-        NeutralInner::NSnd(p) => Term::TSnd(Box::new(quote_neutral(
+        NeutralInner::NSnd(p) => Term::TSnd(Arc::new(quote_neutral(
             size,
             globals,
             global_offset,
@@ -372,7 +709,7 @@ fn quote_neutral(
             session,
         ))),
         NeutralInner::NElim(motive, cases, scrut, env, go) => Term::TElim(
-            Box::new(quote(
+            Arc::new(quote(
                 size,
                 globals,
                 global_offset,
@@ -388,7 +725,7 @@ fn quote_neutral(
                 cases.clone(),
                 session,
             ),
-            Box::new(quote_neutral(
+            Arc::new(quote_neutral(
                 size,
                 globals,
                 global_offset,
@@ -397,13 +734,13 @@ fn quote_neutral(
             )),
         ),
         NeutralInner::NTransport(p, x) => Term::TTransport(
-            Box::new(quote(size, globals, global_offset, (**p).clone(), session)),
-            Box::new(quote(size, globals, global_offset, (**x).clone(), session)),
+            Arc::new(quote(size, globals, global_offset, (**p).clone(), session)),
+            Arc::new(quote(size, globals, global_offset, (**x).clone(), session)),
         ),
         NeutralInner::NTransp(a, r, x) => Term::TTransp(
-            Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
-            Box::new(quote(size, globals, global_offset, (**r).clone(), session)),
-            Box::new(quote(size, globals, global_offset, (**x).clone(), session)),
+            Arc::new(quote(size, globals, global_offset, (**a).clone(), session)),
+            Arc::new(quote(size, globals, global_offset, (**r).clone(), session)),
+            Arc::new(quote(size, globals, global_offset, (**x).clone(), session)),
         ),
         NeutralInner::NHComp(a, sys, base) => {
             let sys_term: System = sys
@@ -416,9 +753,9 @@ fn quote_neutral(
                 })
                 .collect();
             Term::THComp(
-                Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
+                Arc::new(quote(size, globals, global_offset, (**a).clone(), session)),
                 sys_term,
-                Box::new(quote(
+                Arc::new(quote(
                     size,
                     globals,
                     global_offset,
@@ -438,9 +775,9 @@ fn quote_neutral(
                 })
                 .collect();
             Term::TComp(
-                Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
+                Arc::new(quote(size, globals, global_offset, (**a).clone(), session)),
                 sys_term,
-                Box::new(quote(
+                Arc::new(quote(
                     size,
                     globals,
                     global_offset,
@@ -460,9 +797,9 @@ fn quote_neutral(
                 })
                 .collect();
             Term::TFill(
-                Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
+                Arc::new(quote(size, globals, global_offset, (**a).clone(), session)),
                 sys_term,
-                Box::new(quote(
+                Arc::new(quote(
                     size,
                     globals,
                     global_offset,
@@ -482,9 +819,9 @@ fn quote_neutral(
                 })
                 .collect();
             Term::THFill(
-                Box::new(quote(size, globals, global_offset, (**a).clone(), session)),
+                Arc::new(quote(size, globals, global_offset, (**a).clone(), session)),
                 sys_term,
-                Box::new(quote(
+                Arc::new(quote(
                     size,
                     globals,
                     global_offset,
@@ -494,7 +831,7 @@ fn quote_neutral(
             )
         }
         NeutralInner::NMeta(i) => Term::Meta(*i),
-        NeutralInner::NForce(n) => Term::TForce(Box::new(quote_neutral(
+        NeutralInner::NForce(n) => Term::TForce(Arc::new(quote_neutral(
             size,
             globals,
             global_offset,
@@ -503,7 +840,7 @@ fn quote_neutral(
         ))),
         NeutralInner::NProj(n, field) => Term::TProj(
             field.clone(),
-            Box::new(quote_neutral(
+            Arc::new(quote_neutral(
                 size,
                 globals,
                 global_offset,
@@ -552,7 +889,7 @@ fn quote_case_body(
                     // comment on `quote_case_body`).
                     Value::VLam(x, clos) => Term::TAbs(
                         x.clone(),
-                        Box::new(quote_case_body(
+                        Arc::new(quote_case_body(
                             size + 1,
                             globals,
                             global_offset,
@@ -564,7 +901,7 @@ fn quote_case_body(
                     ),
                     Value::VPLam(x, clos) => Term::PLam(
                         x.clone(),
-                        Box::new(quote_case_body(
+                        Arc::new(quote_case_body(
                             size + 1,
                             globals,
                             global_offset,
@@ -581,7 +918,7 @@ fn quote_case_body(
             }
         }
         Term::TApp(f, a) => Term::TApp(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -590,7 +927,7 @@ fn quote_case_body(
                 f,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -602,7 +939,7 @@ fn quote_case_body(
         ),
         Term::TAbs(x, b) => Term::TAbs(
             x.clone(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size + 1,
                 globals,
                 global_offset,
@@ -616,7 +953,7 @@ fn quote_case_body(
         Term::TProp => Term::TProp,
         Term::TSSet => Term::TSSet,
         Term::TLift(a, lvl) => Term::TLift(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -627,7 +964,7 @@ fn quote_case_body(
             )),
             *lvl,
         ),
-        Term::TLower(a) => Term::TLower(Box::new(quote_case_body(
+        Term::TLower(a) => Term::TLower(Arc::new(quote_case_body(
             size,
             globals,
             global_offset,
@@ -639,7 +976,7 @@ fn quote_case_body(
         Term::TIntervalTy => Term::TIntervalTy,
         Term::TPi(x, a, b, _) => Term::TPi(
             x.clone(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -648,7 +985,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size + 1,
                 globals,
                 global_offset,
@@ -662,7 +999,7 @@ fn quote_case_body(
         Term::TInterval(i) => Term::TInterval(i.clone()),
         Term::TCube(c) => Term::TCube(c.clone()),
         Term::TPath(a, u, v) => Term::TPath(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -671,7 +1008,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -680,7 +1017,7 @@ fn quote_case_body(
                 u,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -692,7 +1029,7 @@ fn quote_case_body(
         ),
         Term::PLam(x, b) => Term::PLam(
             x.clone(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size + 1,
                 globals,
                 global_offset,
@@ -703,7 +1040,7 @@ fn quote_case_body(
             )),
         ),
         Term::PApp(p, r) => Term::PApp(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -712,7 +1049,7 @@ fn quote_case_body(
                 p,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -723,7 +1060,7 @@ fn quote_case_body(
             )),
         ),
         Term::THComp(a, sys, u0) => Term::THComp(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -740,7 +1077,7 @@ fn quote_case_body(
                     )
                 })
                 .collect(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -751,7 +1088,7 @@ fn quote_case_body(
             )),
         ),
         Term::TComp(a, sys, u0) => Term::TComp(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -768,7 +1105,7 @@ fn quote_case_body(
                     )
                 })
                 .collect(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -779,7 +1116,7 @@ fn quote_case_body(
             )),
         ),
         Term::TFill(a, sys, u0) => Term::TFill(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -796,7 +1133,7 @@ fn quote_case_body(
                     )
                 })
                 .collect(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -807,7 +1144,7 @@ fn quote_case_body(
             )),
         ),
         Term::THFill(a, sys, u0) => Term::THFill(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -824,7 +1161,7 @@ fn quote_case_body(
                     )
                 })
                 .collect(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -835,7 +1172,7 @@ fn quote_case_body(
             )),
         ),
         Term::TEquiv(a, b) => Term::TEquiv(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -844,7 +1181,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -855,7 +1192,7 @@ fn quote_case_body(
             )),
         ),
         Term::TMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -864,7 +1201,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -873,7 +1210,7 @@ fn quote_case_body(
                 b,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -882,7 +1219,7 @@ fn quote_case_body(
                 f,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -891,7 +1228,7 @@ fn quote_case_body(
                 g,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -900,7 +1237,7 @@ fn quote_case_body(
                 eta,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -911,7 +1248,7 @@ fn quote_case_body(
             )),
         ),
         Term::TEquivFwd(e, x) => Term::TEquivFwd(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -920,7 +1257,7 @@ fn quote_case_body(
                 e,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -930,7 +1267,7 @@ fn quote_case_body(
                 session,
             )),
         ),
-        Term::TUa(e) => Term::TUa(Box::new(quote_case_body(
+        Term::TUa(e) => Term::TUa(Arc::new(quote_case_body(
             size,
             globals,
             global_offset,
@@ -940,7 +1277,7 @@ fn quote_case_body(
             session,
         ))),
         Term::TTransport(p, x) => Term::TTransport(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -949,7 +1286,7 @@ fn quote_case_body(
                 p,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -960,7 +1297,7 @@ fn quote_case_body(
             )),
         ),
         Term::TTransp(a, r, x) => Term::TTransp(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -969,7 +1306,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -978,7 +1315,7 @@ fn quote_case_body(
                 r,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -989,7 +1326,7 @@ fn quote_case_body(
             )),
         ),
         Term::TGlue(a, phi, te) => Term::TGlue(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -998,7 +1335,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1007,7 +1344,7 @@ fn quote_case_body(
                 phi,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1018,7 +1355,7 @@ fn quote_case_body(
             )),
         ),
         Term::TGlueElem(phi, t, a) => Term::TGlueElem(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1027,7 +1364,7 @@ fn quote_case_body(
                 phi,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1036,7 +1373,7 @@ fn quote_case_body(
                 t,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1047,7 +1384,7 @@ fn quote_case_body(
             )),
         ),
         Term::TUnglue(phi, te, g) => Term::TUnglue(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1056,7 +1393,7 @@ fn quote_case_body(
                 phi,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1065,7 +1402,7 @@ fn quote_case_body(
                 te,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1076,7 +1413,7 @@ fn quote_case_body(
             )),
         ),
         Term::TPartial(phi, a) => Term::TPartial(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1085,7 +1422,7 @@ fn quote_case_body(
                 phi,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1107,7 +1444,7 @@ fn quote_case_body(
         ),
         Term::TSigma(x, a, b) => Term::TSigma(
             x.clone(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1116,7 +1453,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size + 1,
                 globals,
                 global_offset,
@@ -1127,7 +1464,7 @@ fn quote_case_body(
             )),
         ),
         Term::TPair(a, b) => Term::TPair(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1136,7 +1473,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1146,7 +1483,7 @@ fn quote_case_body(
                 session,
             )),
         ),
-        Term::TFst(p) => Term::TFst(Box::new(quote_case_body(
+        Term::TFst(p) => Term::TFst(Arc::new(quote_case_body(
             size,
             globals,
             global_offset,
@@ -1155,7 +1492,7 @@ fn quote_case_body(
             p,
             session,
         ))),
-        Term::TSnd(p) => Term::TSnd(Box::new(quote_case_body(
+        Term::TSnd(p) => Term::TSnd(Arc::new(quote_case_body(
             size,
             globals,
             global_offset,
@@ -1184,7 +1521,7 @@ fn quote_case_body(
             args.iter()
                 .map(|a| quote_case_body(size, globals, global_offset, env, go, a, session))
                 .collect(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1200,7 +1537,7 @@ fn quote_case_body(
             args.iter()
                 .map(|a| quote_case_body(size, globals, global_offset, env, go, a, session))
                 .collect(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1209,7 +1546,7 @@ fn quote_case_body(
                 r,
                 session,
             )),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1257,7 +1594,7 @@ fn quote_case_body(
                 });
             }
             Term::TElim(
-                Box::new(quote_case_body(
+                Arc::new(quote_case_body(
                     size,
                     globals,
                     global_offset,
@@ -1267,7 +1604,7 @@ fn quote_case_body(
                     session,
                 )),
                 new_cases,
-                Box::new(quote_case_body(
+                Arc::new(quote_case_body(
                     size,
                     globals,
                     global_offset,
@@ -1280,7 +1617,7 @@ fn quote_case_body(
         }
         Term::Meta(i) => Term::Meta(*i),
         Term::TBy(_) => panic!("TBy should be resolved before NbE"),
-        Term::TDelay(a) => Term::TDelay(Box::new(quote_case_body(
+        Term::TDelay(a) => Term::TDelay(Arc::new(quote_case_body(
             size,
             globals,
             global_offset,
@@ -1289,7 +1626,7 @@ fn quote_case_body(
             a,
             session,
         ))),
-        Term::TNext(a) => Term::TNext(Box::new(quote_case_body(
+        Term::TNext(a) => Term::TNext(Arc::new(quote_case_body(
             size,
             globals,
             global_offset,
@@ -1298,7 +1635,7 @@ fn quote_case_body(
             a,
             session,
         ))),
-        Term::TForce(a) => Term::TForce(Box::new(quote_case_body(
+        Term::TForce(a) => Term::TForce(Arc::new(quote_case_body(
             size,
             globals,
             global_offset,
@@ -1309,7 +1646,7 @@ fn quote_case_body(
         ))),
         Term::TProj(field, r) => Term::TProj(
             field.clone(),
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,
@@ -1320,7 +1657,7 @@ fn quote_case_body(
             )),
         ),
         Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
-            Box::new(quote_case_body(
+            Arc::new(quote_case_body(
                 size,
                 globals,
                 global_offset,

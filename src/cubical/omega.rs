@@ -22,6 +22,7 @@ use crate::cubical::nbe::nbe_eval_ctx;
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError, check_dt};
+use std::sync::Arc;
 
 /// The carriers `by omega` supports, recognized by their datatype head.
 fn supported_carrier(a_nf: &Term) -> Option<&'static str> {
@@ -53,7 +54,7 @@ pub fn prove(
     let (a, u, v) = {
         let goal_nf = nbe_eval_ctx(ctx.len(), goal_ty, session);
         match goal_nf {
-            Term::TPath(a, u, v) => (*a, *u, *v),
+            Term::TPath(a, u, v) => (a.as_ref().clone(), u.as_ref().clone(), v.as_ref().clone()),
             other => {
                 return Err(TypeError::Other(format!(
                     "omega: goal is not a path\n  goal: {}",
@@ -74,7 +75,7 @@ pub fn prove(
     let u_nf = nbe_eval_ctx(ctx.len(), &u, session);
     let v_nf = nbe_eval_ctx(ctx.len(), &v, session);
     if definitionally_equal_ctx_r(ctx, &u_nf, &v_nf, session) == EtaResult::Equal {
-        return Ok(Term::PLam("_i".into(), Box::new(shift(1, 0, &u))));
+        return Ok(Term::PLam("_i".into(), Arc::new(shift(1, 0, &u))));
     }
 
     // 2. Direct instance of a previously defined global lemma.
@@ -92,7 +93,7 @@ pub fn prove(
         for args in arg_permutations(num_tactic, arity) {
             let mut cand = Term::TVar(gi as i32);
             for i in args {
-                cand = Term::TApp(Box::new(cand), Box::new(Term::TVar(i)));
+                cand = Term::TApp(Arc::new(cand), Arc::new(Term::TVar(i)));
             }
             if check_dt(dts, ctx, &cand, goal_ty, session).is_ok() {
                 return Ok(cand);
@@ -149,14 +150,14 @@ mod tests {
         let nat = || Term::TData("Nat".into(), vec![]);
         let t = Term::TPi(
             "m".into(),
-            Box::new(nat()),
-            Box::new(Term::TPi(
+            Arc::new(nat()),
+            Arc::new(Term::TPi(
                 "n".into(),
-                Box::new(nat()),
-                Box::new(Term::TPath(
-                    Box::new(nat()),
-                    Box::new(Term::TVar(0)),
-                    Box::new(Term::TVar(0)),
+                Arc::new(nat()),
+                Arc::new(Term::TPath(
+                    Arc::new(nat()),
+                    Arc::new(Term::TVar(0)),
+                    Arc::new(Term::TVar(0)),
                 )),
                 false,
             )),

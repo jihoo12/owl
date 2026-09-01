@@ -1,8 +1,7 @@
 //! Eliminators on values: application, path application, projections,
 //! datatype elimination and forcing.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use super::eval::eval_nbe;
 use super::hcomp::{do_comp, do_hcomp};
@@ -22,10 +21,10 @@ pub fn do_force(v: Value, globals: &Globals, global_offset: usize, session: &mut
                 "Force (Next _)".into(),
                 value_str(globals, global_offset, &inner, session),
             );
-            *inner
+            inner.as_ref().clone()
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::nforce(n)),
-        other => Value::VForce(Box::new(other)),
+        other => Value::VForce(Arc::new(other)),
     }
 }
 
@@ -47,7 +46,7 @@ pub fn do_apply(
             result
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::napp(n, a)),
-        other => Value::VApp(Box::new(other), Box::new(a)),
+        other => Value::VApp(Arc::new(other), Arc::new(a)),
     }
 }
 
@@ -120,7 +119,7 @@ fn reduce_con_at_endpoint(
     }
     Some(eval_nbe(
         &Scope::empty(),
-        &Rc::new(RefCell::new(Vec::new())),
+        &Arc::new(Mutex::new(Vec::new())),
         0,
         &face_inst,
         session,
@@ -167,8 +166,8 @@ pub fn do_papp(
             }
             Value::VIntervalVar(level) => clos.apply_i_var(level, session),
             other => Value::VPApp(
-                Box::new(Value::VPLam("_".to_string(), clos)),
-                Box::new(other),
+                Arc::new(Value::VPLam("_".to_string(), clos)),
+                Arc::new(other),
             ),
         },
         Value::VNeutral(p) => {
@@ -186,7 +185,7 @@ pub fn do_papp(
                             "hcomp _ _ _ @ 0".into(),
                             value_str(globals, global_offset, &base, session),
                         );
-                        *base
+                        base.as_ref().clone()
                     }
                     I::I1 => {
                         // At i=1, any tube applied to I1 gives the result
@@ -207,13 +206,13 @@ pub fn do_papp(
                             result
                         } else {
                             // Empty system: shouldn't happen (filtered earlier), but fallback
-                            Value::VPApp(Box::new(Value::VHComp(a, sys, base)), Box::new(r))
+                            Value::VPApp(Arc::new(Value::VHComp(a, sys, base)), Arc::new(r))
                         }
                     }
-                    _ => Value::VPApp(Box::new(Value::VHComp(a, sys, base)), Box::new(r)),
+                    _ => Value::VPApp(Arc::new(Value::VHComp(a, sys, base)), Arc::new(r)),
                 }
             } else {
-                Value::VPApp(Box::new(Value::VHComp(a, sys, base)), Box::new(r))
+                Value::VPApp(Arc::new(Value::VHComp(a, sys, base)), Arc::new(r))
             }
         }
         // fill boundary reduction: (fill A sys base) @ 0 = base
@@ -227,11 +226,17 @@ pub fn do_papp(
                             "fill _ _ _ @ 0".into(),
                             value_str(globals, global_offset, &base, session),
                         );
-                        *base
+                        base.as_ref().clone()
                     }
                     I::I1 => {
-                        let result =
-                            do_comp(globals, global_offset, *a, sys.clone(), *base, session);
+                        let result = do_comp(
+                            globals,
+                            global_offset,
+                            a.as_ref().clone(),
+                            sys.clone(),
+                            base.as_ref().clone(),
+                            session,
+                        );
                         record_step(
                             "fill-papp-1".into(),
                             "fill _ _ _ @ 1".into(),
@@ -239,10 +244,10 @@ pub fn do_papp(
                         );
                         result
                     }
-                    _ => Value::VPApp(Box::new(Value::VFill(a, sys, base)), Box::new(r)),
+                    _ => Value::VPApp(Arc::new(Value::VFill(a, sys, base)), Arc::new(r)),
                 }
             } else {
-                Value::VPApp(Box::new(Value::VFill(a, sys, base)), Box::new(r))
+                Value::VPApp(Arc::new(Value::VFill(a, sys, base)), Arc::new(r))
             }
         }
         // hfill boundary reduction: (hfill A sys base) @ 0 = base
@@ -256,11 +261,17 @@ pub fn do_papp(
                             "hfill _ _ _ @ 0".into(),
                             value_str(globals, global_offset, &base, session),
                         );
-                        *base
+                        base.as_ref().clone()
                     }
                     I::I1 => {
-                        let result =
-                            do_hcomp(globals, global_offset, *a, sys.clone(), *base, session);
+                        let result = do_hcomp(
+                            globals,
+                            global_offset,
+                            a.as_ref().clone(),
+                            sys.clone(),
+                            base.as_ref().clone(),
+                            session,
+                        );
                         record_step(
                             "hfill-papp-1".into(),
                             "hfill _ _ _ @ 1".into(),
@@ -268,10 +279,10 @@ pub fn do_papp(
                         );
                         result
                     }
-                    _ => Value::VPApp(Box::new(Value::VHFill(a, sys, base)), Box::new(r)),
+                    _ => Value::VPApp(Arc::new(Value::VHFill(a, sys, base)), Arc::new(r)),
                 }
             } else {
-                Value::VPApp(Box::new(Value::VHFill(a, sys, base)), Box::new(r))
+                Value::VPApp(Arc::new(Value::VHFill(a, sys, base)), Arc::new(r))
             }
         }
         // Square constructor boundary reduction.
@@ -302,7 +313,7 @@ pub fn do_papp(
                     for k in (0..arity).rev() {
                         face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
                     }
-                    let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
+                    let empty_globals: Globals = Arc::new(Mutex::new(Vec::new()));
                     let face_val =
                         eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst, session);
                     record_step(
@@ -317,25 +328,25 @@ pub fn do_papp(
                     return do_papp(globals, global_offset, face_val, (**sq_s).clone(), session);
                 }
                 Value::VPApp(
-                    Box::new(Value::VSqCon(
+                    Arc::new(Value::VSqCon(
                         data.clone(),
                         con.clone(),
                         args.clone(),
                         sq_r.clone(),
                         sq_s.clone(),
                     )),
-                    Box::new(r),
+                    Arc::new(r),
                 )
             } else {
                 Value::VPApp(
-                    Box::new(Value::VSqCon(
+                    Arc::new(Value::VSqCon(
                         data.clone(),
                         con.clone(),
                         args.clone(),
                         sq_r.clone(),
                         sq_s.clone(),
                     )),
-                    Box::new(r),
+                    Arc::new(r),
                 )
             }
         }
@@ -369,13 +380,13 @@ pub fn do_papp(
                     // scope, which is only faithful for closed args).
                     if max_var(face) >= arity as i32 {
                         return Value::VPApp(
-                            Box::new(Value::VCellCon(
+                            Arc::new(Value::VCellCon(
                                 data.clone(),
                                 con.clone(),
                                 args.clone(),
                                 ivars.clone(),
                             )),
-                            Box::new(r),
+                            Arc::new(r),
                         );
                     }
                     let mut face_inst = face.clone();
@@ -385,19 +396,19 @@ pub fn do_papp(
                         .collect();
                     if arg_terms.iter().any(|t| max_var(t) >= 0) {
                         return Value::VPApp(
-                            Box::new(Value::VCellCon(
+                            Arc::new(Value::VCellCon(
                                 data.clone(),
                                 con.clone(),
                                 args.clone(),
                                 ivars.clone(),
                             )),
-                            Box::new(r),
+                            Arc::new(r),
                         );
                     }
                     for k in (0..arity).rev() {
                         face_inst = subst(k as i32, &arg_terms[arity - 1 - k], &face_inst);
                     }
-                    let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
+                    let empty_globals: Globals = Arc::new(Mutex::new(Vec::new()));
                     let mut face_val =
                         eval_nbe(&Scope::empty(), &empty_globals, 0, &face_inst, session);
                     record_step(
@@ -417,24 +428,24 @@ pub fn do_papp(
                     return face_val;
                 }
                 Value::VPApp(
-                    Box::new(Value::VCellCon(
+                    Arc::new(Value::VCellCon(
                         data.clone(),
                         con.clone(),
                         args.clone(),
                         ivars.clone(),
                     )),
-                    Box::new(r),
+                    Arc::new(r),
                 )
             } else {
                 // Non-endpoint interval arg: build nested PApp for remaining ivars.
                 let result = Value::VPApp(
-                    Box::new(Value::VCellCon(
+                    Arc::new(Value::VCellCon(
                         data.clone(),
                         con.clone(),
                         args.clone(),
                         ivars.clone(),
                     )),
-                    Box::new(r),
+                    Arc::new(r),
                 );
                 result
             }
@@ -468,13 +479,13 @@ pub fn do_papp(
                 face_val
             } else {
                 Value::VPApp(
-                    Box::new(Value::VPCon(
+                    Arc::new(Value::VPCon(
                         data.clone(),
                         con.clone(),
                         args.clone(),
                         _r.clone(),
                     )),
-                    Box::new(r),
+                    Arc::new(r),
                 )
             }
         }
@@ -505,8 +516,8 @@ pub fn do_papp(
                 face_val
             } else {
                 Value::VPApp(
-                    Box::new(Value::VCon(data.clone(), con.clone(), args.clone())),
-                    Box::new(r),
+                    Arc::new(Value::VCon(data.clone(), con.clone(), args.clone())),
+                    Arc::new(r),
                 )
             }
         }
@@ -533,14 +544,14 @@ pub fn do_papp(
                         (**t).clone()
                     }
                     _ => Value::VPApp(
-                        Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())),
-                        Box::new(r),
+                        Arc::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())),
+                        Arc::new(r),
                     ),
                 }
             } else {
                 Value::VPApp(
-                    Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())),
-                    Box::new(r),
+                    Arc::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())),
+                    Arc::new(r),
                 )
             }
         }
@@ -551,7 +562,7 @@ pub fn do_papp(
             if let Some(endpoint) = value_to_endpoint(&r) {
                 match endpoint {
                     I::I0 => {
-                        let result = equiv_dom_value(*e);
+                        let result = equiv_dom_value(e.as_ref().clone());
                         record_step(
                             "ua-papp-0".into(),
                             "ua _ @ 0".into(),
@@ -560,7 +571,7 @@ pub fn do_papp(
                         result
                     }
                     I::I1 => {
-                        let result = equiv_cod_value(*e);
+                        let result = equiv_cod_value(e.as_ref().clone());
                         record_step(
                             "ua-papp-1".into(),
                             "ua _ @ 1".into(),
@@ -568,13 +579,13 @@ pub fn do_papp(
                         );
                         result
                     }
-                    _ => Value::VPApp(Box::new(Value::VUa(e)), Box::new(r)),
+                    _ => Value::VPApp(Arc::new(Value::VUa(e)), Arc::new(r)),
                 }
             } else {
-                Value::VPApp(Box::new(Value::VUa(e)), Box::new(r))
+                Value::VPApp(Arc::new(Value::VUa(e)), Arc::new(r))
             }
         }
-        other => Value::VPApp(Box::new(other), Box::new(r)),
+        other => Value::VPApp(Arc::new(other), Arc::new(r)),
     }
 }
 
@@ -586,10 +597,10 @@ pub fn do_fst(globals: &Globals, global_offset: usize, p: Value, session: &mut S
                 "fst (_, _)".into(),
                 value_str(globals, global_offset, &a, session),
             );
-            *a
+            a.as_ref().clone()
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::nfst(n)),
-        other => Value::VFst(Box::new(other)),
+        other => Value::VFst(Arc::new(other)),
     }
 }
 
@@ -601,10 +612,10 @@ pub fn do_snd(globals: &Globals, global_offset: usize, p: Value, session: &mut S
                 "snd (_, _)".into(),
                 value_str(globals, global_offset, &b, session),
             );
-            *b
+            b.as_ref().clone()
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::nsnd(n)),
-        other => Value::VSnd(Box::new(other)),
+        other => Value::VSnd(Arc::new(other)),
     }
 }
 
@@ -629,7 +640,7 @@ pub fn do_proj(field: &str, r: Value, session: &mut Session) -> Value {
             }
             Value::VProj(
                 field.to_string(),
-                Box::new(Value::VRecordUpdate(r_inner, updates.clone())),
+                Arc::new(Value::VRecordUpdate(r_inner, updates.clone())),
             )
         }
         Value::VCon(_, _, ref args) => {
@@ -649,10 +660,10 @@ pub fn do_proj(field: &str, r: Value, session: &mut Session) -> Value {
                     }
                 }
             }
-            Value::VProj(field.to_string(), Box::new(r))
+            Value::VProj(field.to_string(), Arc::new(r))
         }
         Value::VNeutral(n) => Value::VNeutral(Neutral::nproj(n, field.to_string())),
-        other => Value::VProj(field.to_string(), Box::new(other)),
+        other => Value::VProj(field.to_string(), Arc::new(other)),
     }
 }
 
@@ -683,9 +694,9 @@ pub fn do_elim(
                     result
                 }
                 None => Value::VElim(
-                    Box::new(motive),
+                    Arc::new(motive),
                     cases.to_vec(),
-                    Box::new(Value::VCon("".into(), con.clone(), args.clone())),
+                    Arc::new(Value::VCon("".into(), con.clone(), args.clone())),
                     env.clone(),
                     global_offset,
                 ),
@@ -714,9 +725,9 @@ pub fn do_elim(
                     result
                 }
                 None => Value::VElim(
-                    Box::new(motive),
+                    Arc::new(motive),
                     cases.to_vec(),
-                    Box::new(Value::VPCon(
+                    Arc::new(Value::VPCon(
                         "".into(),
                         con.clone(),
                         args.clone(),
@@ -753,9 +764,9 @@ pub fn do_elim(
                     result
                 }
                 None => Value::VElim(
-                    Box::new(motive),
+                    Arc::new(motive),
                     cases.to_vec(),
-                    Box::new(Value::VSqCon(
+                    Arc::new(Value::VSqCon(
                         "".into(),
                         con.clone(),
                         args.clone(),
@@ -795,9 +806,9 @@ pub fn do_elim(
                     result
                 }
                 None => Value::VElim(
-                    Box::new(motive),
+                    Arc::new(motive),
                     cases.to_vec(),
-                    Box::new(Value::VCellCon(
+                    Arc::new(Value::VCellCon(
                         "".into(),
                         con.clone(),
                         args.clone(),
@@ -828,9 +839,9 @@ pub fn do_elim(
             stuck_elim(motive, cases, n, env, global_offset)
         }
         other => Value::VElim(
-            Box::new(motive),
+            Arc::new(motive),
             cases.to_vec(),
-            Box::new(other),
+            Arc::new(other),
             env.clone(),
             global_offset,
         ),
@@ -936,10 +947,10 @@ fn try_destabilize(
         // NElim(motive, cases, scrut, env, go): datatype elimination.
         // Try to destabilize the scrutinee; if it computes to a constructor,
         // re-enter do_elim.
-        NeutralInner::NElim(motive, cases, scrut, env, go) => {
+        NeutralInner::NElim(motive, cases, scrut, env, _go) => {
             if let Some(scrut_val) = try_destabilize(globals, global_offset, scrut, session) {
                 let result = do_elim(
-                    *motive.clone(),
+                    motive.as_ref().clone(),
                     cases,
                     scrut_val,
                     env,

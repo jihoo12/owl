@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::cubical::env::{Env, check_with_full_env, infer_with_full_env};
 use crate::cubical::nbe::{nbe_eval, nbe_eval_with_globals, zonk};
@@ -504,12 +505,12 @@ fn instantiate_module(
         // check; afterwards the member lives as an evaluated value.
         let gref_now = Term::TVar(idx as i32);
         let probe = args.iter().fold(gref_now, |acc, a| {
-            Term::TApp(Box::new(acc), Box::new(a.clone()))
+            Term::TApp(Arc::new(acc), Arc::new(a.clone()))
         });
         let ann = zonk(&infer_with_full_env(env, &probe, session)?, session);
         let gref = Term::TVar((idx + 1) as i32);
         let spine = args.iter().fold(gref, |acc, a| {
-            Term::TApp(Box::new(acc), Box::new(a.clone()))
+            Term::TApp(Arc::new(acc), Arc::new(a.clone()))
         });
         process_def(&dst_full, &ann, &spine, env, false, session)?;
     }
@@ -955,7 +956,7 @@ fn process_def(
     // non-inlined annotation.
     env.define(name.clone(), ty.clone(), resolved_val.clone());
     // Register as an instance if the type is a known instance class
-    if let Term::TData(dname, params) = ty {
+    if let Term::TData(dname, _params) = ty {
         if matches!(dname.as_str(), "CommRing" | "Field" | "Group" | "Module") {
             env.register_instance(name.clone(), ty.clone(), resolved_val.clone());
         }

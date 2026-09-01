@@ -168,10 +168,10 @@ pub fn check_with_env(
 /// placeholder has been replaced.
 pub fn build_definition_values(env: &Env, session: &mut Session) -> Globals {
     let placeholder = Value::VNeutral(Neutral::nvar(0));
-    let globals = std::rc::Rc::new(std::cell::RefCell::new(vec![placeholder; env.defs.len()]));
+    let globals = std::sync::Arc::new(std::sync::Mutex::new(vec![placeholder; env.defs.len()]));
     for index in (0..env.defs.len()).rev() {
         let (_, _, value) = &env.defs[index];
-        globals.borrow_mut()[index] = eval_nbe(&Scope::empty(), &globals, index, value, session);
+        globals.lock().unwrap()[index] = eval_nbe(&Scope::empty(), &globals, index, value, session);
     }
     globals
 }

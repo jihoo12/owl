@@ -13,6 +13,7 @@ use crate::cubical::session::Session;
 use crate::cubical::syntax::{
     Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, subst,
 };
+use std::sync::Arc;
 
 pub fn do_transp(
     env: &Scope,
@@ -40,9 +41,9 @@ pub fn do_transp(
                     let a_term = quote(env.len(), globals, global_offset, a, session);
                     let fam = Term::PLam(
                         "_transp_i".to_string(),
-                        Box::new(Term::TApp(
-                            Box::new(shift(1, 0, &a_term)),
-                            Box::new(Term::TVar(0)),
+                        Arc::new(Term::TApp(
+                            Arc::new(shift(1, 0, &a_term)),
+                            Arc::new(Term::TVar(0)),
                         )),
                     );
                     let fam_val = eval_nbe(env, globals, global_offset, &fam, session);
@@ -90,7 +91,7 @@ pub fn do_transport(
 ) -> Value {
     match p {
         Value::VUa(e) => {
-            let result = do_equiv_fwd(globals, global_offset, *e, x, session);
+            let result = do_equiv_fwd(globals, global_offset, e.as_ref().clone(), x, session);
             record_step(
                 "transport-ua".into(),
                 "transport (ua _) _".into(),
@@ -134,14 +135,14 @@ pub fn do_transport(
 
                 // Lift transport: transport (λi. Lift (A i) lvl) x
                 (Value::VLift(_, _), Value::VLift(_, _)) => Value::VTransport(
-                    Box::new(Value::VPLam(i_name.to_string(), clos.clone())),
-                    Box::new(x),
+                    Arc::new(Value::VPLam(i_name.to_string(), clos.clone())),
+                    Arc::new(x),
                 ),
 
                 // Lower transport: same fallback
                 (Value::VLower(_), Value::VLower(_)) => Value::VTransport(
-                    Box::new(Value::VPLam(i_name.to_string(), clos.clone())),
-                    Box::new(x),
+                    Arc::new(Value::VPLam(i_name.to_string(), clos.clone())),
+                    Arc::new(x),
                 ),
 
                 // Pi transport (non-dependent codomain only)
@@ -197,8 +198,8 @@ pub fn do_transport(
                         result
                     }
                     _ => Value::VTransport(
-                        Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                        Box::new(x),
+                        Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                        Arc::new(x),
                     ),
                 },
 
@@ -216,8 +217,8 @@ pub fn do_transport(
                     );
                     r.unwrap_or_else(|| {
                         Value::VTransport(
-                            Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                            Box::new(x),
+                            Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                            Arc::new(x),
                         )
                     })
                 }
@@ -335,15 +336,15 @@ pub fn do_transport(
                             result
                         }
                         _ => Value::VTransport(
-                            Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                            Box::new(x),
+                            Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                            Arc::new(x),
                         ),
                     }
                 }
 
                 _ => Value::VTransport(
-                    Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                    Box::new(x),
+                    Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                    Arc::new(x),
                 ),
             }
         }
@@ -509,8 +510,8 @@ fn transport_pi(
         Value::VPi(_, _, cod_clos, _) => cod_clos,
         _ => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(x),
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(x),
             );
         }
     };
@@ -522,15 +523,15 @@ fn transport_pi(
             1,
             &quote(formal_env.len(), globals, global_offset, b_val, session),
         );
-        let b_fam = Term::PLam(i_name.to_string(), Box::new(b_body));
+        let b_fam = Term::PLam(i_name.to_string(), Arc::new(b_body));
         let x_term = quote(env.len(), globals, global_offset, x, session);
         let result = Term::TAbs(
             arg_name.to_string(),
-            Box::new(Term::TTransport(
-                Box::new(b_fam),
-                Box::new(Term::TApp(
-                    Box::new(shift(1, 0, &x_term)),
-                    Box::new(Term::TVar(0)),
+            Arc::new(Term::TTransport(
+                Arc::new(b_fam),
+                Arc::new(Term::TApp(
+                    Arc::new(shift(1, 0, &x_term)),
+                    Arc::new(Term::TVar(0)),
                 )),
             )),
         );
@@ -547,8 +548,8 @@ fn transport_pi(
         let reduced = transport_term_fallback(p_term, x_term, session);
         match reduced {
             Term::TTransport(_, _) => Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(x),
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(x),
             ),
             _ => eval_nbe(env, globals, global_offset, &reduced, session),
         }
@@ -568,11 +569,11 @@ fn transport_path(
     let (formal_env, path_at_var) =
         eval_body_at_formal_interval(env, globals, global_offset, clos, session);
     let a_val = match &path_at_var {
-        Value::VPath(a, _, _) => *a.clone(),
+        Value::VPath(a, _, _) => a.as_ref().clone(),
         _ => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(x),
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(x),
             );
         }
     };
@@ -581,16 +582,16 @@ fn transport_path(
         1,
         &quote(formal_env.len(), globals, global_offset, a_val, session),
     );
-    let a_fam = Term::PLam(i_name.to_string(), Box::new(a_body));
+    let a_fam = Term::PLam(i_name.to_string(), Arc::new(a_body));
     let x_term = quote(env.len(), globals, global_offset, x, session);
     let a_fam_s = shift(1, 0, &a_fam);
     let result = Term::PLam(
         "j".to_string(),
-        Box::new(Term::TTransport(
-            Box::new(a_fam_s),
-            Box::new(Term::PApp(
-                Box::new(shift(1, 0, &x_term)),
-                Box::new(Term::TVar(0)),
+        Arc::new(Term::TTransport(
+            Arc::new(a_fam_s),
+            Arc::new(Term::PApp(
+                Arc::new(shift(1, 0, &x_term)),
+                Arc::new(Term::TVar(0)),
             )),
         )),
     );
@@ -611,7 +612,7 @@ fn transport_sigma_pair(
     let (formal_env, sigma_at_var) =
         eval_body_at_formal_interval(env, globals, global_offset, clos, session);
     let a_val = match &sigma_at_var {
-        Value::VSigma(_, a_val, _) => *a_val.clone(),
+        Value::VSigma(_, a_val, _) => a_val.as_ref().clone(),
         _ => Value::VUniv(0),
     };
     let a_body = shift(
@@ -619,15 +620,15 @@ fn transport_sigma_pair(
         1,
         &quote(formal_env.len(), globals, global_offset, a_val, session),
     );
-    let a_fam = Term::PLam(i_name.to_string(), Box::new(a_body));
+    let a_fam = Term::PLam(i_name.to_string(), Arc::new(a_body));
 
     let a_prime = eval_nbe(
         env,
         globals,
         global_offset,
         &Term::TTransport(
-            Box::new(a_fam.clone()),
-            Box::new(quote(env.len(), globals, global_offset, a.clone(), session)),
+            Arc::new(a_fam.clone()),
+            Arc::new(quote(env.len(), globals, global_offset, a.clone(), session)),
         ),
         session,
     );
@@ -641,20 +642,20 @@ fn transport_sigma_pair(
         1,
         &quote(formal_env.len(), globals, global_offset, b_val, session),
     );
-    let b_fam = Term::PLam(i_name.to_string(), Box::new(b_body));
+    let b_fam = Term::PLam(i_name.to_string(), Arc::new(b_body));
 
     let b_prime = eval_nbe(
         env,
         globals,
         global_offset,
         &Term::TTransport(
-            Box::new(b_fam),
-            Box::new(quote(env.len(), globals, global_offset, b.clone(), session)),
+            Arc::new(b_fam),
+            Arc::new(quote(env.len(), globals, global_offset, b.clone(), session)),
         ),
         session,
     );
 
-    Value::VPair(Box::new(a_prime), Box::new(b_prime))
+    Value::VPair(Arc::new(a_prime), Arc::new(b_prime))
 }
 
 /// Transport a constructor `con c a₁ ... aₙ` through a data type family.
@@ -686,8 +687,8 @@ fn transport_data_con(
         Value::VData(name, _) => name,
         _ => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VCon("".into(), con_name.into(), args.to_vec())),
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VCon("".into(), con_name.into(), args.to_vec())),
             );
         }
     };
@@ -695,8 +696,8 @@ fn transport_data_con(
         Some(dt) => dt.clone(),
         None => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec())),
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec())),
             );
         }
     };
@@ -704,8 +705,8 @@ fn transport_data_con(
         Some(sig) => sig.clone(),
         None => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec())),
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VCon(d_name.clone(), con_name.into(), args.to_vec())),
             );
         }
     };
@@ -779,14 +780,14 @@ fn transport_data_con(
                 ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
             }
 
-            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let ty_fam = Term::PLam(i_name.to_string(), Arc::new(ty_shifted));
             let transported = eval_nbe(
                 env,
                 globals,
                 global_offset,
                 &Term::TTransport(
-                    Box::new(ty_fam),
-                    Box::new(quote(
+                    Arc::new(ty_fam),
+                    Arc::new(quote(
                         env.len(),
                         globals,
                         global_offset,
@@ -817,14 +818,14 @@ fn transport_data_con(
                 );
                 ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
             }
-            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let ty_fam = Term::PLam(i_name.to_string(), Arc::new(ty_shifted));
             let transported = eval_nbe(
                 env,
                 globals,
                 global_offset,
                 &Term::TTransport(
-                    Box::new(ty_fam),
-                    Box::new(quote(
+                    Arc::new(ty_fam),
+                    Arc::new(quote(
                         env.len(),
                         globals,
                         global_offset,
@@ -860,12 +861,12 @@ fn transport_data_pcon(
         Value::VData(name, _) => name,
         _ => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VPCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VPCon(
                     "".into(),
                     con_name.into(),
                     args.to_vec(),
-                    Box::new(r.clone()),
+                    Arc::new(r.clone()),
                 )),
             );
         }
@@ -874,12 +875,12 @@ fn transport_data_pcon(
         Some(dt) => dt.clone(),
         None => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VPCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VPCon(
                     d_name.clone(),
                     con_name.into(),
                     args.to_vec(),
-                    Box::new(r.clone()),
+                    Arc::new(r.clone()),
                 )),
             );
         }
@@ -888,12 +889,12 @@ fn transport_data_pcon(
         Some(sig) => sig.clone(),
         None => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VPCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VPCon(
                     d_name.clone(),
                     con_name.into(),
                     args.to_vec(),
-                    Box::new(r.clone()),
+                    Arc::new(r.clone()),
                 )),
             );
         }
@@ -901,7 +902,7 @@ fn transport_data_pcon(
 
     let n = con_sig.arity();
     if n == 0 {
-        return Value::VPCon(d_name.clone(), con_name.into(), vec![], Box::new(r.clone()));
+        return Value::VPCon(d_name.clone(), con_name.into(), vec![], Arc::new(r.clone()));
     }
 
     let mut result_args: Vec<Value> = Vec::new();
@@ -944,14 +945,14 @@ fn transport_data_pcon(
                 );
                 ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
             }
-            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let ty_fam = Term::PLam(i_name.to_string(), Arc::new(ty_shifted));
             let transported = eval_nbe(
                 env,
                 globals,
                 global_offset,
                 &Term::TTransport(
-                    Box::new(ty_fam),
-                    Box::new(quote(
+                    Arc::new(ty_fam),
+                    Arc::new(quote(
                         env.len(),
                         globals,
                         global_offset,
@@ -981,14 +982,14 @@ fn transport_data_pcon(
                 );
                 ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
             }
-            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let ty_fam = Term::PLam(i_name.to_string(), Arc::new(ty_shifted));
             let transported = eval_nbe(
                 env,
                 globals,
                 global_offset,
                 &Term::TTransport(
-                    Box::new(ty_fam),
-                    Box::new(quote(
+                    Arc::new(ty_fam),
+                    Arc::new(quote(
                         env.len(),
                         globals,
                         global_offset,
@@ -1006,7 +1007,7 @@ fn transport_data_pcon(
         d_name.clone(),
         con_name.into(),
         result_args,
-        Box::new(r.clone()),
+        Arc::new(r.clone()),
     )
 }
 
@@ -1029,13 +1030,13 @@ fn transport_data_sqcon(
         Value::VData(name, _) => name,
         _ => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VSqCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VSqCon(
                     "".into(),
                     con_name.into(),
                     args.to_vec(),
-                    Box::new(r.clone()),
-                    Box::new(s.clone()),
+                    Arc::new(r.clone()),
+                    Arc::new(s.clone()),
                 )),
             );
         }
@@ -1044,13 +1045,13 @@ fn transport_data_sqcon(
         Some(dt) => dt.clone(),
         None => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VSqCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VSqCon(
                     d_name.clone(),
                     con_name.into(),
                     args.to_vec(),
-                    Box::new(r.clone()),
-                    Box::new(s.clone()),
+                    Arc::new(r.clone()),
+                    Arc::new(s.clone()),
                 )),
             );
         }
@@ -1059,13 +1060,13 @@ fn transport_data_sqcon(
         Some(sig) => sig.clone(),
         None => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VSqCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VSqCon(
                     d_name.clone(),
                     con_name.into(),
                     args.to_vec(),
-                    Box::new(r.clone()),
-                    Box::new(s.clone()),
+                    Arc::new(r.clone()),
+                    Arc::new(s.clone()),
                 )),
             );
         }
@@ -1077,8 +1078,8 @@ fn transport_data_sqcon(
             d_name.clone(),
             con_name.into(),
             vec![],
-            Box::new(r.clone()),
-            Box::new(s.clone()),
+            Arc::new(r.clone()),
+            Arc::new(s.clone()),
         );
     }
 
@@ -1121,14 +1122,14 @@ fn transport_data_sqcon(
                 );
                 ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
             }
-            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let ty_fam = Term::PLam(i_name.to_string(), Arc::new(ty_shifted));
             let transported = eval_nbe(
                 env,
                 globals,
                 global_offset,
                 &Term::TTransport(
-                    Box::new(ty_fam),
-                    Box::new(quote(
+                    Arc::new(ty_fam),
+                    Arc::new(quote(
                         env.len(),
                         globals,
                         global_offset,
@@ -1158,14 +1159,14 @@ fn transport_data_sqcon(
                 );
                 ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
             }
-            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let ty_fam = Term::PLam(i_name.to_string(), Arc::new(ty_shifted));
             let transported = eval_nbe(
                 env,
                 globals,
                 global_offset,
                 &Term::TTransport(
-                    Box::new(ty_fam),
-                    Box::new(quote(
+                    Arc::new(ty_fam),
+                    Arc::new(quote(
                         env.len(),
                         globals,
                         global_offset,
@@ -1183,8 +1184,8 @@ fn transport_data_sqcon(
         d_name.clone(),
         con_name.into(),
         result_args,
-        Box::new(r.clone()),
-        Box::new(s.clone()),
+        Arc::new(r.clone()),
+        Arc::new(s.clone()),
     )
 }
 
@@ -1207,8 +1208,8 @@ fn transport_data_cellcon(
         Value::VData(name, _) => name,
         _ => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VCellCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VCellCon(
                     "".into(),
                     con_name.into(),
                     args.to_vec(),
@@ -1221,8 +1222,8 @@ fn transport_data_cellcon(
         Some(dt) => dt.clone(),
         None => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VCellCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VCellCon(
                     d_name.clone(),
                     con_name.into(),
                     args.to_vec(),
@@ -1235,8 +1236,8 @@ fn transport_data_cellcon(
         Some(sig) => sig.clone(),
         None => {
             return Value::VTransport(
-                Box::new(Value::VPLam("_".to_string(), clos.clone())),
-                Box::new(Value::VCellCon(
+                Arc::new(Value::VPLam("_".to_string(), clos.clone())),
+                Arc::new(Value::VCellCon(
                     d_name.clone(),
                     con_name.into(),
                     args.to_vec(),
@@ -1290,14 +1291,14 @@ fn transport_data_cellcon(
                 );
                 ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
             }
-            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let ty_fam = Term::PLam(i_name.to_string(), Arc::new(ty_shifted));
             let transported = eval_nbe(
                 env,
                 globals,
                 global_offset,
                 &Term::TTransport(
-                    Box::new(ty_fam),
-                    Box::new(quote(
+                    Arc::new(ty_fam),
+                    Arc::new(quote(
                         env.len(),
                         globals,
                         global_offset,
@@ -1327,14 +1328,14 @@ fn transport_data_cellcon(
                 );
                 ty_shifted = subst(j as i32, &shift(0, j as i32, &arg_term), &ty_shifted);
             }
-            let ty_fam = Term::PLam(i_name.to_string(), Box::new(ty_shifted));
+            let ty_fam = Term::PLam(i_name.to_string(), Arc::new(ty_shifted));
             let transported = eval_nbe(
                 env,
                 globals,
                 global_offset,
                 &Term::TTransport(
-                    Box::new(ty_fam),
-                    Box::new(quote(
+                    Arc::new(ty_fam),
+                    Arc::new(quote(
                         env.len(),
                         globals,
                         global_offset,
@@ -1366,7 +1367,7 @@ fn transport_glue(
         let (formal_env, glue_at_var) =
             eval_body_at_formal_interval(env, globals, global_offset, clos, session);
         let a_val = match &glue_at_var {
-            Value::VGlue(a, _, _) => *a.clone(),
+            Value::VGlue(a, _, _) => a.as_ref().clone(),
             _ => return None,
         };
         let a_body = shift(
@@ -1374,14 +1375,14 @@ fn transport_glue(
             1,
             &quote(formal_env.len(), globals, global_offset, a_val, session),
         );
-        let a_fam = Term::PLam(i_name.to_string(), Box::new(a_body));
+        let a_fam = Term::PLam(i_name.to_string(), Arc::new(a_body));
         Some(eval_nbe(
             env,
             globals,
             global_offset,
             &Term::TTransport(
-                Box::new(a_fam),
-                Box::new(quote(env.len(), globals, global_offset, x.clone(), session)),
+                Arc::new(a_fam),
+                Arc::new(quote(env.len(), globals, global_offset, x.clone(), session)),
             ),
             session,
         ))
@@ -1389,7 +1390,7 @@ fn transport_glue(
         let (formal_env, glue_at_var) =
             eval_body_at_formal_interval(env, globals, global_offset, clos, session);
         let te_val = match &glue_at_var {
-            Value::VGlue(_, _, te) => *te.clone(),
+            Value::VGlue(_, _, te) => te.as_ref().clone(),
             _ => return None,
         };
         let dom = equiv_dom_value(te_val);
@@ -1398,14 +1399,14 @@ fn transport_glue(
             1,
             &quote(formal_env.len(), globals, global_offset, dom, session),
         );
-        let dom_fam = Term::PLam(i_name.to_string(), Box::new(dom_body));
+        let dom_fam = Term::PLam(i_name.to_string(), Arc::new(dom_body));
         Some(eval_nbe(
             env,
             globals,
             global_offset,
             &Term::TTransport(
-                Box::new(dom_fam),
-                Box::new(quote(env.len(), globals, global_offset, x.clone(), session)),
+                Arc::new(dom_fam),
+                Arc::new(quote(env.len(), globals, global_offset, x.clone(), session)),
             ),
             session,
         ))
@@ -1420,7 +1421,7 @@ fn transport_glue(
                 let (_, glue_at_var) =
                     eval_body_at_formal_interval(env, globals, global_offset, clos, session);
                 let a_ty = match &glue_at_var {
-                    Value::VGlue(a, _, _) => *a.clone(),
+                    Value::VGlue(a, _, _) => a.as_ref().clone(),
                     _ => return None,
                 };
 
@@ -1428,19 +1429,32 @@ fn transport_glue(
                 let t_body = shift(
                     1,
                     0,
-                    &quote(env.len(), globals, global_offset, *t.clone(), session),
+                    &quote(
+                        env.len(),
+                        globals,
+                        global_offset,
+                        t.as_ref().clone(),
+                        session,
+                    ),
                 );
-                let tube = Term::PLam(i_name.to_string(), Box::new(t_body));
+                let tube = Term::PLam(i_name.to_string(), Arc::new(t_body));
                 let tube_val = eval_nbe(env, globals, global_offset, &tube, session);
 
                 // Wrap as a single-entry system: [(phi, λi. tube)]
                 let sys: DNFSystem = vec![(phi0.clone(), tube_val)];
-                let hcomp_val = do_hcomp(globals, global_offset, a_ty, sys, *a.clone(), session);
+                let hcomp_val = do_hcomp(
+                    globals,
+                    global_offset,
+                    a_ty,
+                    sys,
+                    a.as_ref().clone(),
+                    session,
+                );
 
                 Some(Value::VGlueElem(
                     phi0.clone(),
                     t.clone(),
-                    Box::new(hcomp_val),
+                    Arc::new(hcomp_val),
                 ))
             }
             _ => None,
@@ -1451,7 +1465,7 @@ fn transport_glue(
 /// Term-level transport reduction.
 pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Term {
     match p_ {
-        Term::TUa(ref e) => nbe_eval(&Term::TEquivFwd(e.clone(), Box::new(x_)), session),
+        Term::TUa(ref e) => nbe_eval(&Term::TEquivFwd(e.clone(), Arc::new(x_)), session),
 
         Term::PLam(ref i_name, ref body) => {
             let b0 = nbe_eval(&beta(body, &Term::TInterval(I::I0)), session);
@@ -1471,7 +1485,7 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                     if a0_eval == a1_eval {
                         let b_fam = Term::PLam(
                             i_name.clone(),
-                            Box::new(
+                            Arc::new(
                                 match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
                                     Term::TPi(_, _, b_i, _) => {
                                         let max_idx = max_var(&b_i);
@@ -1494,11 +1508,11 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                         let x_shifted = shift(1, 0, &x_);
                         Term::TAbs(
                             arg_name,
-                            Box::new(nbe_eval(
+                            Arc::new(nbe_eval(
                                 &Term::TTransport(
-                                    Box::new(b_fam),
-                                    Box::new(nbe_eval(
-                                        &Term::TApp(Box::new(x_shifted), Box::new(Term::TVar(0))),
+                                    Arc::new(b_fam),
+                                    Arc::new(nbe_eval(
+                                        &Term::TApp(Arc::new(x_shifted), Arc::new(Term::TVar(0))),
                                         session,
                                     )),
                                 ),
@@ -1519,12 +1533,12 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                             };
                             let b_fam = Term::PLam(
                                 i_name.clone(),
-                                Box::new(
+                                Arc::new(
                                     match nbe_eval(
                                         &beta(&shift(1, 0, body), &Term::TVar(0)),
                                         session,
                                     ) {
-                                        Term::TPi(_, _, b_i, _) => *b_i,
+                                        Term::TPi(_, _, b_i, _) => b_i.as_ref().clone(),
                                         _ => shift(1, 0, &b0_body),
                                     },
                                 ),
@@ -1532,13 +1546,13 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                             let x_shifted = shift(1, 0, &x_);
                             Term::TAbs(
                                 arg_name,
-                                Box::new(nbe_eval(
+                                Arc::new(nbe_eval(
                                     &Term::TTransport(
-                                        Box::new(b_fam),
-                                        Box::new(nbe_eval(
+                                        Arc::new(b_fam),
+                                        Arc::new(nbe_eval(
                                             &Term::TApp(
-                                                Box::new(x_shifted),
-                                                Box::new(Term::TVar(0)),
+                                                Arc::new(x_shifted),
+                                                Arc::new(Term::TVar(0)),
                                             ),
                                             session,
                                         )),
@@ -1565,23 +1579,23 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                                 _ => shift(1, 0, &b0_body),
                             };
 
-                            let a_fam = Term::PLam(i_name.clone(), Box::new(a_i));
+                            let a_fam = Term::PLam(i_name.clone(), Arc::new(a_i));
                             let a_rev_fam = Term::PLam(
                                 "j".to_string(),
-                                Box::new(Term::PApp(
-                                    Box::new(shift(1, 0, &a_fam)),
-                                    Box::new(Term::TInterval(I::Neg(Box::new(I::Var(0))))),
+                                Arc::new(Term::PApp(
+                                    Arc::new(shift(1, 0, &a_fam)),
+                                    Arc::new(Term::TInterval(I::Neg(Arc::new(I::Var(0))))),
                                 )),
                             );
 
                             let y0_term = Term::TTransport(
-                                Box::new(shift(1, 0, &a_rev_fam)),
-                                Box::new(Term::TVar(0)),
+                                Arc::new(shift(1, 0, &a_rev_fam)),
+                                Arc::new(Term::TVar(0)),
                             );
 
                             let b_fam = Term::PLam(
                                 i_name.clone(),
-                                Box::new({
+                                Arc::new({
                                     let max_idx = max_var(&b_i);
                                     let temp = max_idx + 1;
                                     let tmp_var = Term::TVar(temp);
@@ -1592,20 +1606,20 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                                     let y0_shifted = shift(1, 0, &y0_term);
                                     let fill_at_i = nbe_eval(
                                         &Term::TTransport(
-                                            Box::new(Term::PLam(
+                                            Arc::new(Term::PLam(
                                                 "j".to_string(),
-                                                Box::new(nbe_eval(
+                                                Arc::new(nbe_eval(
                                                     &Term::PApp(
-                                                        Box::new(shift(2, 0, &a_fam)),
-                                                        Box::new(Term::TInterval(I::Meet(
-                                                            Box::new(I::Var(1)),
-                                                            Box::new(I::Var(0)),
+                                                        Arc::new(shift(2, 0, &a_fam)),
+                                                        Arc::new(Term::TInterval(I::Meet(
+                                                            Arc::new(I::Var(1)),
+                                                            Arc::new(I::Var(0)),
                                                         ))),
                                                     ),
                                                     session,
                                                 )),
                                             )),
-                                            Box::new(y0_shifted),
+                                            Arc::new(y0_shifted),
                                         ),
                                         session,
                                     );
@@ -1616,11 +1630,11 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                             let x_shifted = shift(1, 0, &x_);
                             Term::TAbs(
                                 arg_name,
-                                Box::new(nbe_eval(
+                                Arc::new(nbe_eval(
                                     &Term::TTransport(
-                                        Box::new(b_fam),
-                                        Box::new(nbe_eval(
-                                            &Term::TApp(Box::new(x_shifted), Box::new(y0_term)),
+                                        Arc::new(b_fam),
+                                        Arc::new(nbe_eval(
+                                            &Term::TApp(Arc::new(x_shifted), Arc::new(y0_term)),
                                             session,
                                         )),
                                     ),
@@ -1637,9 +1651,9 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
 
                     let a_fam = Term::PLam(
                         i_name.clone(),
-                        Box::new(
+                        Arc::new(
                             match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                                Term::TPath(a, _, _) => *a,
+                                Term::TPath(a, _, _) => a.as_ref().clone(),
                                 _ => shift(1, 0, &ty_a0),
                             },
                         ),
@@ -1649,10 +1663,10 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                     let x_shifted = shift(1, 0, &x_);
                     Term::PLam(
                         "j".to_string(),
-                        Box::new(nbe_eval(
+                        Arc::new(nbe_eval(
                             &Term::TTransport(
-                                Box::new(a_fam_s),
-                                Box::new(Term::PApp(Box::new(x_shifted), Box::new(Term::TVar(0)))),
+                                Arc::new(a_fam_s),
+                                Arc::new(Term::PApp(Arc::new(x_shifted), Arc::new(Term::TVar(0)))),
                             ),
                             session,
                         )),
@@ -1674,41 +1688,41 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
 
                         let a_fam = Term::PLam(
                             i_name.clone(),
-                            Box::new(
+                            Arc::new(
                                 match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
-                                    Term::TSigma(_, a_i, _) => *a_i,
+                                    Term::TSigma(_, a_i, _) => a_i.as_ref().clone(),
                                     _ => shift(1, 0, &b0_a),
                                 },
                             ),
                         );
 
                         let a_prime = nbe_eval(
-                            &Term::TTransport(Box::new(a_fam.clone()), a.clone()),
+                            &Term::TTransport(Arc::new(a_fam.clone()), a.clone()),
                             session,
                         );
 
                         let a_clone = (**a).clone();
                         let b_fam = Term::PLam(
                             i_name.clone(),
-                            Box::new(
+                            Arc::new(
                                 match nbe_eval(&beta(&shift(1, 0, body), &Term::TVar(0)), session) {
                                     Term::TSigma(_, _, b_i) => {
                                         let fill_at_i = nbe_eval(
                                             &Term::TTransport(
-                                                Box::new(Term::PLam(
+                                                Arc::new(Term::PLam(
                                                     "j".to_string(),
-                                                    Box::new(nbe_eval(
+                                                    Arc::new(nbe_eval(
                                                         &Term::PApp(
-                                                            Box::new(shift(2, 0, &a_fam)),
-                                                            Box::new(Term::TInterval(I::Meet(
-                                                                Box::new(I::Var(1)),
-                                                                Box::new(I::Var(0)),
+                                                            Arc::new(shift(2, 0, &a_fam)),
+                                                            Arc::new(Term::TInterval(I::Meet(
+                                                                Arc::new(I::Var(1)),
+                                                                Arc::new(I::Var(0)),
                                                             ))),
                                                         ),
                                                         session,
                                                     )),
                                                 )),
-                                                Box::new(shift(1, 0, &a_clone)),
+                                                Arc::new(shift(1, 0, &a_clone)),
                                             ),
                                             session,
                                         );
@@ -1720,12 +1734,12 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                         );
 
                         let b_prime =
-                            nbe_eval(&Term::TTransport(Box::new(b_fam), b.clone()), session);
-                        Term::TPair(Box::new(a_prime), Box::new(b_prime))
+                            nbe_eval(&Term::TTransport(Arc::new(b_fam), b.clone()), session);
+                        Term::TPair(Arc::new(a_prime), Arc::new(b_prime))
                     }
                     _ => Term::TTransport(
-                        Box::new(Term::PLam(i_name.clone(), body.clone())),
-                        Box::new(x_),
+                        Arc::new(Term::PLam(i_name.clone(), body.clone())),
+                        Arc::new(x_),
                     ),
                 },
 
@@ -1734,28 +1748,28 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                     if is_bot_dnf(&nbe_eval(phi0, session)) {
                         nbe_eval(
                             &Term::TTransport(
-                                Box::new(Term::PLam(
+                                Arc::new(Term::PLam(
                                     i_name.clone(),
-                                    Box::new(
+                                    Arc::new(
                                         match nbe_eval(
                                             &beta(&shift(1, 0, body), &Term::TVar(0)),
                                             session,
                                         ) {
-                                            Term::TGlue(a, _, _) => *a,
+                                            Term::TGlue(a, _, _) => a.as_ref().clone(),
                                             other => other,
                                         },
                                     ),
                                 )),
-                                Box::new(x_),
+                                Arc::new(x_),
                             ),
                             session,
                         )
                     } else if is_top_dnf(&nbe_eval(phi0, session)) {
                         nbe_eval(
                             &Term::TTransport(
-                                Box::new(Term::PLam(
+                                Arc::new(Term::PLam(
                                     i_name.clone(),
-                                    Box::new(
+                                    Arc::new(
                                         match nbe_eval(
                                             &beta(&shift(1, 0, body), &Term::TVar(0)),
                                             session,
@@ -1767,7 +1781,7 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                                         },
                                     ),
                                 )),
-                                Box::new(x_),
+                                Arc::new(x_),
                             ),
                             session,
                         )
@@ -1781,24 +1795,24 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                                     &beta(&shift(1, 0, body), &Term::TVar(0)),
                                     session,
                                 ) {
-                                    Term::TGlue(a, _, _) => *a,
+                                    Term::TGlue(a, _, _) => a.as_ref().clone(),
                                     other => other,
                                 };
-                                let tube = Term::PLam(i_name.clone(), Box::new(shift(1, 0, &*t)));
+                                let tube = Term::PLam(i_name.clone(), Arc::new(shift(1, 0, &*t)));
                                 let hcomp = Term::THComp(
-                                    Box::new(a_ty),
+                                    Arc::new(a_ty),
                                     vec![((**phi0).clone(), tube)],
                                     (*a).clone(),
                                 );
                                 Term::TGlueElem(
-                                    Box::new((**phi0).clone()),
+                                    Arc::new((**phi0).clone()),
                                     t.clone(),
-                                    Box::new(hcomp),
+                                    Arc::new(hcomp),
                                 )
                             }
                             _ => Term::TTransport(
-                                Box::new(Term::PLam(i_name, body.clone())),
-                                Box::new(x_),
+                                Arc::new(Term::PLam(i_name, body.clone())),
+                                Arc::new(x_),
                             ),
                         }
                     }
@@ -1811,22 +1825,22 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                         Term::TLift(v, lvl) => {
                             let a_fam = Term::PLam(
                                 i_name.clone(),
-                                Box::new(
+                                Arc::new(
                                     match nbe_eval(
                                         &beta(&shift(1, 0, body), &Term::TVar(0)),
                                         session,
                                     ) {
-                                        Term::TLift(a, _) => *a,
+                                        Term::TLift(a, _) => a.as_ref().clone(),
                                         other => other,
                                     },
                                 ),
                             );
-                            let inner_transport = Term::TTransport(Box::new(a_fam), v);
-                            Term::TLift(Box::new(inner_transport), lvl)
+                            let inner_transport = Term::TTransport(Arc::new(a_fam), v);
+                            Term::TLift(Arc::new(inner_transport), lvl)
                         }
                         _ => Term::TTransport(
-                            Box::new(Term::PLam(i_name, body.clone())),
-                            Box::new(x_),
+                            Arc::new(Term::PLam(i_name, body.clone())),
+                            Arc::new(x_),
                         ),
                     }
                 }
@@ -1838,33 +1852,33 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                         Term::TLower(v) => {
                             let a_fam = Term::PLam(
                                 i_name.clone(),
-                                Box::new(
+                                Arc::new(
                                     match nbe_eval(
                                         &beta(&shift(1, 0, body), &Term::TVar(0)),
                                         session,
                                     ) {
-                                        Term::TLower(a) => *a,
+                                        Term::TLower(a) => a.as_ref().clone(),
                                         other => other,
                                     },
                                 ),
                             );
-                            let inner_transport = Term::TTransport(Box::new(a_fam), v);
-                            Term::TLower(Box::new(inner_transport))
+                            let inner_transport = Term::TTransport(Arc::new(a_fam), v);
+                            Term::TLower(Arc::new(inner_transport))
                         }
                         _ => Term::TTransport(
-                            Box::new(Term::PLam(i_name, body.clone())),
-                            Box::new(x_),
+                            Arc::new(Term::PLam(i_name, body.clone())),
+                            Arc::new(x_),
                         ),
                     }
                 }
 
                 _ => Term::TTransport(
-                    Box::new(Term::PLam(i_name.clone(), body.clone())),
-                    Box::new(x_),
+                    Arc::new(Term::PLam(i_name.clone(), body.clone())),
+                    Arc::new(x_),
                 ),
             }
         }
 
-        p_ => Term::TTransport(Box::new(p_), Box::new(x_)),
+        p_ => Term::TTransport(Arc::new(p_), Arc::new(x_)),
     }
 }

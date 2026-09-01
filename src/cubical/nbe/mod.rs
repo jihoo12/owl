@@ -57,8 +57,7 @@ pub use value::{Closure, DNFSystem, Env, Globals, IClosure, Neutral, Scope, Valu
 #[allow(unused_imports)]
 pub use crate::cubical::session::get_meta_solution;
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Term, max_var};
@@ -90,7 +89,7 @@ pub fn nbe_eval(t: &Term, session: &mut Session) -> Term {
         }
     }
     let result = {
-        let empty_globals: Globals = Rc::new(RefCell::new(Vec::new()));
+        let empty_globals: Globals = Arc::new(Mutex::new(Vec::new()));
         let mv = max_var(t);
         if mv < 0 {
             normalize(&Scope::empty(), &empty_globals, 0, t, session)
@@ -135,7 +134,7 @@ pub fn nbe_eval_ctx(ctx_len: usize, t: &Term, session: &mut Session) -> Term {
     let Some(globals) = session.get_current_globals() else {
         return nbe_eval(t, session);
     };
-    let n_globals = globals.borrow().len();
+    let n_globals = globals.lock().unwrap().len();
     let n_local = ctx_len.saturating_sub(n_globals);
     // Build the eval env with ONLY the local binders (as neutral variables).
     // Global references are left outside the env so they resolve through the

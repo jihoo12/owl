@@ -9,6 +9,7 @@ use crate::cubical::equality::definitionally_equal;
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Term, shift, subst};
+use std::sync::Arc;
 
 /// Try to match a constructor value and extract its ordinary + interval args.
 /// Returns (con_name, ordinary_args, interval_args) or None.
@@ -218,7 +219,7 @@ pub fn do_hcomp(
                         global_offset,
                         body: {
                             let inner_term = quote(1, globals, global_offset, inner, session);
-                            Term::TAbs(arg_name.clone(), Box::new(inner_term))
+                            Term::TAbs(arg_name.clone(), Arc::new(inner_term))
                         },
                     },
                 );
@@ -258,7 +259,7 @@ pub fn do_hcomp(
                 let fst_result = do_hcomp(
                     globals,
                     global_offset,
-                    *fst_ty.clone(),
+                    fst_ty.as_ref().clone(),
                     fst_sys,
                     (**fst_base).clone(),
                     session,
@@ -296,7 +297,7 @@ pub fn do_hcomp(
                     session,
                 );
 
-                let result = Value::VPair(Box::new(fst_result), Box::new(snd_result));
+                let result = Value::VPair(Arc::new(fst_result), Arc::new(snd_result));
                 record_step(
                     "hcomp-sigma".into(),
                     "hcomp (Σ _ _) sys p q".into(),
@@ -320,13 +321,13 @@ pub fn do_hcomp(
                     Value::VCellCon(_, name, args, ivars) => {
                         (name.clone(), args.clone(), ivars.clone())
                     }
-                    _ => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
+                    _ => return Value::VHComp(Arc::new(a_ty), sys, Arc::new(base)),
                 };
 
                 let dts = session.current_dts();
                 let dt = match dts.iter().find(|dt| dt.name == *d_name) {
                     Some(dt) => dt.clone(),
-                    None => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
+                    None => return Value::VHComp(Arc::new(a_ty), sys, Arc::new(base)),
                 };
 
                 let arg_tys = match dt
@@ -337,7 +338,7 @@ pub fn do_hcomp(
                     .or_else(|| dt.find_cellcon(&base_con).map(|s| s.arg_tys.clone()))
                 {
                     Some(tys) => tys,
-                    None => return Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
+                    None => return Value::VHComp(Arc::new(a_ty), sys, Arc::new(base)),
                 };
 
                 let n = arg_tys.len();
@@ -376,10 +377,10 @@ pub fn do_hcomp(
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
                             }
                         } else {
-                            return Value::VHComp(Box::new(a_ty), sys, Box::new(base));
+                            return Value::VHComp(Arc::new(a_ty), sys, Arc::new(base));
                         }
                     } else {
-                        return Value::VHComp(Box::new(a_ty), sys, Box::new(base));
+                        return Value::VHComp(Arc::new(a_ty), sys, Arc::new(base));
                     }
                 }
 
@@ -420,14 +421,14 @@ pub fn do_hcomp(
                         d_name.clone(),
                         base_con.clone(),
                         result_args,
-                        Box::new(base_ivars[0].clone()),
+                        Arc::new(base_ivars[0].clone()),
                     ),
                     Value::VSqCon(_, _, _, _, _) => Value::VSqCon(
                         d_name.clone(),
                         base_con.clone(),
                         result_args,
-                        Box::new(base_ivars[0].clone()),
-                        Box::new(base_ivars[1].clone()),
+                        Arc::new(base_ivars[0].clone()),
+                        Arc::new(base_ivars[1].clone()),
                     ),
                     Value::VCellCon(_, _, _, _) => {
                         Value::VCellCon(d_name.clone(), base_con.clone(), result_args, base_ivars)
@@ -437,7 +438,7 @@ pub fn do_hcomp(
             }
 
             // ── Default: stuck hcomp ──
-            _ => Value::VHComp(Box::new(a_ty), sys, Box::new(base)),
+            _ => Value::VHComp(Arc::new(a_ty), sys, Arc::new(base)),
         }
     }
 }
@@ -544,7 +545,7 @@ pub fn do_comp(
                         global_offset,
                         body: {
                             let inner_term = quote(1, globals, global_offset, inner, session);
-                            Term::TAbs(arg_name.clone(), Box::new(inner_term))
+                            Term::TAbs(arg_name.clone(), Arc::new(inner_term))
                         },
                     },
                 );
@@ -584,7 +585,7 @@ pub fn do_comp(
                 let fst_result = do_comp(
                     globals,
                     global_offset,
-                    *fst_ty.clone(),
+                    fst_ty.as_ref().clone(),
                     fst_sys,
                     (**fst_base).clone(),
                     session,
@@ -622,7 +623,7 @@ pub fn do_comp(
                     session,
                 );
 
-                let result = Value::VPair(Box::new(fst_result), Box::new(snd_result));
+                let result = Value::VPair(Arc::new(fst_result), Arc::new(snd_result));
                 record_step(
                     "comp-sigma".into(),
                     "comp (Σ _ _) sys p q".into(),
@@ -647,7 +648,7 @@ pub fn do_comp(
                         (name.clone(), args.clone(), ivars.clone())
                     }
                     _ => {
-                        let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                        let result = Value::VComp(Arc::new(a_fam), sys, Arc::new(base));
                         record_step(
                             "comp-stuck".into(),
                             "comp _ _ _ _".into(),
@@ -661,7 +662,7 @@ pub fn do_comp(
                 let dt = match dts.iter().find(|dt| dt.name == *d_name) {
                     Some(dt) => dt.clone(),
                     None => {
-                        let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                        let result = Value::VComp(Arc::new(a_fam), sys, Arc::new(base));
                         record_step(
                             "comp-stuck".into(),
                             "comp _ _ _ _".into(),
@@ -680,7 +681,7 @@ pub fn do_comp(
                 let arg_tys = match arg_tys {
                     Some(tys) => tys,
                     None => {
-                        let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                        let result = Value::VComp(Arc::new(a_fam), sys, Arc::new(base));
                         record_step(
                             "comp-stuck".into(),
                             "comp _ _ _ _".into(),
@@ -726,7 +727,7 @@ pub fn do_comp(
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
                             }
                         } else {
-                            let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                            let result = Value::VComp(Arc::new(a_fam), sys, Arc::new(base));
                             record_step(
                                 "comp-stuck".into(),
                                 "comp _ _ _ _".into(),
@@ -735,7 +736,7 @@ pub fn do_comp(
                             return result;
                         }
                     } else {
-                        let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                        let result = Value::VComp(Arc::new(a_fam), sys, Arc::new(base));
                         record_step(
                             "comp-stuck".into(),
                             "comp _ _ _ _".into(),
@@ -782,14 +783,14 @@ pub fn do_comp(
                         d_name.clone(),
                         base_con.clone(),
                         result_args,
-                        Box::new(base_ivars[0].clone()),
+                        Arc::new(base_ivars[0].clone()),
                     ),
                     Value::VSqCon(_, _, _, _, _) => Value::VSqCon(
                         d_name.clone(),
                         base_con.clone(),
                         result_args,
-                        Box::new(base_ivars[0].clone()),
-                        Box::new(base_ivars[1].clone()),
+                        Arc::new(base_ivars[0].clone()),
+                        Arc::new(base_ivars[1].clone()),
                     ),
                     Value::VCellCon(_, _, _, _) => {
                         Value::VCellCon(d_name.clone(), base_con.clone(), result_args, base_ivars)
@@ -805,7 +806,7 @@ pub fn do_comp(
             }
 
             _ => {
-                let result = Value::VComp(Box::new(a_fam), sys, Box::new(base));
+                let result = Value::VComp(Arc::new(a_fam), sys, Arc::new(base));
                 record_step(
                     "comp-stuck".into(),
                     "comp _ _ _ _".into(),
@@ -936,7 +937,7 @@ pub fn do_fill(
                         global_offset,
                         body: Term::TAbs(
                             arg_name.clone(),
-                            Box::new(Term::PApp(Box::new(inner_term), Box::new(Term::TVar(1)))),
+                            Arc::new(Term::PApp(Arc::new(inner_term), Arc::new(Term::TVar(1)))),
                         ),
                     },
                 );
@@ -977,7 +978,7 @@ pub fn do_fill(
                 let fst_fill = do_fill(
                     globals,
                     global_offset,
-                    *fst_ty.clone(),
+                    fst_ty.as_ref().clone(),
                     fst_sys,
                     (**fst_base).clone(),
                     session,
@@ -1024,8 +1025,8 @@ pub fn do_fill(
                         globals: globals.clone(),
                         global_offset,
                         body: Term::TPair(
-                            Box::new(Term::PApp(Box::new(fst_fill_term), Box::new(Term::TVar(1)))),
-                            Box::new(Term::PApp(Box::new(snd_fill_term), Box::new(Term::TVar(1)))),
+                            Arc::new(Term::PApp(Arc::new(fst_fill_term), Arc::new(Term::TVar(1)))),
+                            Arc::new(Term::PApp(Arc::new(snd_fill_term), Arc::new(Term::TVar(1)))),
                         ),
                     },
                 );
@@ -1053,7 +1054,7 @@ pub fn do_fill(
                         (name.clone(), args.clone(), ivars.clone())
                     }
                     _ => {
-                        let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                        let result = Value::VFill(Arc::new(a_fam), sys, Arc::new(base));
                         record_step(
                             "fill-stuck".into(),
                             "fill _ _ _".into(),
@@ -1067,7 +1068,7 @@ pub fn do_fill(
                 let dt = match dts.iter().find(|dt| dt.name == *d_name) {
                     Some(dt) => dt.clone(),
                     None => {
-                        let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                        let result = Value::VFill(Arc::new(a_fam), sys, Arc::new(base));
                         record_step(
                             "fill-stuck".into(),
                             "fill _ _ _".into(),
@@ -1086,7 +1087,7 @@ pub fn do_fill(
                 {
                     Some(tys) => tys,
                     None => {
-                        let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                        let result = Value::VFill(Arc::new(a_fam), sys, Arc::new(base));
                         record_step(
                             "fill-stuck".into(),
                             "fill _ _ _".into(),
@@ -1147,7 +1148,7 @@ pub fn do_fill(
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
                             }
                         } else {
-                            let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                            let result = Value::VFill(Arc::new(a_fam), sys, Arc::new(base));
                             record_step(
                                 "fill-stuck".into(),
                                 "fill _ _ _".into(),
@@ -1156,7 +1157,7 @@ pub fn do_fill(
                             return result;
                         }
                     } else {
-                        let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                        let result = Value::VFill(Arc::new(a_fam), sys, Arc::new(base));
                         record_step(
                             "fill-stuck".into(),
                             "fill _ _ _".into(),
@@ -1194,7 +1195,7 @@ pub fn do_fill(
                     );
                     let arg_fill_term = quote(1, globals, global_offset, arg_fill, session);
                     result_arg_terms
-                        .push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
+                        .push(Term::PApp(Arc::new(arg_fill_term), Arc::new(Term::TVar(1))));
                 }
 
                 let con_term = match &base {
@@ -1205,7 +1206,7 @@ pub fn do_fill(
                         d_name.clone(),
                         base_con.clone(),
                         result_arg_terms,
-                        Box::new(quote(
+                        Arc::new(quote(
                             1,
                             globals,
                             global_offset,
@@ -1217,14 +1218,14 @@ pub fn do_fill(
                         d_name.clone(),
                         base_con.clone(),
                         result_arg_terms,
-                        Box::new(quote(
+                        Arc::new(quote(
                             1,
                             globals,
                             global_offset,
                             base_ivars[0].clone(),
                             session,
                         )),
-                        Box::new(quote(
+                        Arc::new(quote(
                             1,
                             globals,
                             global_offset,
@@ -1266,7 +1267,7 @@ pub fn do_fill(
 
             // ── Default: stuck fill ──
             _ => {
-                let result = Value::VFill(Box::new(a_fam), sys, Box::new(base));
+                let result = Value::VFill(Arc::new(a_fam), sys, Arc::new(base));
                 record_step(
                     "fill-stuck".into(),
                     "fill _ _ _".into(),
@@ -1396,7 +1397,7 @@ pub fn do_hfill(
                         global_offset,
                         body: Term::TAbs(
                             arg_name.clone(),
-                            Box::new(Term::PApp(Box::new(inner_term), Box::new(Term::TVar(1)))),
+                            Arc::new(Term::PApp(Arc::new(inner_term), Arc::new(Term::TVar(1)))),
                         ),
                     },
                 );
@@ -1437,7 +1438,7 @@ pub fn do_hfill(
                 let fst_fill = do_hfill(
                     globals,
                     global_offset,
-                    *fst_ty.clone(),
+                    fst_ty.as_ref().clone(),
                     fst_sys,
                     (**fst_base).clone(),
                     session,
@@ -1484,8 +1485,8 @@ pub fn do_hfill(
                         globals: globals.clone(),
                         global_offset,
                         body: Term::TPair(
-                            Box::new(Term::PApp(Box::new(fst_fill_term), Box::new(Term::TVar(1)))),
-                            Box::new(Term::PApp(Box::new(snd_fill_term), Box::new(Term::TVar(1)))),
+                            Arc::new(Term::PApp(Arc::new(fst_fill_term), Arc::new(Term::TVar(1)))),
+                            Arc::new(Term::PApp(Arc::new(snd_fill_term), Arc::new(Term::TVar(1)))),
                         ),
                     },
                 );
@@ -1513,7 +1514,7 @@ pub fn do_hfill(
                         (name.clone(), args.clone(), ivars.clone())
                     }
                     _ => {
-                        let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                        let result = Value::VHFill(Arc::new(a_ty), sys, Arc::new(base));
                         record_step(
                             "hfill-stuck".into(),
                             "hfill _ _ _".into(),
@@ -1527,7 +1528,7 @@ pub fn do_hfill(
                 let dt = match dts.iter().find(|dt| dt.name == *d_name) {
                     Some(dt) => dt.clone(),
                     None => {
-                        let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                        let result = Value::VHFill(Arc::new(a_ty), sys, Arc::new(base));
                         record_step(
                             "hfill-stuck".into(),
                             "hfill _ _ _".into(),
@@ -1546,7 +1547,7 @@ pub fn do_hfill(
                 {
                     Some(tys) => tys,
                     None => {
-                        let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                        let result = Value::VHFill(Arc::new(a_ty), sys, Arc::new(base));
                         record_step(
                             "hfill-stuck".into(),
                             "hfill _ _ _".into(),
@@ -1606,7 +1607,7 @@ pub fn do_hfill(
                                 per_arg_tubes[k].push((phi.clone(), tube_arg_plam));
                             }
                         } else {
-                            let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                            let result = Value::VHFill(Arc::new(a_ty), sys, Arc::new(base));
                             record_step(
                                 "hfill-stuck".into(),
                                 "hfill _ _ _".into(),
@@ -1615,7 +1616,7 @@ pub fn do_hfill(
                             return result;
                         }
                     } else {
-                        let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                        let result = Value::VHFill(Arc::new(a_ty), sys, Arc::new(base));
                         record_step(
                             "hfill-stuck".into(),
                             "hfill _ _ _".into(),
@@ -1653,7 +1654,7 @@ pub fn do_hfill(
                     );
                     let arg_fill_term = quote(1, globals, global_offset, arg_fill, session);
                     result_arg_terms
-                        .push(Term::PApp(Box::new(arg_fill_term), Box::new(Term::TVar(1))));
+                        .push(Term::PApp(Arc::new(arg_fill_term), Arc::new(Term::TVar(1))));
                 }
 
                 let con_term = match &base {
@@ -1664,7 +1665,7 @@ pub fn do_hfill(
                         d_name.clone(),
                         base_con.clone(),
                         result_arg_terms,
-                        Box::new(quote(
+                        Arc::new(quote(
                             1,
                             globals,
                             global_offset,
@@ -1676,14 +1677,14 @@ pub fn do_hfill(
                         d_name.clone(),
                         base_con.clone(),
                         result_arg_terms,
-                        Box::new(quote(
+                        Arc::new(quote(
                             1,
                             globals,
                             global_offset,
                             base_ivars[0].clone(),
                             session,
                         )),
-                        Box::new(quote(
+                        Arc::new(quote(
                             1,
                             globals,
                             global_offset,
@@ -1725,7 +1726,7 @@ pub fn do_hfill(
 
             // ── Default: stuck hfill ──
             _ => {
-                let result = Value::VHFill(Box::new(a_ty), sys, Box::new(base));
+                let result = Value::VHFill(Arc::new(a_ty), sys, Arc::new(base));
                 record_step(
                     "hfill-stuck".into(),
                     "hfill _ _ _".into(),

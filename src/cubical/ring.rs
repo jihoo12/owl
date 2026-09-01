@@ -28,6 +28,7 @@ use crate::cubical::nbe::nbe_eval_ctx;
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Term, shift};
 use crate::cubical::typechecker::{Ctx, TypeError, check_dt, infer_dt};
+use std::sync::Arc;
 
 /// Extract the ring operations `(add, mul, zero, one)` from a term whose type
 /// is a bundled algebra record applied to its parameters — `CommRing A add mul
@@ -207,7 +208,7 @@ impl Ring {
                     "ring: internal error — structured mode without a ring term".into(),
                 )
             })?;
-            Ok(Term::TProj(field.to_string(), Box::new(c.clone())))
+            Ok(Term::TProj(field.to_string(), Arc::new(c.clone())))
         };
         // The ring operations. In `Concrete` mode these are the globals
         // `add`/`mul`/`zero`/`one`; in `Structured` mode they are extracted
@@ -290,7 +291,7 @@ impl Ring {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn app(f: &Term, a: &Term) -> Term {
-    Term::TApp(Box::new(f.clone()), Box::new(a.clone()))
+    Term::TApp(Arc::new(f.clone()), Arc::new(a.clone()))
 }
 
 pub(crate) fn inst(f: &Term, args: &[&Term]) -> Term {
@@ -299,7 +300,7 @@ pub(crate) fn inst(f: &Term, args: &[&Term]) -> Term {
 
 /// Path reflection: `Path t t`.
 pub(crate) fn refl(t: &Term) -> Term {
-    Term::PLam("_i".into(), Box::new(shift(1, 0, t)))
+    Term::PLam("_i".into(), Arc::new(shift(1, 0, t)))
 }
 
 /// `refl` adjusted to the declared endpoints `a`, `b` — valid when `a` and
@@ -418,7 +419,7 @@ pub(crate) fn numeral_of(r: &Ring, t: &Term, session: &mut Session) -> Option<i6
                 return Some(0);
             }
             if let Term::TApp(outer, inner) = t {
-                if let Term::TApp(g, one_t) = &**outer {
+                if let Term::TApp(g, one_t) = outer.as_ref() {
                     let g_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, g, session);
                     let add_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.add, session);
                     if g_nf == add_nf && **one_t == r.one {
@@ -439,8 +440,8 @@ pub(crate) fn numeral_of(r: &Ring, t: &Term, session: &mut Session) -> Option<i6
                 return Some(1);
             }
             match nf {
-                Term::TApp(outer, inner) => match *outer {
-                    Term::TApp(g, one_t) if *g == r.add && *one_t == r.one => {
+                Term::TApp(outer, inner) => match outer.as_ref() {
+                    Term::TApp(g, one_t) if **g == r.add && **one_t == r.one => {
                         numeral_of(r, &inner, session).map(|j| j + 1)
                     }
                     _ => None,
@@ -735,11 +736,11 @@ pub(crate) fn as_add(r: &Ring, t: &Term, session: &mut Session) -> Option<(Term,
             }
             let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session);
             match nf {
-                Term::TApp(outer, b) => match *outer {
+                Term::TApp(outer, b) => match outer.as_ref() {
                     Term::TApp(g, a) => {
                         let add_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.add, session);
-                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &g, session) == add_nf {
-                            Some((*a, *b))
+                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, g, session) == add_nf {
+                            Some((a.as_ref().clone(), b.as_ref().clone()))
                         } else {
                             None
                         }
@@ -785,11 +786,11 @@ pub(crate) fn as_mul(r: &Ring, t: &Term, session: &mut Session) -> Option<(Term,
             }
             let nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, t, session);
             match nf {
-                Term::TApp(outer, b) => match *outer {
+                Term::TApp(outer, b) => match outer.as_ref() {
                     Term::TApp(g, a) => {
                         let mul_nf = crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &r.mul, session);
-                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, &g, session) == mul_nf {
-                            Some((*a, *b))
+                        if crate::cubical::nbe::nbe_eval_ctx(r.ctx_len, g, session) == mul_nf {
+                            Some((a.as_ref().clone(), b.as_ref().clone()))
                         } else {
                             None
                         }
@@ -1694,7 +1695,7 @@ fn sides_from_nf(
     match goal_nf {
         Term::TPath(a, u, v) => {
             let a_nf = nbe_eval_ctx(ctx.len(), &a, session);
-            Ok((*u, *v, a_nf))
+            Ok((u.as_ref().clone(), v.as_ref().clone(), a_nf))
         }
         other => Err(TypeError::Other(format!(
             "ring: goal is not a path (got '{}')",

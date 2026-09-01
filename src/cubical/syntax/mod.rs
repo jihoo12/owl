@@ -10,6 +10,7 @@ pub use positivity::{Variance, check_datatype_positivity, compute_param_variance
 pub use pretty::show_term;
 
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top};
+use std::sync::Arc;
 
 pub type Name = String;
 pub type Level = i32;
@@ -25,118 +26,67 @@ pub type System = Vec<(Term, Term)>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Term {
     TVar(i32),
-    TApp(Box<Term>, Box<Term>),
-    TAbs(Name, Box<Term>),
+    TApp(Arc<Term>, Arc<Term>),
+    TAbs(Name, Arc<Term>),
     TUniv(Level),
-    /// Impredicative proof-irrelevant universe (Prop).
-    /// `Prop : U0`. Prop is impredicative: `Pi (x:A). B : Prop` when both A,B : Prop.
     TProp,
-    /// SSet — the universe of small types. `SSet : U1`. SSet is closed under Pi, Sigma, Path.
     TSSet,
-    /// Universe lifting: `TLift(A, m)` lives in `U_{max(n,m)}` when `A : U_n`.
-    /// Semantically identity — used to coerce types between universe levels.
-    TLift(Box<Term>, Level),
-    /// Universe lowering: `TLower(A)` maps a type in `U_{n+1}` down to `U_n`.
-    /// Must be applied to a lifted value. `lower(lift(A)) = A`.
-    TLower(Box<Term>),
+    TLift(Arc<Term>, Level),
+    TLower(Arc<Term>),
     TIntervalTy,
-    TPi(Name, Box<Term>, Box<Term>, bool),
+    TPi(Name, Arc<Term>, Arc<Term>, bool),
     TInterval(I),
     TCube(DNF),
-    TPath(Box<Term>, Box<Term>, Box<Term>),
-    PLam(Name, Box<Term>),
-    PApp(Box<Term>, Box<Term>),
-    THComp(Box<Term>, System, Box<Term>),
-    TComp(Box<Term>, System, Box<Term>),
-    TFill(Box<Term>, System, Box<Term>),
-    THFill(Box<Term>, System, Box<Term>),
-    TEquiv(Box<Term>, Box<Term>),
+    TPath(Arc<Term>, Arc<Term>, Arc<Term>),
+    PLam(Name, Arc<Term>),
+    PApp(Arc<Term>, Arc<Term>),
+    THComp(Arc<Term>, System, Arc<Term>),
+    TComp(Arc<Term>, System, Arc<Term>),
+    TFill(Arc<Term>, System, Arc<Term>),
+    THFill(Arc<Term>, System, Arc<Term>),
+    TEquiv(Arc<Term>, Arc<Term>),
     TMkEquiv(
-        Box<Term>,
-        Box<Term>,
-        Box<Term>,
-        Box<Term>,
-        Box<Term>,
-        Box<Term>,
+        Arc<Term>,
+        Arc<Term>,
+        Arc<Term>,
+        Arc<Term>,
+        Arc<Term>,
+        Arc<Term>,
     ),
-    TEquivFwd(Box<Term>, Box<Term>),
-    TUa(Box<Term>),
-    TTransport(Box<Term>, Box<Term>),
-    /// Generalized transport: `TTransp(family, direction, base)`.
-    /// `family : I → Type` (a type family), `direction : I`, `base : family i0`.
-    /// Result type: `family direction`.
-    /// At `i0`: returns `base` unchanged. At `i1`: full transport (decomposes
-    /// through Pi/Sigma/data like the current `transport`). For non-concrete
-    /// directions, stuck as a neutral.
-    TTransp(Box<Term>, Box<Term>, Box<Term>),
-    TGlue(Box<Term>, Box<Term>, Box<Term>),
-    TGlueElem(Box<Term>, Box<Term>, Box<Term>),
-    TUnglue(Box<Term>, Box<Term>, Box<Term>),
-    TPartial(Box<Term>, Box<Term>),
-    /// System type former: `[phi => A, psi => B]`.
-    /// Represents a partial type family — on face φ the type is A, on face ψ the type is B.
+    TEquivFwd(Arc<Term>, Arc<Term>),
+    TUa(Arc<Term>),
+    TTransport(Arc<Term>, Arc<Term>),
+    TTransp(Arc<Term>, Arc<Term>, Arc<Term>),
+    TGlue(Arc<Term>, Arc<Term>, Arc<Term>),
+    TGlueElem(Arc<Term>, Arc<Term>, Arc<Term>),
+    TUnglue(Arc<Term>, Arc<Term>, Arc<Term>),
+    TPartial(Arc<Term>, Arc<Term>),
     TSystemType(System),
-    TSigma(Name, Box<Term>, Box<Term>),
-    TPair(Box<Term>, Box<Term>),
-    TFst(Box<Term>),
-    TSnd(Box<Term>),
+    TSigma(Name, Arc<Term>, Arc<Term>),
+    TPair(Arc<Term>, Arc<Term>),
+    TFst(Arc<Term>),
+    TSnd(Arc<Term>),
 
     // -- Tactics / Meta-variables -------------------------------------------
-    /// Unsolved meta-variable (tactic hole). `Meta(i)` is created by the
-    /// tactic engine and should be fully solved before NbE/typechecking.
     Meta(i32),
-    /// A tactic block `by t1; t2; ...` — desugared by the typechecker.
     TBy(Vec<Tactic>),
 
     // -- Inductive types / Higher Inductive Types (HITs) --------------------
-    /// Reference to a declared datatype, used as a type.
-    /// `TData("S1", [])` ~ `S¹`. For parameterized types:
-    /// `TData("List", [A])` ~ `List A`.
     TData(Name, Vec<Term>),
-    /// Ordinary constructor application: `TCon(datatype, constructor, args)`.
-    /// `args` are positional, in declaration order.
     TCon(Name, Name, Vec<Term>),
-    /// Path-constructor application: `TPCon(datatype, constructor, args, r)`.
-    /// `r` is the interval argument. `args` are the constructor's ordinary
-    /// arguments only (the interval argument is kept separate as `r`,
-    /// matching how `PLam`/`PApp` separate interval abstraction from term
-    /// abstraction).
-    TPCon(Name, Name, Vec<Term>, Box<Term>),
-    /// Square-constructor application: `TSqCon(datatype, constructor, args, r, s)`.
-    /// `r` and `s` are the two interval arguments. `args` are the constructor's
-    /// ordinary arguments only.
-    TSqCon(Name, Name, Vec<Term>, Box<Term>, Box<Term>),
-    /// N-dimensional cell-constructor application: `TCellCon(datatype, constructor, args, ivars)`.
-    /// `ivars` is the list of interval arguments (0 = point con, 1 = path con,
-    /// 2 = square con, 3 = cube con, ...). `args` are the constructor's ordinary
-    /// arguments only.  Replaces TPCon/TSqCon for dimensions >= 3 and provides
-    /// a uniform representation for all HIT cell constructors.
+    TPCon(Name, Name, Vec<Term>, Arc<Term>),
+    TSqCon(Name, Name, Vec<Term>, Arc<Term>, Arc<Term>),
     TCellCon(Name, Name, Vec<Term>, Vec<Term>),
-    /// Eliminator (dependent recursor) for a datatype.
-    /// `TElim(motive, cases, scrutinee)`.
-    /// `motive : (x : TData(d)) -> U_n`, given as a `TAbs`-shaped term
-    /// (i.e. `motive` itself binds the scrutinee, index 0 in its body).
-    TElim(Box<Term>, Vec<ElimCase>, Box<Term>),
+    TElim(Arc<Term>, Vec<ElimCase>, Arc<Term>),
 
     // -- Record types --------------------------------------------------------
-    /// Record field projection: `TProj(field, record)`.
-    /// Projects the named field from a record value. Records are inductive types
-    /// with a single constructor, so this is semantically an eliminator that
-    /// selects the appropriate constructor argument.
-    TProj(Name, Box<Term>),
-    /// Record update: `TRecordUpdate(record, [(field, value), ...])`.
-    /// Desugars to a constructor application with the specified fields replaced
-    /// by new values while the rest are projected from the original record.
-    TRecordUpdate(Box<Term>, Vec<(Name, Term)>),
+    TProj(Name, Arc<Term>),
+    TRecordUpdate(Arc<Term>, Vec<(Name, Term)>),
 
     // -- Coinduction ---------------------------------------------------------
-    /// Delay type former: `Delay A` is the type of delayed computations.
-    /// It has a single constructor `Next : A -> Delay A`.
-    TDelay(Box<Term>),
-    /// Constructor: wraps a value into `Delay A`.
-    TNext(Box<Term>),
-    /// Destructor: forces a delayed computation. `Force (Next x) = x`.
-    TForce(Box<Term>),
+    TDelay(Arc<Term>),
+    TNext(Arc<Term>),
+    TForce(Arc<Term>),
 }
 
 /// One arm of an eliminator. Binds `binders.len()` fresh variables over
@@ -578,7 +528,7 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
                 .map(|case| ElimCase {
                     con: case.con.clone(),
                     binders: case.binders.clone(),
-                    body: b(shift(d, c + case.binders.len() as i32, &case.body)),
+                    body: Box::new(shift(d, c + case.binders.len() as i32, &case.body)),
                     as_name: case.as_name.clone(),
                     record_bindings: case.record_bindings.clone(),
                     refinements: case.refinements.clone(),
@@ -773,7 +723,7 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                     ElimCase {
                         con: case.con.clone(),
                         binders: case.binders.clone(),
-                        body: b(subst(j + n, &s1, &case.body)),
+                        body: Box::new(subst(j + n, &s1, &case.body)),
                         as_name: case.as_name.clone(),
                         record_bindings: case.record_bindings.clone(),
                         refinements: case.refinements.clone(),
@@ -983,8 +933,8 @@ pub fn equiv_dom(t: &Term) -> Term {
 // ---------------------------------------------------------------------------
 
 #[inline]
-fn b<T>(v: T) -> Box<T> {
-    Box::new(v)
+fn b<T>(v: T) -> Arc<T> {
+    Arc::new(v)
 }
 
 #[cfg(test)]
@@ -993,8 +943,8 @@ mod tests {
     use super::pretty::show_term;
     use super::*;
 
-    fn b(t: Term) -> Box<Term> {
-        Box::new(t)
+    fn b(t: Term) -> Arc<Term> {
+        Arc::new(t)
     }
 
     #[test]

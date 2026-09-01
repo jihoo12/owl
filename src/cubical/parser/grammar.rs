@@ -10,6 +10,7 @@ use crate::cubical::syntax::{
     CellConSig, ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift, subst,
 };
 use crate::cubical::typechecker::errors::Pos;
+use std::sync::Arc;
 
 pub(super) struct Parser {
     tokens: Vec<Token>,
@@ -541,7 +542,7 @@ impl Parser {
                     let shifted_a = shift(-depth, 0, &a);
                     args.push(shifted_a);
                     depth += 1;
-                    cur = *b;
+                    cur = b.as_ref().clone();
                 }
                 Term::TData(ref n, _) if n == dt_name => {
                     let result = shift(-depth, 0, &cur);
@@ -589,7 +590,7 @@ impl Parser {
             }
             let mut term = body;
             for binder in binders.into_iter().rev() {
-                term = Term::TAbs(binder, Box::new(term));
+                term = Term::TAbs(binder, Arc::new(term));
             }
             return Ok(term);
         }
@@ -601,7 +602,7 @@ impl Parser {
             let body = self.parse_term()?;
             self.term_env.remove(0);
             self.ivar_env.remove(0);
-            return Ok(Term::PLam(binder, Box::new(body)));
+            return Ok(Term::PLam(binder, Arc::new(body)));
         }
         // Implicit binder: {x : A}
         if self.consume(&TokenKind::LBrace) {
@@ -616,7 +617,7 @@ impl Parser {
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
-            return Ok(Term::TPi(binder, Box::new(ty), Box::new(body), true));
+            return Ok(Term::TPi(binder, Arc::new(ty), Arc::new(body), true));
         }
         if self.consume_ident("∀") || self.consume_ident("forall") {
             let (binder, ty) = self.parse_parenthesized_binder("Pi")?;
@@ -624,7 +625,7 @@ impl Parser {
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
-            return Ok(Term::TPi(binder, Box::new(ty), Box::new(body), false));
+            return Ok(Term::TPi(binder, Arc::new(ty), Arc::new(body), false));
         }
         if self.consume_ident("Σ") {
             let (binder, ty) = self.parse_parenthesized_binder("Sigma")?;
@@ -632,7 +633,7 @@ impl Parser {
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
-            return Ok(Term::TSigma(binder, Box::new(ty), Box::new(body)));
+            return Ok(Term::TSigma(binder, Arc::new(ty), Arc::new(body)));
         }
         self.parse_pair()
     }
@@ -658,8 +659,8 @@ impl Parser {
         self.term_env.remove(0);
 
         Ok(Term::TApp(
-            Box::new(Term::TAbs(binder, Box::new(body))),
-            Box::new(value),
+            Arc::new(Term::TAbs(binder, Arc::new(body))),
+            Arc::new(value),
         ))
     }
 
@@ -770,7 +771,7 @@ impl Parser {
         let left = self.parse_arrow()?;
         if !self.stop_at_comma && self.consume(&TokenKind::Comma) {
             let right = self.parse_term()?;
-            Ok(Term::TPair(Box::new(left), Box::new(right)))
+            Ok(Term::TPair(Arc::new(left), Arc::new(right)))
         } else {
             Ok(left)
         }
@@ -786,8 +787,8 @@ impl Parser {
             self.term_env.remove(0);
             Ok(Term::TPi(
                 "_".to_string(),
-                Box::new(left),
-                Box::new(right),
+                Arc::new(left),
+                Arc::new(right),
                 false,
             ))
         } else {
@@ -812,7 +813,7 @@ impl Parser {
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
-            return Ok(Term::TPi(binder, Box::new(ty), Box::new(body), true));
+            return Ok(Term::TPi(binder, Arc::new(ty), Arc::new(body), true));
         }
         if self.consume_ident("∀") || self.consume_ident("forall") {
             let (binder, ty) = self.parse_parenthesized_binder("Pi")?;
@@ -820,7 +821,7 @@ impl Parser {
             self.term_env.insert(0, binder.clone());
             let body = self.parse_term()?;
             self.term_env.remove(0);
-            Ok(Term::TPi(binder, Box::new(ty), Box::new(body), false))
+            Ok(Term::TPi(binder, Arc::new(ty), Arc::new(body), false))
         } else {
             self.parse_arrow()
         }
@@ -836,8 +837,8 @@ impl Parser {
             self.term_env.remove(0);
             Ok(Term::TSigma(
                 "_".to_string(),
-                Box::new(left),
-                Box::new(right),
+                Arc::new(left),
+                Arc::new(right),
             ))
         } else {
             Ok(left)
@@ -848,7 +849,7 @@ impl Parser {
         let mut term = self.parse_meet()?;
         while self.consume(&TokenKind::OrSym) {
             let rhs = self.parse_meet()?;
-            term = interval_binary(term, rhs, |a, b| I::Join(Box::new(a), Box::new(b)), self)?;
+            term = interval_binary(term, rhs, |a, b| I::Join(Arc::new(a), Arc::new(b)), self)?;
         }
         Ok(term)
     }
@@ -857,7 +858,7 @@ impl Parser {
         let mut term = self.parse_tilde()?;
         while self.consume(&TokenKind::AndSym) {
             let rhs = self.parse_tilde()?;
-            term = interval_binary(term, rhs, |a, b| I::Meet(Box::new(a), Box::new(b)), self)?;
+            term = interval_binary(term, rhs, |a, b| I::Meet(Arc::new(a), Arc::new(b)), self)?;
         }
         Ok(term)
     }
@@ -866,7 +867,7 @@ impl Parser {
         if self.consume(&TokenKind::Tilde) {
             let term = self.parse_tilde()?;
             let i = expect_interval(term, self)?;
-            Ok(Term::TInterval(I::Neg(Box::new(i))))
+            Ok(Term::TInterval(I::Neg(Arc::new(i))))
         } else {
             self.parse_papp()
         }
@@ -876,7 +877,7 @@ impl Parser {
         if self.consume(&TokenKind::Tilde) {
             let inner = self.parse_prefix_or_atom()?;
             let i = expect_interval(inner, self)?;
-            Ok(Term::TInterval(I::Neg(Box::new(i))))
+            Ok(Term::TInterval(I::Neg(Arc::new(i))))
         } else {
             self.parse_prefix_or_atom()
         }
@@ -911,7 +912,7 @@ impl Parser {
                 )?;
                 let rhs2 = self.parse_interval_arg()?;
                 if let Term::TCon(dt, con, args) = term {
-                    term = Term::TSqCon(dt, con, args, Box::new(rhs), Box::new(rhs2));
+                    term = Term::TSqCon(dt, con, args, Arc::new(rhs), Arc::new(rhs2));
                 }
             }
         }
@@ -919,12 +920,12 @@ impl Parser {
             let rhs = self.parse_tilde()?;
             if let Term::TCon(dt, con, args) = term {
                 if self.is_path_constructor(&dt, &con) {
-                    term = Term::TPCon(dt, con, args, Box::new(rhs));
+                    term = Term::TPCon(dt, con, args, Arc::new(rhs));
                 } else {
-                    term = Term::PApp(Box::new(Term::TCon(dt, con, args)), Box::new(rhs));
+                    term = Term::PApp(Arc::new(Term::TCon(dt, con, args)), Arc::new(rhs));
                 }
             } else {
-                term = Term::PApp(Box::new(term), Box::new(rhs));
+                term = Term::PApp(Arc::new(term), Arc::new(rhs));
             }
         }
         Ok(term)
@@ -946,42 +947,42 @@ impl Parser {
         }
         let mut term = first;
         for arg in args {
-            term = Term::TApp(Box::new(term), Box::new(arg));
+            term = Term::TApp(Arc::new(term), Arc::new(arg));
         }
         Ok(term)
     }
 
     fn parse_prefix_or_atom(&mut self) -> Result<Term, ParseError> {
         if self.consume_ident("fst") {
-            return Ok(Term::TFst(Box::new(self.parse_prefix_or_atom()?)));
+            return Ok(Term::TFst(Arc::new(self.parse_prefix_or_atom()?)));
         }
         if self.consume_ident("snd") {
-            return Ok(Term::TSnd(Box::new(self.parse_prefix_or_atom()?)));
+            return Ok(Term::TSnd(Arc::new(self.parse_prefix_or_atom()?)));
         }
         if self.consume_ident("ua") {
-            return Ok(Term::TUa(Box::new(self.parse_prefix_or_atom()?)));
+            return Ok(Term::TUa(Arc::new(self.parse_prefix_or_atom()?)));
         }
         if self.consume_ident("transport") || self.consume_ident("coe") {
             let p = self.parse_prefix_or_atom()?;
             let x = self.parse_prefix_or_atom()?;
-            return Ok(Term::TTransport(Box::new(p), Box::new(x)));
+            return Ok(Term::TTransport(Arc::new(p), Arc::new(x)));
         }
         if self.consume_ident("transp") {
             let a = self.parse_prefix_or_atom()?;
             let r = self.parse_prefix_or_atom()?;
             let x = self.parse_prefix_or_atom()?;
-            return Ok(Term::TTransp(Box::new(a), Box::new(r), Box::new(x)));
+            return Ok(Term::TTransp(Arc::new(a), Arc::new(r), Arc::new(x)));
         }
         if self.consume_ident("equivFwd") {
             let e = self.parse_prefix_or_atom()?;
             let x = self.parse_prefix_or_atom()?;
-            return Ok(Term::TEquivFwd(Box::new(e), Box::new(x)));
+            return Ok(Term::TEquivFwd(Arc::new(e), Arc::new(x)));
         }
         if self.consume_ident("Force") {
-            return Ok(Term::TForce(Box::new(self.parse_prefix_or_atom()?)));
+            return Ok(Term::TForce(Arc::new(self.parse_prefix_or_atom()?)));
         }
         if self.consume_ident("Next") {
-            return Ok(Term::TNext(Box::new(self.parse_prefix_or_atom()?)));
+            return Ok(Term::TNext(Arc::new(self.parse_prefix_or_atom()?)));
         }
         // Module-qualified reference: `M.name`, `M.Nat`, `M.Nat.zero`.  Only
         // fires when the leading segment is a module prefix; otherwise the
@@ -1019,7 +1020,7 @@ impl Parser {
                     }
                 }
                 self.pos += 1;
-                term = Term::TProj(field, Box::new(term));
+                term = Term::TProj(field, Arc::new(term));
             } else {
                 break;
             }
@@ -1045,7 +1046,7 @@ impl Parser {
                 self.stop_at_comma = saved_stop_at_comma;
             }
             self.expect(TokenKind::RBrace, "expected '}' after record update fields")?;
-            term = Term::TRecordUpdate(Box::new(term), updates);
+            term = Term::TRecordUpdate(Arc::new(term), updates);
         }
         Ok(term)
     }
@@ -1053,19 +1054,19 @@ impl Parser {
     fn parse_atom(&mut self) -> Result<Term, ParseError> {
         if self.consume_ident("Delay") {
             let a = self.parse_prefix_or_atom()?;
-            return Ok(Term::TDelay(Box::new(a)));
+            return Ok(Term::TDelay(Arc::new(a)));
         }
         if self.consume_ident("Path") {
             let a = self.parse_prefix_or_atom()?;
             let u = self.parse_prefix_or_atom()?;
             let v = self.parse_prefix_or_atom()?;
-            return Ok(Term::TPath(Box::new(a), Box::new(u), Box::new(v)));
+            return Ok(Term::TPath(Arc::new(a), Arc::new(u), Arc::new(v)));
         }
         if self.consume_ident("PathP") {
             let a = self.parse_prefix_or_atom()?;
             let u = self.parse_prefix_or_atom()?;
             let v = self.parse_prefix_or_atom()?;
-            return Ok(Term::TPath(Box::new(a), Box::new(u), Box::new(v)));
+            return Ok(Term::TPath(Arc::new(a), Arc::new(u), Arc::new(v)));
         }
         if self.consume_ident("isProp") {
             let a = self.parse_prefix_or_atom()?;
@@ -1131,7 +1132,7 @@ impl Parser {
                 vec![(phi, u)]
             };
             let u0 = self.parse_prefix_or_atom()?;
-            return Ok(Term::THComp(Box::new(a), system, Box::new(u0)));
+            return Ok(Term::THComp(Arc::new(a), system, Arc::new(u0)));
         }
         if self.consume_ident("comp") {
             let a = self.parse_prefix_or_atom()?;
@@ -1143,7 +1144,7 @@ impl Parser {
                 vec![(phi, u)]
             };
             let u0 = self.parse_prefix_or_atom()?;
-            return Ok(Term::TComp(Box::new(a), system, Box::new(u0)));
+            return Ok(Term::TComp(Arc::new(a), system, Arc::new(u0)));
         }
         if self.consume_ident("fill") {
             let a = self.parse_prefix_or_atom()?;
@@ -1155,7 +1156,7 @@ impl Parser {
                 vec![(phi, u)]
             };
             let u0 = self.parse_prefix_or_atom()?;
-            return Ok(Term::TFill(Box::new(a), system, Box::new(u0)));
+            return Ok(Term::TFill(Arc::new(a), system, Arc::new(u0)));
         }
         if self.consume_ident("hfill") {
             let a = self.parse_prefix_or_atom()?;
@@ -1167,12 +1168,12 @@ impl Parser {
                 vec![(phi, u)]
             };
             let u0 = self.parse_prefix_or_atom()?;
-            return Ok(Term::THFill(Box::new(a), system, Box::new(u0)));
+            return Ok(Term::THFill(Arc::new(a), system, Arc::new(u0)));
         }
         if self.consume_ident("Equiv") {
             let a = self.parse_prefix_or_atom()?;
             let b = self.parse_prefix_or_atom()?;
-            return Ok(Term::TEquiv(Box::new(a), Box::new(b)));
+            return Ok(Term::TEquiv(Arc::new(a), Arc::new(b)));
         }
         if self.consume_ident("mkEquiv") {
             let a = self.parse_prefix_or_atom()?;
@@ -1182,36 +1183,36 @@ impl Parser {
             let eta = self.parse_prefix_or_atom()?;
             let eps = self.parse_prefix_or_atom()?;
             return Ok(Term::TMkEquiv(
-                Box::new(a),
-                Box::new(b),
-                Box::new(f),
-                Box::new(g),
-                Box::new(eta),
-                Box::new(eps),
+                Arc::new(a),
+                Arc::new(b),
+                Arc::new(f),
+                Arc::new(g),
+                Arc::new(eta),
+                Arc::new(eps),
             ));
         }
         if self.consume_ident("Glue") {
             let a = self.parse_prefix_or_atom()?;
             let phi = self.parse_prefix_or_atom()?;
             let te = self.parse_prefix_or_atom()?;
-            return Ok(Term::TGlue(Box::new(a), Box::new(phi), Box::new(te)));
+            return Ok(Term::TGlue(Arc::new(a), Arc::new(phi), Arc::new(te)));
         }
         if self.consume_ident("Partial") {
             let phi = self.parse_prefix_or_atom()?;
             let a = self.parse_prefix_or_atom()?;
-            return Ok(Term::TPartial(Box::new(phi), Box::new(a)));
+            return Ok(Term::TPartial(Arc::new(phi), Arc::new(a)));
         }
         if self.consume_ident("glueElem") || self.consume_ident("glue") {
             let phi = self.parse_prefix_or_atom()?;
             let t = self.parse_prefix_or_atom()?;
             let a = self.parse_prefix_or_atom()?;
-            return Ok(Term::TGlueElem(Box::new(phi), Box::new(t), Box::new(a)));
+            return Ok(Term::TGlueElem(Arc::new(phi), Arc::new(t), Arc::new(a)));
         }
         if self.consume_ident("unglue") {
             let phi = self.parse_prefix_or_atom()?;
             let te = self.parse_prefix_or_atom()?;
             let g = self.parse_prefix_or_atom()?;
-            return Ok(Term::TUnglue(Box::new(phi), Box::new(te), Box::new(g)));
+            return Ok(Term::TUnglue(Arc::new(phi), Arc::new(te), Arc::new(g)));
         }
         if self.consume_ident("match") {
             return self.parse_match();
@@ -1231,7 +1232,7 @@ impl Parser {
                             "expected ']' after phi in partial type",
                         )?;
                         let a = self.parse_prefix_or_atom()?;
-                        return Ok(Term::TPartial(Box::new(phi), Box::new(a)));
+                        return Ok(Term::TPartial(Arc::new(phi), Arc::new(a)));
                     }
                 }
             }
@@ -1474,9 +1475,9 @@ impl Parser {
         self.term_env.remove(0);
 
         self.expect_ident("with")?;
-        let motive = Term::TAbs(binder, Box::new(return_type));
+        let motive = Term::TAbs(binder, Arc::new(return_type));
         let cases = self.parse_match_cases(&motive, &scrutinee)?;
-        Ok(Term::TElim(Box::new(motive), cases, Box::new(scrutinee)))
+        Ok(Term::TElim(Arc::new(motive), cases, Arc::new(scrutinee)))
     }
 
     /// Parse the `| constructor binders => body` arms of a `match`.
@@ -1899,8 +1900,8 @@ impl Parser {
                 None
             };
             let case_expected = Term::TApp(
-                Box::new(shift((arity + extra_shift) as i32, 0, motive)),
-                Box::new(Term::TCon(head_dt, head.clone(), con_args)),
+                Arc::new(shift((arity + extra_shift) as i32, 0, motive)),
+                Arc::new(Term::TCon(head_dt, head.clone(), con_args)),
             );
             // One column per argument, with the argument's index in the case
             // context (innermost-first binder list, plus the as-binder's slot).
@@ -2005,7 +2006,7 @@ impl Parser {
         // case context lifted under the fresh λ binder.
         let motive = Term::TAbs(
             "z".to_string(),
-            Box::new(subst(
+            Arc::new(subst(
                 (*slot + 1) as i32,
                 &Term::TVar(0),
                 &shift(1, 0, expected_ty),
@@ -2056,8 +2057,8 @@ impl Parser {
                 .map(|a| Term::TVar((sub_arity - 1 - a) as i32))
                 .collect();
             let sub_expected = Term::TApp(
-                Box::new(shift(sub_arity as i32, 0, &motive)),
-                Box::new(Term::TCon(head_dt, head.clone(), con_args)),
+                Arc::new(shift(sub_arity as i32, 0, &motive)),
+                Arc::new(Term::TCon(head_dt, head.clone(), con_args)),
             );
             let sub_bodies: Vec<Box<Term>> = idxs.iter().map(|&i| bodies[i].clone()).collect();
             let sub_body = self.compile_columns(sub_cols, &sub_bodies, &sub_expected)?;
@@ -2072,9 +2073,9 @@ impl Parser {
         }
 
         Ok(Box::new(Term::TElim(
-            Box::new(motive),
+            Arc::new(motive),
             cases,
-            Box::new(Term::TVar(*slot as i32)),
+            Arc::new(Term::TVar(*slot as i32)),
         )))
     }
     fn token_pos(&self) -> (usize, usize) {
@@ -2167,8 +2168,8 @@ impl Parser {
                 let mut val_w = val;
                 // Innermost parameter binds closest, so wrap in reverse.
                 for (pname, pty) in params.iter().rev() {
-                    ty_w = Term::TPi(pname.clone(), Box::new(pty.clone()), Box::new(ty_w), false);
-                    val_w = Term::TAbs(pname.clone(), Box::new(val_w));
+                    ty_w = Term::TPi(pname.clone(), Arc::new(pty.clone()), Arc::new(ty_w), false);
+                    val_w = Term::TAbs(pname.clone(), Arc::new(val_w));
                 }
                 (ty_w, val_w)
             }
@@ -2191,7 +2192,7 @@ impl Parser {
             Some((prefix, params)) if candidate.starts_with(&format!("{prefix}.")) => {
                 let l = self.term_env.len() as i32;
                 params.iter().enumerate().fold(global_ref, |acc, (i, _)| {
-                    Term::TApp(Box::new(acc), Box::new(Term::TVar(l - 1 - i as i32)))
+                    Term::TApp(Arc::new(acc), Arc::new(Term::TVar(l - 1 - i as i32)))
                 })
             }
             _ => global_ref,
@@ -2717,14 +2718,14 @@ impl Parser {
     fn build_isprop(&self, a: Term) -> Term {
         Term::TPi(
             "_".to_string(),
-            Box::new(a.clone()),
-            Box::new(Term::TPi(
+            Arc::new(a.clone()),
+            Arc::new(Term::TPi(
                 "_".to_string(),
-                Box::new(shift(1, 0, &a)),
-                Box::new(Term::TPath(
-                    Box::new(shift(2, 0, &a)),
-                    Box::new(Term::TVar(1)),
-                    Box::new(Term::TVar(0)),
+                Arc::new(shift(1, 0, &a)),
+                Arc::new(Term::TPath(
+                    Arc::new(shift(2, 0, &a)),
+                    Arc::new(Term::TVar(1)),
+                    Arc::new(Term::TVar(0)),
                 )),
                 false,
             )),
@@ -2744,43 +2745,43 @@ impl Parser {
         // type of 3rd binder (p): Path A x y, checked at depth 2
         //   A shifted by 2, x = TVar(1), y = TVar(0)
         let ty_p = Term::TPath(
-            Box::new(shift(2, 0, &a)),
-            Box::new(Term::TVar(1)),
-            Box::new(Term::TVar(0)),
+            Arc::new(shift(2, 0, &a)),
+            Arc::new(Term::TVar(1)),
+            Arc::new(Term::TVar(0)),
         );
         // type of 4th binder (q): Path A x y, checked at depth 3
         //   A shifted by 3, x = TVar(2), y = TVar(1)
         let ty_q = Term::TPath(
-            Box::new(shift(3, 0, &a)),
-            Box::new(Term::TVar(2)),
-            Box::new(Term::TVar(1)),
+            Arc::new(shift(3, 0, &a)),
+            Arc::new(Term::TVar(2)),
+            Arc::new(Term::TVar(1)),
         );
         // body: Path (Path A x y) p q, checked at depth 4
         //   inner Path A x y: A shifted by 4, x = TVar(3), y = TVar(2)
         //   p = TVar(1), q = TVar(0)
         let inner_path = Term::TPath(
-            Box::new(shift(4, 0, &a)),
-            Box::new(Term::TVar(3)),
-            Box::new(Term::TVar(2)),
+            Arc::new(shift(4, 0, &a)),
+            Arc::new(Term::TVar(3)),
+            Arc::new(Term::TVar(2)),
         );
         let body = Term::TPath(
-            Box::new(inner_path),
-            Box::new(Term::TVar(1)),
-            Box::new(Term::TVar(0)),
+            Arc::new(inner_path),
+            Arc::new(Term::TVar(1)),
+            Arc::new(Term::TVar(0)),
         );
         Term::TPi(
             "_".to_string(),
-            Box::new(a.clone()),
-            Box::new(Term::TPi(
+            Arc::new(a.clone()),
+            Arc::new(Term::TPi(
                 "_".to_string(),
-                Box::new(shift(1, 0, &a)),
-                Box::new(Term::TPi(
+                Arc::new(shift(1, 0, &a)),
+                Arc::new(Term::TPi(
                     "_".to_string(),
-                    Box::new(ty_p),
-                    Box::new(Term::TPi(
+                    Arc::new(ty_p),
+                    Arc::new(Term::TPi(
                         "_".to_string(),
-                        Box::new(ty_q),
-                        Box::new(body),
+                        Arc::new(ty_q),
+                        Arc::new(body),
                         false,
                     )),
                     false,
@@ -2795,73 +2796,73 @@ impl Parser {
     fn build_isgroupoid(&self, a: Term) -> Term {
         // type of p: Path A x y at depth 2
         let ty_p = Term::TPath(
-            Box::new(shift(2, 0, &a)),
-            Box::new(Term::TVar(1)),
-            Box::new(Term::TVar(0)),
+            Arc::new(shift(2, 0, &a)),
+            Arc::new(Term::TVar(1)),
+            Arc::new(Term::TVar(0)),
         );
         // type of q: Path A x y at depth 3
         let ty_q = Term::TPath(
-            Box::new(shift(3, 0, &a)),
-            Box::new(Term::TVar(2)),
-            Box::new(Term::TVar(1)),
+            Arc::new(shift(3, 0, &a)),
+            Arc::new(Term::TVar(2)),
+            Arc::new(Term::TVar(1)),
         );
         // type of r: Path (Path A x y) p q at depth 4
         let inner_path_4 = Term::TPath(
-            Box::new(shift(4, 0, &a)),
-            Box::new(Term::TVar(3)),
-            Box::new(Term::TVar(2)),
+            Arc::new(shift(4, 0, &a)),
+            Arc::new(Term::TVar(3)),
+            Arc::new(Term::TVar(2)),
         );
         let ty_r = Term::TPath(
-            Box::new(inner_path_4),
-            Box::new(Term::TVar(1)),
-            Box::new(Term::TVar(0)),
+            Arc::new(inner_path_4),
+            Arc::new(Term::TVar(1)),
+            Arc::new(Term::TVar(0)),
         );
         // type of s: Path (Path A x y) p q at depth 5
         let inner_path_5 = Term::TPath(
-            Box::new(shift(5, 0, &a)),
-            Box::new(Term::TVar(4)),
-            Box::new(Term::TVar(3)),
+            Arc::new(shift(5, 0, &a)),
+            Arc::new(Term::TVar(4)),
+            Arc::new(Term::TVar(3)),
         );
         let ty_s = Term::TPath(
-            Box::new(inner_path_5),
-            Box::new(Term::TVar(2)),
-            Box::new(Term::TVar(1)),
+            Arc::new(inner_path_5),
+            Arc::new(Term::TVar(2)),
+            Arc::new(Term::TVar(1)),
         );
         // body: Path (Path (Path A x y) p q) r s at depth 6
         let innermost_path = Term::TPath(
-            Box::new(shift(6, 0, &a)),
-            Box::new(Term::TVar(5)),
-            Box::new(Term::TVar(4)),
+            Arc::new(shift(6, 0, &a)),
+            Arc::new(Term::TVar(5)),
+            Arc::new(Term::TVar(4)),
         );
         let inner_path_6 = Term::TPath(
-            Box::new(innermost_path),
-            Box::new(Term::TVar(3)),
-            Box::new(Term::TVar(2)),
+            Arc::new(innermost_path),
+            Arc::new(Term::TVar(3)),
+            Arc::new(Term::TVar(2)),
         );
         let body = Term::TPath(
-            Box::new(inner_path_6),
-            Box::new(Term::TVar(1)),
-            Box::new(Term::TVar(0)),
+            Arc::new(inner_path_6),
+            Arc::new(Term::TVar(1)),
+            Arc::new(Term::TVar(0)),
         );
         Term::TPi(
             "_".to_string(),
-            Box::new(a.clone()),
-            Box::new(Term::TPi(
+            Arc::new(a.clone()),
+            Arc::new(Term::TPi(
                 "_".to_string(),
-                Box::new(shift(1, 0, &a)),
-                Box::new(Term::TPi(
+                Arc::new(shift(1, 0, &a)),
+                Arc::new(Term::TPi(
                     "_".to_string(),
-                    Box::new(ty_p),
-                    Box::new(Term::TPi(
+                    Arc::new(ty_p),
+                    Arc::new(Term::TPi(
                         "_".to_string(),
-                        Box::new(ty_q),
-                        Box::new(Term::TPi(
+                        Arc::new(ty_q),
+                        Arc::new(Term::TPi(
                             "_".to_string(),
-                            Box::new(ty_r),
-                            Box::new(Term::TPi(
+                            Arc::new(ty_r),
+                            Arc::new(Term::TPi(
                                 "_".to_string(),
-                                Box::new(ty_s),
-                                Box::new(body),
+                                Arc::new(ty_s),
+                                Arc::new(body),
                                 false,
                             )),
                             false,
@@ -2898,9 +2899,9 @@ impl Parser {
             let left = 2 * depth as i32 - 1 - left_depth;
             let right = 2 * depth as i32 - 1 - right_depth;
             body = Term::TPath(
-                Box::new(body),
-                Box::new(Term::TVar(left)),
-                Box::new(Term::TVar(right)),
+                Arc::new(body),
+                Arc::new(Term::TVar(left)),
+                Arc::new(Term::TVar(right)),
             );
         }
 
@@ -2924,15 +2925,15 @@ impl Parser {
                 let left = j_i - pair_start; // = 1
                 let right = j_i - (pair_start + 1); // = 0
                 Term::TPath(
-                    Box::new(a_at_pair),
-                    Box::new(Term::TVar(left)),
-                    Box::new(Term::TVar(right)),
+                    Arc::new(a_at_pair),
+                    Arc::new(Term::TVar(left)),
+                    Arc::new(Term::TVar(right)),
                 )
             };
             result = Term::TPi(
                 "_".to_string(),
-                Box::new(binder_ty),
-                Box::new(result),
+                Arc::new(binder_ty),
+                Arc::new(result),
                 false,
             );
         }

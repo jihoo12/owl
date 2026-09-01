@@ -4,6 +4,7 @@
 
 use crate::cubical::session::{Session, get_meta_solution};
 use crate::cubical::syntax::Term;
+use std::sync::Arc;
 
 pub fn meta_mentions(id: i32, t: &Term) -> bool {
     match t {
@@ -112,128 +113,190 @@ pub fn try_solve_meta(id: i32, rhs: &Term, session: &mut Session) -> bool {
 }
 
 pub fn zonk(t: &Term, session: &Session) -> Term {
-    match t {
-        Term::Meta(i) => {
-            if let Some(solution) = session.get_meta_solution(*i) {
-                solution
-            } else {
-                t.clone()
-            }
-        }
-        _ => {
-            let mut cloned = t.clone();
-            fn zonk_sub(term: &mut Term, session: &Session) {
-                match term {
-                    Term::Meta(i) => {
-                        if let Some(solution) = session.get_meta_solution(*i) {
-                            *term = solution;
-                        }
-                    }
-                    _ => {
-                        let children = term_children_mut(term);
-                        for child in children {
-                            zonk_sub(child, session);
-                        }
-                    }
+    fn zonk_inner(term: &Term, session: &Session) -> Term {
+        match term {
+            Term::Meta(i) => {
+                if let Some(solution) = session.get_meta_solution(*i) {
+                    solution.clone()
+                } else {
+                    term.clone()
                 }
             }
-            zonk_sub(&mut cloned, session);
-            cloned
+            Term::TVar(_)
+            | Term::TUniv(_)
+            | Term::TProp
+            | Term::TSSet
+            | Term::TIntervalTy
+            | Term::TInterval(_)
+            | Term::TCube(_)
+            | Term::TBy(_) => term.clone(),
+            Term::TApp(f, a) => Term::TApp(
+                Arc::new(zonk_inner(f, session)),
+                Arc::new(zonk_inner(a, session)),
+            ),
+            Term::TAbs(n, b) | Term::PLam(n, b) => {
+                let ctor = match term {
+                    Term::TAbs(_, _) => Term::TAbs,
+                    _ => Term::PLam,
+                };
+                ctor(n.clone(), Arc::new(zonk_inner(b, session)))
+            }
+            Term::TPi(n, a, b, bc) => Term::TPi(
+                n.clone(),
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(b, session)),
+                *bc,
+            ),
+            Term::TSigma(n, a, b) => Term::TSigma(
+                n.clone(),
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(b, session)),
+            ),
+            Term::TPath(a, u, v) => Term::TPath(
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(u, session)),
+                Arc::new(zonk_inner(v, session)),
+            ),
+            Term::PApp(p, r) => Term::PApp(
+                Arc::new(zonk_inner(p, session)),
+                Arc::new(zonk_inner(r, session)),
+            ),
+            Term::THComp(a, sys, base) => Term::THComp(
+                Arc::new(zonk_inner(a, session)),
+                zonk_sys(sys, session),
+                Arc::new(zonk_inner(base, session)),
+            ),
+            Term::TComp(a, sys, base) => Term::TComp(
+                Arc::new(zonk_inner(a, session)),
+                zonk_sys(sys, session),
+                Arc::new(zonk_inner(base, session)),
+            ),
+            Term::TFill(a, sys, base) => Term::TFill(
+                Arc::new(zonk_inner(a, session)),
+                zonk_sys(sys, session),
+                Arc::new(zonk_inner(base, session)),
+            ),
+            Term::THFill(a, sys, base) => Term::THFill(
+                Arc::new(zonk_inner(a, session)),
+                zonk_sys(sys, session),
+                Arc::new(zonk_inner(base, session)),
+            ),
+            Term::TEquiv(a, b) => Term::TEquiv(
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(b, session)),
+            ),
+            Term::TMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(b, session)),
+                Arc::new(zonk_inner(f, session)),
+                Arc::new(zonk_inner(g, session)),
+                Arc::new(zonk_inner(eta, session)),
+                Arc::new(zonk_inner(eps, session)),
+            ),
+            Term::TEquivFwd(e, x) => Term::TEquivFwd(
+                Arc::new(zonk_inner(e, session)),
+                Arc::new(zonk_inner(x, session)),
+            ),
+            Term::TTransport(e, x) => Term::TTransport(
+                Arc::new(zonk_inner(e, session)),
+                Arc::new(zonk_inner(x, session)),
+            ),
+            Term::TTransp(a, r, x) => Term::TTransp(
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(r, session)),
+                Arc::new(zonk_inner(x, session)),
+            ),
+            Term::TUa(e) => Term::TUa(Arc::new(zonk_inner(e, session))),
+            Term::TGlue(a, phi, te) => Term::TGlue(
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(phi, session)),
+                Arc::new(zonk_inner(te, session)),
+            ),
+            Term::TGlueElem(phi, t, a) => Term::TGlueElem(
+                Arc::new(zonk_inner(phi, session)),
+                Arc::new(zonk_inner(t, session)),
+                Arc::new(zonk_inner(a, session)),
+            ),
+            Term::TUnglue(phi, te, g) => Term::TUnglue(
+                Arc::new(zonk_inner(phi, session)),
+                Arc::new(zonk_inner(te, session)),
+                Arc::new(zonk_inner(g, session)),
+            ),
+            Term::TPartial(phi, a) => Term::TPartial(
+                Arc::new(zonk_inner(phi, session)),
+                Arc::new(zonk_inner(a, session)),
+            ),
+            Term::TSystemType(sys) => Term::TSystemType(zonk_sys(sys, session)),
+            Term::TPair(a, b) => Term::TPair(
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(b, session)),
+            ),
+            Term::TFst(p) => Term::TFst(Arc::new(zonk_inner(p, session))),
+            Term::TSnd(p) => Term::TSnd(Arc::new(zonk_inner(p, session))),
+            Term::TProj(n, p) => Term::TProj(n.clone(), Arc::new(zonk_inner(p, session))),
+            Term::TLift(p, n) => Term::TLift(Arc::new(zonk_inner(p, session)), n.clone()),
+            Term::TLower(p) => Term::TLower(Arc::new(zonk_inner(p, session))),
+            Term::TDelay(p) => Term::TDelay(Arc::new(zonk_inner(p, session))),
+            Term::TNext(p) => Term::TNext(Arc::new(zonk_inner(p, session))),
+            Term::TForce(p) => Term::TForce(Arc::new(zonk_inner(p, session))),
+            Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
+                Arc::new(zonk_inner(r, session)),
+                updates
+                    .iter()
+                    .map(|(n, e)| (n.clone(), zonk_inner(e, session)))
+                    .collect(),
+            ),
+            Term::TData(n, params) => Term::TData(
+                n.clone(),
+                params.iter().map(|p| zonk_inner(p, session)).collect(),
+            ),
+            Term::TCon(n, idx, args) => Term::TCon(
+                n.clone(),
+                idx.clone(),
+                args.iter().map(|a| zonk_inner(a, session)).collect(),
+            ),
+            Term::TPCon(n, idx, args, r) => Term::TPCon(
+                n.clone(),
+                idx.clone(),
+                args.iter().map(|a| zonk_inner(a, session)).collect(),
+                Arc::new(zonk_inner(r, session)),
+            ),
+            Term::TSqCon(n, idx, args, r, s) => Term::TSqCon(
+                n.clone(),
+                idx.clone(),
+                args.iter().map(|a| zonk_inner(a, session)).collect(),
+                Arc::new(zonk_inner(r, session)),
+                Arc::new(zonk_inner(s, session)),
+            ),
+            Term::TCellCon(n, idx, args, ivars) => Term::TCellCon(
+                n.clone(),
+                idx.clone(),
+                args.iter().map(|a| zonk_inner(a, session)).collect(),
+                ivars.iter().map(|v| zonk_inner(v, session)).collect(),
+            ),
+            Term::TElim(motive, cases, scrut) => Term::TElim(
+                Arc::new(zonk_inner(motive, session)),
+                cases
+                    .iter()
+                    .map(|c| {
+                        let mut zonked = c.clone();
+                        zonked.body = Box::new(zonk_inner(&c.body, session));
+                        zonked
+                    })
+                    .collect(),
+                Arc::new(zonk_inner(scrut, session)),
+            ),
         }
     }
-}
-
-fn term_children_mut(t: &mut Term) -> Vec<&mut Term> {
-    match t {
-        Term::TVar(_)
-        | Term::TUniv(_)
-        | Term::TProp
-        | Term::TSSet
-        | Term::TIntervalTy
-        | Term::TInterval(_)
-        | Term::TCube(_)
-        | Term::Meta(_) => vec![],
-        Term::TApp(f, a) => vec![f.as_mut(), a.as_mut()],
-        Term::TAbs(_, b) | Term::PLam(_, b) => vec![b.as_mut()],
-        Term::TPi(_, a, b, _) | Term::TSigma(_, a, b) => vec![a.as_mut(), b.as_mut()],
-        Term::TPath(a, u, v) => vec![a.as_mut(), u.as_mut(), v.as_mut()],
-        Term::PApp(p, r) => vec![p.as_mut(), r.as_mut()],
-        Term::THComp(a, sys, base)
-        | Term::TComp(a, sys, base)
-        | Term::TFill(a, sys, base)
-        | Term::THFill(a, sys, base) => {
-            let mut children = vec![a.as_mut(), base.as_mut()];
-            for (phi, tube) in sys.iter_mut() {
-                children.push(phi);
-                children.push(tube);
-            }
-            children
-        }
-        Term::TEquiv(a, b) => vec![a.as_mut(), b.as_mut()],
-        Term::TMkEquiv(a, b, f, g, eta, eps) => {
-            vec![
-                a.as_mut(),
-                b.as_mut(),
-                f.as_mut(),
-                g.as_mut(),
-                eta.as_mut(),
-                eps.as_mut(),
-            ]
-        }
-        Term::TEquivFwd(e, x) | Term::TTransport(e, x) => vec![e.as_mut(), x.as_mut()],
-        Term::TTransp(a, r, x) => vec![a.as_mut(), r.as_mut(), x.as_mut()],
-        Term::TUa(e) => vec![e.as_mut()],
-        Term::TGlue(a, phi, te) => vec![a.as_mut(), phi.as_mut(), te.as_mut()],
-        Term::TGlueElem(phi, t, a) => vec![phi.as_mut(), t.as_mut(), a.as_mut()],
-        Term::TUnglue(phi, te, g) => vec![phi.as_mut(), te.as_mut(), g.as_mut()],
-        Term::TPartial(phi, a) => vec![phi.as_mut(), a.as_mut()],
-        Term::TSystemType(sys) => sys
-            .iter_mut()
-            .flat_map(|(phi, a)| vec![phi as &mut Term, a as &mut Term])
-            .collect(),
-        Term::TPair(a, b) => vec![a.as_mut(), b.as_mut()],
-        Term::TFst(p)
-        | Term::TSnd(p)
-        | Term::TLift(p, _)
-        | Term::TLower(p)
-        | Term::TDelay(p)
-        | Term::TNext(p)
-        | Term::TForce(p) => vec![p.as_mut()],
-        Term::TProj(_, p) => vec![p.as_mut()],
-        Term::TRecordUpdate(r, updates) => {
-            let mut children: Vec<&mut Term> = vec![r.as_mut()];
-            for (_, e) in updates.iter_mut() {
-                children.push(e);
-            }
-            children
-        }
-        Term::TData(_, params) => params.iter_mut().collect(),
-        Term::TCon(_, _, args) => args.iter_mut().collect(),
-        Term::TPCon(_, _, args, r) => {
-            let mut children: Vec<&mut Term> = args.iter_mut().collect();
-            children.push(r.as_mut());
-            children
-        }
-        Term::TSqCon(_, _, args, r, s) => {
-            let mut children: Vec<&mut Term> = args.iter_mut().collect();
-            children.push(r.as_mut());
-            children.push(s.as_mut());
-            children
-        }
-        Term::TCellCon(_, _, args, ivars) => {
-            let mut children: Vec<&mut Term> = args.iter_mut().collect();
-            children.extend(ivars.iter_mut());
-            children
-        }
-        Term::TElim(motive, cases, scrut) => {
-            let mut children = vec![motive.as_mut(), scrut.as_mut()];
-            for case in cases.iter_mut() {
-                children.push(case.body.as_mut());
-            }
-            children
-        }
-        Term::TBy(_) => vec![],
+    fn zonk_sys(
+        sys: &crate::cubical::syntax::System,
+        session: &Session,
+    ) -> crate::cubical::syntax::System {
+        sys.iter()
+            .map(|(phi, tube)| (zonk_inner(phi, session), zonk_inner(tube, session)))
+            .collect()
     }
+    zonk_inner(t, session)
 }
 
 pub(super) fn has_meta_in_term(t: &Term) -> bool {

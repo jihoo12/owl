@@ -11,15 +11,15 @@
 mod tests {
     use crate::cubical::nbe::{Globals, Scope, Value, eval_nbe, nbe_eval};
     use crate::cubical::syntax::Term;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::Mutex;
 
-    fn b(t: Term) -> Box<Term> {
-        Box::new(t)
+    fn b(t: Term) -> Arc<Term> {
+        Arc::new(t)
     }
 
     fn empty_globals() -> Globals {
-        Rc::new(RefCell::new(Vec::new()))
+        Arc::new(Mutex::new(Vec::new()))
     }
 
     // ---------------------------------------------------------------

@@ -1,9 +1,10 @@
 use super::*;
 use crate::cubical::interval::{DNF, I, Literal};
 use std::collections::BTreeSet;
+use std::sync::Mutex;
 
-fn b(t: Term) -> Box<Term> {
-    Box::new(t)
+fn b(t: Term) -> Arc<Term> {
+    Arc::new(t)
 }
 
 #[test]
@@ -268,7 +269,7 @@ fn glue_transport_on_glue_elem_decomposes() {
         let base = Term::TUniv(2);
         let glue_elem = Term::TGlueElem(b(non_trivial_phi.clone()), b(cap), b(base));
         let transport = Term::TTransport(b(fam), b(glue_elem));
-        let globals: Globals = Rc::new(RefCell::new(Vec::new()));
+        let globals: Globals = Arc::new(Mutex::new(Vec::new()));
         let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
         let phi_dnf = DNF {
             cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
@@ -276,17 +277,17 @@ fn glue_transport_on_glue_elem_decomposes() {
         match result {
             Value::VGlueElem(phi, t, a) => {
                 assert_eq!(phi, phi_dnf, "face should be the non-trivial phi");
-                match *t {
-                    Value::VUniv(n) => assert_eq!(n, 1, "cap should be U1"),
+                match &*t {
+                    Value::VUniv(n) => assert_eq!(*n, 1, "cap should be U1"),
                     other => panic!("expected VUniv(1) for cap, got: {:?}", other),
                 }
-                match *a {
+                match &*a {
                     Value::VHComp(_, h_sys, h_base) => {
                         // Single-entry system with the expected face
                         assert_eq!(h_sys.len(), 1, "hcomp system should have 1 entry");
                         assert_eq!(h_sys[0].0, phi_dnf, "hcomp face should match");
-                        match *h_base {
-                            Value::VUniv(n) => assert_eq!(n, 2, "hcomp base should be U2"),
+                        match &**h_base {
+                            Value::VUniv(n) => assert_eq!(*n, 2, "hcomp base should be U2"),
                             other => {
                                 panic!("expected VUniv(2) for hcomp base, got: {:?}", other)
                             }
@@ -311,7 +312,7 @@ fn glue_transport_on_non_glue_elem_stays_stuck() {
         let glue_ty = Term::TGlue(b(Term::TVar(0)), b(non_trivial_phi), b(Term::TUniv(0)));
         let fam = Term::PLam("i".to_string(), b(glue_ty));
         let transport = Term::TTransport(b(fam), b(Term::TUniv(0)));
-        let globals: Globals = Rc::new(RefCell::new(Vec::new()));
+        let globals: Globals = Arc::new(Mutex::new(Vec::new()));
         let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
         match result {
             Value::VTransport(_, _) => {}
@@ -335,7 +336,7 @@ fn glue_transport_face_mismatch_stays_stuck() {
         let fam = Term::PLam("i".to_string(), b(glue_ty));
         let glue_elem = Term::TGlueElem(b(phi2), b(Term::TUniv(1)), b(Term::TUniv(2)));
         let transport = Term::TTransport(b(fam), b(glue_elem));
-        let globals: Globals = Rc::new(RefCell::new(Vec::new()));
+        let globals: Globals = Arc::new(Mutex::new(Vec::new()));
         let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
         match result {
             Value::VTransport(_, _) => {}
@@ -345,4 +346,56 @@ fn glue_transport_face_mismatch_stays_stuck() {
             ),
         }
     });
+}
+
+#[test]
+fn deep_tapp_chain_does_not_overflow() {
+    // Build: ((id id) id) ... id  with 10000 applications.
+    // The depth guard (EVAL_NBE_MAX_DEPTH=2000) caps the recursion so it
+    // doesn't overflow the stack.  The result is a stuck neutral (VNeutral)
+    // because the depth limit is hit before full normalization.
+    // We use a 64 MiB stack thread (like all example guards) for headroom.
+    let n = 10_000;
+    let id = Term::TAbs("x".to_string(), b(Term::TVar(0)));
+    let mut term = Term::TApp(b(id.clone()), b(id.clone()));
+    for _ in 2..n {
+        term = Term::TApp(b(term), b(id.clone()));
+    }
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            crate::cubical::session::with_session_mut(|session| {
+                let empty_globals: super::Globals =
+                    std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+                let env = super::Scope::empty();
+                let _val = super::eval_nbe(&env, &empty_globals, 0, &term, session);
+            });
+        })
+        .expect("spawn deep tapp test thread");
+    handle.join().expect("deep tapp test thread panicked");
+}
+
+#[test]
+fn deep_tapp_chain_does_not_overflow_small_stack() {
+    // Same test as above but on a 2 MiB stack — the default libtest size.
+    // With Arc-based Term::clone being O(1), the depth guard at 2000 prevents
+    // stack overflow even on a minimal stack.
+    let n = 2_500;
+    let id = Term::TAbs("x".to_string(), b(Term::TVar(0)));
+    let mut term = Term::TApp(b(id.clone()), b(id.clone()));
+    for _ in 2..n {
+        term = Term::TApp(b(term), b(id.clone()));
+    }
+    let handle = std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            crate::cubical::session::with_session_mut(|session| {
+                let empty_globals: super::Globals =
+                    std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+                let env = super::Scope::empty();
+                let _val = super::eval_nbe(&env, &empty_globals, 0, &term, session);
+            });
+        })
+        .expect("spawn deep tapp test thread");
+    handle.join().expect("deep tapp test thread panicked");
 }

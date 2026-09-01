@@ -602,9 +602,10 @@ pub fn check_datatype_positivity(dt: &Datatype) -> Result<(), PositivityError> {
 mod tests {
     use super::*;
     use crate::cubical::syntax::{ConSig, PConSig};
+    use std::sync::Arc;
 
-    fn b(t: Term) -> Box<Term> {
-        Box::new(t)
+    fn b(t: Term) -> Arc<Term> {
+        Arc::new(t)
     }
 
     #[test]

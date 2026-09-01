@@ -7,6 +7,7 @@
 //   crate::equality::{definitionally_equal_ctx, definitionally_equal_ctx_r, EtaResult}
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 pub mod errors;
 pub mod termination;
@@ -335,9 +336,9 @@ fn apply_literal_inner(lit: &Literal, t: &Term, session: &mut Session) -> Term {
     fn go_i(i: &I, n: i32, val: &I) -> I {
         match i {
             I::Var(k) if *k == n => val.clone(),
-            I::Meet(a, b) => I::Meet(Box::new(go_i(a, n, val)), Box::new(go_i(b, n, val))),
-            I::Join(a, b) => I::Join(Box::new(go_i(a, n, val)), Box::new(go_i(b, n, val))),
-            I::Neg(a) => I::Neg(Box::new(go_i(a, n, val))),
+            I::Meet(a, b) => I::Meet(Arc::new(go_i(a, n, val)), Arc::new(go_i(b, n, val))),
+            I::Join(a, b) => I::Join(Arc::new(go_i(a, n, val)), Arc::new(go_i(b, n, val))),
+            I::Neg(a) => I::Neg(Arc::new(go_i(a, n, val))),
             other => other.clone(),
         }
     }
@@ -351,156 +352,156 @@ fn apply_literal_inner(lit: &Literal, t: &Term, session: &mut Session) -> Term {
                 let subst_lit = |l: &Literal| -> I {
                     match l {
                         Literal::Pos(k) => go_i(&I::Var(*k), n, val),
-                        Literal::NegVar(k) => I::Neg(Box::new(go_i(&I::Var(*k), n, val))),
+                        Literal::NegVar(k) => I::Neg(Arc::new(go_i(&I::Var(*k), n, val))),
                     }
                 };
                 let subst_cube = |c: &BTreeSet<Literal>| -> I {
                     c.iter().fold(I::I1, |acc, l| {
-                        I::Meet(Box::new(subst_lit(l)), Box::new(acc))
+                        I::Meet(Arc::new(subst_lit(l)), Arc::new(acc))
                     })
                 };
                 let combined = cubes.iter().fold(I::I0, |acc, c| {
-                    I::Join(Box::new(subst_cube(c)), Box::new(acc))
+                    I::Join(Arc::new(subst_cube(c)), Arc::new(acc))
                 });
                 nbe_eval(&Term::TInterval(combined), session)
             }
 
             Term::TApp(f, a) => nbe_eval(
                 &Term::TApp(
-                    Box::new(go(f, n, val, session)),
-                    Box::new(go(a, n, val, session)),
+                    Arc::new(go(f, n, val, session)),
+                    Arc::new(go(a, n, val, session)),
                 ),
                 session,
             ),
-            Term::TAbs(x, b) => Term::TAbs(x.clone(), Box::new(go(b, n, val, session))),
+            Term::TAbs(x, b) => Term::TAbs(x.clone(), Arc::new(go(b, n, val, session))),
             Term::TPi(x, a, b, implicit) => Term::TPi(
                 x.clone(),
-                Box::new(go(a, n, val, session)),
-                Box::new(go(b, n, val, session)),
+                Arc::new(go(a, n, val, session)),
+                Arc::new(go(b, n, val, session)),
                 *implicit,
             ),
             Term::TPath(a, u, v) => Term::TPath(
-                Box::new(go(a, n, val, session)),
-                Box::new(go(u, n, val, session)),
-                Box::new(go(v, n, val, session)),
+                Arc::new(go(a, n, val, session)),
+                Arc::new(go(u, n, val, session)),
+                Arc::new(go(v, n, val, session)),
             ),
-            Term::PLam(i, b) => Term::PLam(i.clone(), Box::new(go(b, n + 1, val, session))),
+            Term::PLam(i, b) => Term::PLam(i.clone(), Arc::new(go(b, n + 1, val, session))),
             Term::PApp(p, r) => nbe_eval(
                 &Term::PApp(
-                    Box::new(go(p, n, val, session)),
-                    Box::new(go(r, n, val, session)),
+                    Arc::new(go(p, n, val, session)),
+                    Arc::new(go(r, n, val, session)),
                 ),
                 session,
             ),
             Term::THComp(a, sys, u0) => nbe_eval(
                 &Term::THComp(
-                    Box::new(go(a, n, val, session)),
+                    Arc::new(go(a, n, val, session)),
                     sys.iter()
                         .map(|(phi, t)| (go(phi, n, val, session), go(t, n, val, session)))
                         .collect(),
-                    Box::new(go(u0, n, val, session)),
+                    Arc::new(go(u0, n, val, session)),
                 ),
                 session,
             ),
             Term::TComp(a, sys, u0) => nbe_eval(
                 &Term::TComp(
-                    Box::new(go(a, n, val, session)),
+                    Arc::new(go(a, n, val, session)),
                     sys.iter()
                         .map(|(phi, t)| (go(phi, n, val, session), go(t, n, val, session)))
                         .collect(),
-                    Box::new(go(u0, n, val, session)),
+                    Arc::new(go(u0, n, val, session)),
                 ),
                 session,
             ),
             Term::TFill(a, sys, u0) => nbe_eval(
                 &Term::TFill(
-                    Box::new(go(a, n, val, session)),
+                    Arc::new(go(a, n, val, session)),
                     sys.iter()
                         .map(|(phi, t)| (go(phi, n, val, session), go(t, n, val, session)))
                         .collect(),
-                    Box::new(go(u0, n, val, session)),
+                    Arc::new(go(u0, n, val, session)),
                 ),
                 session,
             ),
             Term::THFill(a, sys, u0) => nbe_eval(
                 &Term::THFill(
-                    Box::new(go(a, n, val, session)),
+                    Arc::new(go(a, n, val, session)),
                     sys.iter()
                         .map(|(phi, t)| (go(phi, n, val, session), go(t, n, val, session)))
                         .collect(),
-                    Box::new(go(u0, n, val, session)),
+                    Arc::new(go(u0, n, val, session)),
                 ),
                 session,
             ),
             Term::TEquiv(a, b) => Term::TEquiv(
-                Box::new(go(a, n, val, session)),
-                Box::new(go(b, n, val, session)),
+                Arc::new(go(a, n, val, session)),
+                Arc::new(go(b, n, val, session)),
             ),
             Term::TMkEquiv(a, b, f, g, eta, eps) => Term::TMkEquiv(
-                Box::new(go(a, n, val, session)),
-                Box::new(go(b, n, val, session)),
-                Box::new(go(f, n, val, session)),
-                Box::new(go(g, n, val, session)),
-                Box::new(go(eta, n, val, session)),
-                Box::new(go(eps, n, val, session)),
+                Arc::new(go(a, n, val, session)),
+                Arc::new(go(b, n, val, session)),
+                Arc::new(go(f, n, val, session)),
+                Arc::new(go(g, n, val, session)),
+                Arc::new(go(eta, n, val, session)),
+                Arc::new(go(eps, n, val, session)),
             ),
             Term::TEquivFwd(e, x) => nbe_eval(
                 &Term::TEquivFwd(
-                    Box::new(go(e, n, val, session)),
-                    Box::new(go(x, n, val, session)),
+                    Arc::new(go(e, n, val, session)),
+                    Arc::new(go(x, n, val, session)),
                 ),
                 session,
             ),
-            Term::TUa(e) => Term::TUa(Box::new(go(e, n, val, session))),
+            Term::TUa(e) => Term::TUa(Arc::new(go(e, n, val, session))),
             Term::TTransport(p, x) => nbe_eval(
                 &Term::TTransport(
-                    Box::new(go(p, n, val, session)),
-                    Box::new(go(x, n, val, session)),
+                    Arc::new(go(p, n, val, session)),
+                    Arc::new(go(x, n, val, session)),
                 ),
                 session,
             ),
             Term::TGlue(a, ph, te) => nbe_eval(
                 &Term::TGlue(
-                    Box::new(go(a, n, val, session)),
-                    Box::new(go(ph, n, val, session)),
-                    Box::new(go(te, n, val, session)),
+                    Arc::new(go(a, n, val, session)),
+                    Arc::new(go(ph, n, val, session)),
+                    Arc::new(go(te, n, val, session)),
                 ),
                 session,
             ),
             Term::TGlueElem(ph, x, a) => nbe_eval(
                 &Term::TGlueElem(
-                    Box::new(go(ph, n, val, session)),
-                    Box::new(go(x, n, val, session)),
-                    Box::new(go(a, n, val, session)),
+                    Arc::new(go(ph, n, val, session)),
+                    Arc::new(go(x, n, val, session)),
+                    Arc::new(go(a, n, val, session)),
                 ),
                 session,
             ),
             Term::TUnglue(ph, te, g) => nbe_eval(
                 &Term::TUnglue(
-                    Box::new(go(ph, n, val, session)),
-                    Box::new(go(te, n, val, session)),
-                    Box::new(go(g, n, val, session)),
+                    Arc::new(go(ph, n, val, session)),
+                    Arc::new(go(te, n, val, session)),
+                    Arc::new(go(g, n, val, session)),
                 ),
                 session,
             ),
             Term::TPartial(ph, a) => nbe_eval(
                 &Term::TPartial(
-                    Box::new(go(ph, n, val, session)),
-                    Box::new(go(a, n, val, session)),
+                    Arc::new(go(ph, n, val, session)),
+                    Arc::new(go(a, n, val, session)),
                 ),
                 session,
             ),
             Term::TSigma(x, a, b) => Term::TSigma(
                 x.clone(),
-                Box::new(go(a, n, val, session)),
-                Box::new(go(b, n, val, session)),
+                Arc::new(go(a, n, val, session)),
+                Arc::new(go(b, n, val, session)),
             ),
             Term::TPair(a, b) => Term::TPair(
-                Box::new(go(a, n, val, session)),
-                Box::new(go(b, n, val, session)),
+                Arc::new(go(a, n, val, session)),
+                Arc::new(go(b, n, val, session)),
             ),
-            Term::TFst(p) => nbe_eval(&Term::TFst(Box::new(go(p, n, val, session))), session),
-            Term::TSnd(p) => nbe_eval(&Term::TSnd(Box::new(go(p, n, val, session))), session),
+            Term::TFst(p) => nbe_eval(&Term::TFst(Arc::new(go(p, n, val, session))), session),
+            Term::TSnd(p) => nbe_eval(&Term::TSnd(Arc::new(go(p, n, val, session))), session),
             // Inductive types / HITs: recurse into all sub-terms.
             Term::TData(d, params) => nbe_eval(
                 &Term::TData(
@@ -522,7 +523,7 @@ fn apply_literal_inner(lit: &Literal, t: &Term, session: &mut Session) -> Term {
                     data.clone(),
                     con.clone(),
                     args.iter().map(|a| go(a, n, val, session)).collect(),
-                    Box::new(go(r, n, val, session)),
+                    Arc::new(go(r, n, val, session)),
                 ),
                 session,
             ),
@@ -531,8 +532,8 @@ fn apply_literal_inner(lit: &Literal, t: &Term, session: &mut Session) -> Term {
                     data.clone(),
                     con.clone(),
                     args.iter().map(|a| go(a, n, val, session)).collect(),
-                    Box::new(go(r, n, val, session)),
-                    Box::new(go(s, n, val, session)),
+                    Arc::new(go(r, n, val, session)),
+                    Arc::new(go(s, n, val, session)),
                 ),
                 session,
             ),
@@ -547,7 +548,7 @@ fn apply_literal_inner(lit: &Literal, t: &Term, session: &mut Session) -> Term {
             ),
             Term::TElim(motive, cases, scrut) => nbe_eval(
                 &Term::TElim(
-                    Box::new(go(motive, n, val, session)),
+                    Arc::new(go(motive, n, val, session)),
                     cases
                         .iter()
                         .map(|c| ElimCase {
@@ -559,7 +560,7 @@ fn apply_literal_inner(lit: &Literal, t: &Term, session: &mut Session) -> Term {
                             refinements: c.refinements.clone(),
                         })
                         .collect(),
-                    Box::new(go(scrut, n, val, session)),
+                    Arc::new(go(scrut, n, val, session)),
                 ),
                 session,
             ),
@@ -687,9 +688,9 @@ fn eval_elim_face(
     // Fallback (shouldn't normally be reached): try the old TElim approach.
     nbe_eval(
         &Term::TElim(
-            Box::new(shift(_ambient_depth, 0, _motive)),
+            Arc::new(shift(_ambient_depth, 0, _motive)),
             shift_cases(cases, _ambient_depth),
-            Box::new(nbe_eval(face, session)),
+            Arc::new(nbe_eval(face, session)),
         ),
         session,
     )
@@ -804,7 +805,7 @@ fn build_params(param_terms: &[Option<Term>]) -> Vec<Term> {
 /// This is used for implicit argument resolution - when we have an implicit
 /// binder `{x : A}`, we search the context for a term of type `A`.
 fn find_implicit_arg(
-    dts: &[Datatype],
+    _dts: &[Datatype],
     ctx: &Ctx,
     target_ty: &Term,
     session: &mut Session,
@@ -843,7 +844,7 @@ fn fill_implicit_args(
                 if let Some(arg) = find_implicit_arg(_dts, ctx, &a, session) {
                     let arg_clone = arg.clone();
                     // Apply the implicit argument
-                    f = Term::TApp(Box::new(f), Box::new(arg));
+                    f = Term::TApp(Arc::new(f), Arc::new(arg));
                     // Update the type to the codomain with the argument substituted
                     f_ty = beta(&b, &arg_clone);
                     // Continue the loop in case there are more implicit args
@@ -932,7 +933,7 @@ fn infer_dt_inner(
         Term::TApp(f, a) => match infer_dt(dts, ctx, f, session) {
             Ok(f_ty) => {
                 // Fill in any implicit arguments before checking the explicit argument
-                let (f_filled, f_ty_filled) =
+                let (_f_filled, f_ty_filled) =
                     fill_implicit_args(dts, ctx, f.as_ref().clone(), f_ty, session)?;
                 let (a_ty, b_ty) = match &f_ty_filled {
                     Term::TPi(_, a, b, _) => (a.as_ref().clone(), b.as_ref().clone()),
@@ -1076,8 +1077,8 @@ fn infer_dt_inner(
                 f,
                 &Term::TPi(
                     "_".into(),
-                    Box::new(a_.clone()),
-                    Box::new(shift(1, 0, &b_)),
+                    Arc::new(a_.clone()),
+                    Arc::new(shift(1, 0, &b_)),
                     false,
                 ),
                 session,
@@ -1088,8 +1089,8 @@ fn infer_dt_inner(
                 g,
                 &Term::TPi(
                     "_".into(),
-                    Box::new(b_.clone()),
-                    Box::new(shift(1, 0, &a_)),
+                    Arc::new(b_.clone()),
+                    Arc::new(shift(1, 0, &a_)),
                     false,
                 ),
                 session,
@@ -1100,15 +1101,15 @@ fn infer_dt_inner(
                 eta,
                 &Term::TPi(
                     "a".into(),
-                    Box::new(a_.clone()),
-                    Box::new(Term::TPath(
-                        Box::new(shift(1, 0, &a_)),
-                        Box::new(Term::TVar(0)),
-                        Box::new(Term::TApp(
-                            Box::new(shift(1, 0, g)),
-                            Box::new(Term::TApp(
-                                Box::new(shift(1, 0, f)),
-                                Box::new(Term::TVar(0)),
+                    Arc::new(a_.clone()),
+                    Arc::new(Term::TPath(
+                        Arc::new(shift(1, 0, &a_)),
+                        Arc::new(Term::TVar(0)),
+                        Arc::new(Term::TApp(
+                            Arc::new(shift(1, 0, g)),
+                            Arc::new(Term::TApp(
+                                Arc::new(shift(1, 0, f)),
+                                Arc::new(Term::TVar(0)),
                             )),
                         )),
                     )),
@@ -1122,23 +1123,23 @@ fn infer_dt_inner(
                 eps,
                 &Term::TPi(
                     "b".into(),
-                    Box::new(b_.clone()),
-                    Box::new(Term::TPath(
-                        Box::new(shift(1, 0, &b_)),
-                        Box::new(Term::TApp(
-                            Box::new(shift(1, 0, f)),
-                            Box::new(Term::TApp(
-                                Box::new(shift(1, 0, g)),
-                                Box::new(Term::TVar(0)),
+                    Arc::new(b_.clone()),
+                    Arc::new(Term::TPath(
+                        Arc::new(shift(1, 0, &b_)),
+                        Arc::new(Term::TApp(
+                            Arc::new(shift(1, 0, f)),
+                            Arc::new(Term::TApp(
+                                Arc::new(shift(1, 0, g)),
+                                Arc::new(Term::TVar(0)),
                             )),
                         )),
-                        Box::new(Term::TVar(0)),
+                        Arc::new(Term::TVar(0)),
                     )),
                     false,
                 ),
                 session,
             )?;
-            Ok(Term::TEquiv(Box::new(a_), Box::new(b_)))
+            Ok(Term::TEquiv(Arc::new(a_), Arc::new(b_)))
         }
 
         // equivFwd e x : B   where  e : Equiv A B,  x : A
@@ -1153,9 +1154,9 @@ fn infer_dt_inner(
             let (a, b) = require_equiv_dt(dts, ctx, e, session)?;
             let n = type_level_dt(dts, ctx, &a, session)?;
             Ok(Term::TPath(
-                Box::new(Term::TUniv(n)),
-                Box::new(a),
-                Box::new(b),
+                Arc::new(Term::TUniv(n)),
+                Arc::new(a),
+                Arc::new(b),
             ))
         }
 
@@ -1185,14 +1186,14 @@ fn infer_dt_inner(
                         Term::TPath(a_ty, u, v) => {
                             let u = shift(-1, 0, &u);
                             let v = shift(-1, 0, &v);
-                            Term::TPath(a_ty, Box::new(u), Box::new(v))
+                            Term::TPath(a_ty, Arc::new(u), Arc::new(v))
                         }
                         _other => {
                             let a_ty = infer_dt(dts, &ctx2, body, session)?;
                             let u =
                                 shift(-1, 0, &apply_literal(&Literal::NegVar(0), body, session));
                             let v = shift(-1, 0, &apply_literal(&Literal::Pos(0), body, session));
-                            Term::TPath(Box::new(a_ty), Box::new(u), Box::new(v))
+                            Term::TPath(Arc::new(a_ty), Arc::new(u), Arc::new(v))
                         }
                     }
                 }
@@ -1228,13 +1229,13 @@ fn infer_dt_inner(
             check_interval_dt(dts, ctx, &r_ty, session)?;
             // x : A i0
             let x_ty = nbe_eval(
-                &Term::TApp(Box::new(shift(1, 0, a)), Box::new(Term::TInterval(I::I0))),
+                &Term::TApp(Arc::new(shift(1, 0, a)), Arc::new(Term::TInterval(I::I0))),
                 session,
             );
             check_dt(dts, ctx, x, &x_ty, session)?;
             // Result type: A r
             let result = nbe_eval(
-                &Term::TApp(Box::new(shift(1, 0, a)), Box::new(shift(1, 0, r))),
+                &Term::TApp(Arc::new(shift(1, 0, a)), Arc::new(shift(1, 0, r))),
                 session,
             );
             Ok(result)
@@ -1250,10 +1251,10 @@ fn infer_dt_inner(
                 Term::TPair(te_a, _) => {
                     let sigma = Term::TSigma(
                         "X".to_string(),
-                        Box::new(Term::TUniv(n)),
-                        Box::new(Term::TEquiv(
-                            Box::new(Term::TVar(0)),
-                            Box::new(shift(1, 0, &a_ty_)),
+                        Arc::new(Term::TUniv(n)),
+                        Arc::new(Term::TEquiv(
+                            Arc::new(Term::TVar(0)),
+                            Arc::new(shift(1, 0, &a_ty_)),
                         )),
                     );
                     check_dt(dts, ctx, te, &sigma, session)?;
@@ -1266,10 +1267,10 @@ fn infer_dt_inner(
                         Term::TPair(te_a, _) => {
                             let sigma = Term::TSigma(
                                 "X".to_string(),
-                                Box::new(Term::TUniv(n)),
-                                Box::new(Term::TEquiv(
-                                    Box::new(Term::TVar(0)),
-                                    Box::new(shift(1, 0, &a_ty_)),
+                                Arc::new(Term::TUniv(n)),
+                                Arc::new(Term::TEquiv(
+                                    Arc::new(Term::TVar(0)),
+                                    Arc::new(shift(1, 0, &a_ty_)),
                                 )),
                             );
                             check_dt(dts, ctx, &body_stripped, &sigma, session)?;
@@ -1633,7 +1634,7 @@ fn infer_dt_inner(
                                     &nbe_eval(
                                         &Term::PApp(
                                             a_fam.clone(),
-                                            Box::new(Term::TInterval(I::I1)),
+                                            Arc::new(Term::TInterval(I::I1)),
                                         ),
                                         session,
                                     ),
@@ -1703,7 +1704,7 @@ fn infer_dt_inner(
                                     &nbe_eval(
                                         &Term::PApp(
                                             a_fam.clone(),
-                                            Box::new(Term::TInterval(I::I1)),
+                                            Arc::new(Term::TInterval(I::I1)),
                                         ),
                                         session,
                                     ),
@@ -1731,9 +1732,9 @@ fn infer_dt_inner(
             }
             let comp_result = Term::TComp(a_fam.clone(), sys.clone(), base.clone());
             Ok(Term::TPath(
-                Box::new(shift(1, 0, &a_fam_)),
-                Box::new(nbe_eval(base, session)),
-                Box::new(nbe_eval(&comp_result, session)),
+                Arc::new(shift(1, 0, &a_fam_)),
+                Arc::new(nbe_eval(base, session)),
+                Arc::new(nbe_eval(&comp_result, session)),
             ))
         }
 
@@ -1796,9 +1797,9 @@ fn infer_dt_inner(
             }
             let hcomp_result = Term::THComp(a_ty.clone(), sys.clone(), base.clone());
             Ok(Term::TPath(
-                Box::new(shift(1, 0, &a_ty_)),
-                Box::new(nbe_eval(base, session)),
-                Box::new(nbe_eval(&hcomp_result, session)),
+                Arc::new(shift(1, 0, &a_ty_)),
+                Arc::new(nbe_eval(base, session)),
+                Arc::new(nbe_eval(&hcomp_result, session)),
             ))
         }
 
@@ -1916,8 +1917,8 @@ fn infer_dt_inner(
                     let shifted_pty = shift(offset, 0, pty);
                     result = Term::TPi(
                         pname.clone(),
-                        Box::new(shifted_pty),
-                        Box::new(result),
+                        Arc::new(shifted_pty),
+                        Arc::new(result),
                         false,
                     );
                     offset -= 1;
@@ -1971,9 +1972,9 @@ fn infer_dt_inner(
                     .rev()
                     .fold(sig.face1.clone(), |ty, a| beta(&ty, a));
                 Ok(Term::TPath(
-                    Box::new(Term::TData(d.clone(), params.clone())),
-                    Box::new(nbe_eval(&face0, session)),
-                    Box::new(nbe_eval(&face1, session)),
+                    Arc::new(Term::TData(d.clone(), params.clone())),
+                    Arc::new(nbe_eval(&face0, session)),
+                    Arc::new(nbe_eval(&face1, session)),
                 ))
             } else {
                 Err(TypeError::UnknownConstructor {
@@ -2091,23 +2092,23 @@ fn infer_dt_inner(
             if is_endpoint(r) {
                 // sq @ 0 or sq @ 1 has type Path (<j> Torus) (fi0 args) (fi1 args)
                 return Ok(Term::TPath(
-                    Box::new(Term::PLam("j".to_string(), Box::new(data_ty))),
-                    Box::new(face_i0_subst),
-                    Box::new(face_i1_subst),
+                    Arc::new(Term::PLam("j".to_string(), Arc::new(data_ty))),
+                    Arc::new(face_i0_subst),
+                    Arc::new(face_i1_subst),
                 ));
             }
 
             // Outer type: PathP (<i> PathP (<j> A) (fi0 j) (fi1 j)) (fj0 i) (fj1 i)
             // In Owl AST: TPath(PLam("i", TPath(PLam("j", A), fi0, fi1)), fj0, fj1)
             let inner_path = Term::TPath(
-                Box::new(Term::PLam("j".to_string(), Box::new(data_ty))),
-                Box::new(face_i0_subst),
-                Box::new(face_i1_subst),
+                Arc::new(Term::PLam("j".to_string(), Arc::new(data_ty))),
+                Arc::new(face_i0_subst),
+                Arc::new(face_i1_subst),
             );
             let outer_type = Term::TPath(
-                Box::new(Term::PLam("i".to_string(), Box::new(inner_path))),
-                Box::new(face_j0_subst),
-                Box::new(face_j1_subst),
+                Arc::new(Term::PLam("i".to_string(), Arc::new(inner_path))),
+                Arc::new(face_j0_subst),
+                Arc::new(face_j1_subst),
             );
             Ok(outer_type)
         }
@@ -2205,18 +2206,18 @@ fn infer_dt_inner(
 
             // Start with the innermost PathP using the last interval variable.
             let mut result_type = Term::TPath(
-                Box::new(Term::PLam(ivar_names[0].clone(), Box::new(data_ty))),
-                Box::new(substituted_faces[0].clone()),
-                Box::new(substituted_faces[1].clone()),
+                Arc::new(Term::PLam(ivar_names[0].clone(), Arc::new(data_ty))),
+                Arc::new(substituted_faces[0].clone()),
+                Arc::new(substituted_faces[1].clone()),
             );
 
             // Wrap with PathPs for each subsequent interval variable (from inner to outer).
             for k in 1..dim {
                 let body = result_type;
                 result_type = Term::TPath(
-                    Box::new(Term::PLam(ivar_names[k].clone(), Box::new(body))),
-                    Box::new(substituted_faces[2 * k].clone()),
-                    Box::new(substituted_faces[2 * k + 1].clone()),
+                    Arc::new(Term::PLam(ivar_names[k].clone(), Arc::new(body))),
+                    Arc::new(substituted_faces[2 * k].clone()),
+                    Arc::new(substituted_faces[2 * k + 1].clone()),
                 );
             }
 
@@ -2226,7 +2227,7 @@ fn infer_dt_inner(
             for k in (0..dim).rev() {
                 if is_endpoint(&ivars[k]) {
                     if let Term::TPath(_, inner, _) = current {
-                        current = *inner;
+                        current = inner.as_ref().clone();
                     } else {
                         break;
                     }
@@ -2437,7 +2438,7 @@ fn infer_dt_inner(
                 let scrut_as_con = Term::TCon(d.clone(), con_sig.name.clone(), con_term_args);
                 let shifted_motive = shift(arity_i32 + extra_shift, 0, motive);
                 let expected_ty = nbe_eval(
-                    &Term::TApp(Box::new(shifted_motive), Box::new(scrut_as_con)),
+                    &Term::TApp(Arc::new(shifted_motive), Arc::new(scrut_as_con)),
                     session,
                 );
                 check_dt(dts, &case_ctx, &case.body, &expected_ty, session)?;
@@ -2502,11 +2503,11 @@ fn infer_dt_inner(
                     d.clone(),
                     pcon_sig.name.clone(),
                     ord_var.clone(),
-                    Box::new(i_var.clone()),
+                    Arc::new(i_var.clone()),
                 );
                 let motive_shifted = shift((arity + 1) as i32, 0, motive);
                 let motive_at_pcon = nbe_eval(
-                    &Term::TApp(Box::new(motive_shifted.clone()), Box::new(pcon_term)),
+                    &Term::TApp(Arc::new(motive_shifted.clone()), Arc::new(pcon_term)),
                     session,
                 );
                 let face0_subst = subst_params_face(&pcon_sig.face0, &scrut_params, arity, session);
@@ -2529,9 +2530,9 @@ fn infer_dt_inner(
                 );
 
                 let expected_body_ty = Term::TPath(
-                    Box::new(Term::PLam(i_name.clone(), Box::new(motive_at_pcon))),
-                    Box::new(shift(1, 0, &face0_case)),
-                    Box::new(shift(1, 0, &face1_case)),
+                    Arc::new(Term::PLam(i_name.clone(), Arc::new(motive_at_pcon))),
+                    Arc::new(shift(1, 0, &face0_case)),
+                    Arc::new(shift(1, 0, &face1_case)),
                 );
                 if case.refinements.is_some() {
                     // Refined nested-pattern HIT case. The parser compiled the
@@ -2570,16 +2571,16 @@ fn infer_dt_inner(
                     };
                     let correct_motive = Term::TAbs(
                         "z".to_string(),
-                        Box::new(subst(
+                        Arc::new(subst(
                             slot + 1,
                             &Term::TVar(0),
                             &shift(1, 0, &expected_body_ty),
                         )),
                     );
                     let rebuilt = Term::TElim(
-                        Box::new(correct_motive),
+                        Arc::new(correct_motive),
                         elim_cases,
-                        Box::new(Term::TVar(slot)),
+                        Arc::new(Term::TVar(slot)),
                     );
                     check_dt(dts, &case_ctx, &rebuilt, &expected_body_ty, session)?;
                 } else {
@@ -2597,8 +2598,10 @@ fn infer_dt_inner(
                             nbe_eval(&shift(-1, 0, &reduced), session)
                         }
                         _ => {
-                            let papp =
-                                Term::PApp(case.body.clone(), Box::new(Term::TInterval(I::I0)));
+                            let papp = Term::PApp(
+                                Arc::new(case.body.as_ref().clone()),
+                                Arc::new(Term::TInterval(I::I0)),
+                            );
                             let reduced = reduce_pcon_endpoints_dt(dts, &papp, session);
                             nbe_eval(&reduced, session)
                         }
@@ -2613,8 +2616,10 @@ fn infer_dt_inner(
                             nbe_eval(&shift(-1, 0, &reduced), session)
                         }
                         _ => {
-                            let papp =
-                                Term::PApp(case.body.clone(), Box::new(Term::TInterval(I::I1)));
+                            let papp = Term::PApp(
+                                Arc::new(case.body.as_ref().clone()),
+                                Arc::new(Term::TInterval(I::I1)),
+                            );
                             let reduced = reduce_pcon_endpoints_dt(dts, &papp, session);
                             nbe_eval(&reduced, session)
                         }
@@ -2688,12 +2693,12 @@ fn infer_dt_inner(
                     d.clone(),
                     sqcon_sig.name.clone(),
                     ord_var_sq.clone(),
-                    Box::new(r_var.clone()),
-                    Box::new(s_var.clone()),
+                    Arc::new(r_var.clone()),
+                    Arc::new(s_var.clone()),
                 );
                 let motive_shifted_sq = shift((arity_sq + 2) as i32, 0, motive);
                 let motive_at_sqcon = nbe_eval(
-                    &Term::TApp(Box::new(motive_shifted_sq.clone()), Box::new(sqcon_term)),
+                    &Term::TApp(Arc::new(motive_shifted_sq.clone()), Arc::new(sqcon_term)),
                     session,
                 );
 
@@ -2740,14 +2745,14 @@ fn infer_dt_inner(
                 );
 
                 let inner_path = Term::TPath(
-                    Box::new(Term::PLam(s_name.clone(), Box::new(motive_at_sqcon))),
-                    Box::new(shift(1, 0, &face_i0_case)),
-                    Box::new(shift(1, 0, &face_i1_case)),
+                    Arc::new(Term::PLam(s_name.clone(), Arc::new(motive_at_sqcon))),
+                    Arc::new(shift(1, 0, &face_i0_case)),
+                    Arc::new(shift(1, 0, &face_i1_case)),
                 );
                 let expected_body_ty_sq = Term::TPath(
-                    Box::new(Term::PLam(r_name.clone(), Box::new(inner_path))),
-                    Box::new(shift(2, 0, &face_j0_case)),
-                    Box::new(shift(2, 0, &face_j1_case)),
+                    Arc::new(Term::PLam(r_name.clone(), Arc::new(inner_path))),
+                    Arc::new(shift(2, 0, &face_j0_case)),
+                    Arc::new(shift(2, 0, &face_j1_case)),
                 );
                 session.set_skip_plam_endpt(true);
                 check_dt(dts, &case_ctx_sq, &case.body, &expected_body_ty_sq, session)?;
@@ -2897,8 +2902,8 @@ fn infer_dt_inner(
                 let motive_shifted_cell = shift((arity_cell + dim) as i32, 0, motive);
                 let motive_at_cellcon = nbe_eval(
                     &Term::TApp(
-                        Box::new(motive_shifted_cell.clone()),
-                        Box::new(cellcon_term),
+                        Arc::new(motive_shifted_cell.clone()),
+                        Arc::new(cellcon_term),
                     ),
                     session,
                 );
@@ -2939,21 +2944,21 @@ fn infer_dt_inner(
 
                 // Start with the innermost PathP.
                 let mut expected_body_ty = Term::TPath(
-                    Box::new(Term::PLam(
+                    Arc::new(Term::PLam(
                         ivar_names[0].to_string(),
-                        Box::new(motive_at_cellcon),
+                        Arc::new(motive_at_cellcon),
                     )),
-                    Box::new(shift(1, 0, &face_cases[0])),
-                    Box::new(shift(1, 0, &face_cases[1])),
+                    Arc::new(shift(1, 0, &face_cases[0])),
+                    Arc::new(shift(1, 0, &face_cases[1])),
                 );
 
                 // Wrap with PathPs for each subsequent interval variable.
                 for k in 1..dim {
                     let body = expected_body_ty;
                     expected_body_ty = Term::TPath(
-                        Box::new(Term::PLam(ivar_names[k].to_string(), Box::new(body))),
-                        Box::new(shift((k + 1) as i32, 0, &face_cases[2 * k])),
-                        Box::new(shift((k + 1) as i32, 0, &face_cases[2 * k + 1])),
+                        Arc::new(Term::PLam(ivar_names[k].to_string(), Arc::new(body))),
+                        Arc::new(shift((k + 1) as i32, 0, &face_cases[2 * k])),
+                        Arc::new(shift((k + 1) as i32, 0, &face_cases[2 * k + 1])),
                     );
                 }
 
@@ -3074,14 +3079,14 @@ fn infer_dt_inner(
         // Next : A -> Delay A
         Term::TNext(a) => {
             let a_ty = infer_dt(dts, ctx, a, session)?;
-            Ok(Term::TDelay(Box::new(a_ty)))
+            Ok(Term::TDelay(Arc::new(a_ty)))
         }
         // Force : Delay A -> A
         Term::TForce(a) => {
             let delay_ty = infer_dt(dts, ctx, a, session)?;
             // delay_ty should be Delay B for some B
             match nbe_eval(&delay_ty, session) {
-                Term::TDelay(b) => Ok(*b),
+                Term::TDelay(b) => Ok(b.as_ref().clone()),
                 other => Err(TypeError::Other(format!(
                     "Force expects a Delay type, but got: {}",
                     other
@@ -3144,7 +3149,7 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term, session: &mut Session) -
                 .map(|a| reduce_pcon_endpoints_dt(dts, a, session))
                 .collect();
             nbe_eval(
-                &Term::TPCon(d.clone(), pc.clone(), reduced_args, Box::new(r_nf)),
+                &Term::TPCon(d.clone(), pc.clone(), reduced_args, Arc::new(r_nf)),
                 session,
             )
         }
@@ -3193,7 +3198,7 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term, session: &mut Session) -
                     let face = subst_face(&sig.face_j0);
                     return reduce_pcon_endpoints_dt(
                         dts,
-                        &nbe_eval(&Term::PApp(Box::new(face), s.clone()), session),
+                        &nbe_eval(&Term::PApp(Arc::new(face), s.clone()), session),
                         session,
                     );
                 }
@@ -3202,7 +3207,7 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term, session: &mut Session) -
                     let face = subst_face(&sig.face_j1);
                     return reduce_pcon_endpoints_dt(
                         dts,
-                        &nbe_eval(&Term::PApp(Box::new(face), s.clone()), session),
+                        &nbe_eval(&Term::PApp(Arc::new(face), s.clone()), session),
                         session,
                     );
                 }
@@ -3225,8 +3230,8 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term, session: &mut Session) -
                     args.iter()
                         .map(|a| reduce_pcon_endpoints_dt(dts, a, session))
                         .collect(),
-                    Box::new(r_nf),
-                    Box::new(s_nf),
+                    Arc::new(r_nf),
+                    Arc::new(s_nf),
                 ),
                 session,
             )
@@ -3283,7 +3288,7 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term, session: &mut Session) -
                     for iv in ivar_nfs[1..].iter() {
                         result = reduce_pcon_endpoints_dt(
                             dts,
-                            &Term::PApp(Box::new(result), Box::new(iv.clone())),
+                            &Term::PApp(Arc::new(result), Arc::new(iv.clone())),
                             session,
                         );
                     }
@@ -3377,12 +3382,12 @@ fn reduce_pcon_endpoints_dt(dts: &[Datatype], t: &Term, session: &mut Session) -
                 }
             }
             let p2 = reduce_pcon_endpoints_dt(dts, p, session);
-            nbe_eval(&Term::PApp(Box::new(p2), Box::new(r_nf.clone())), session)
+            nbe_eval(&Term::PApp(Arc::new(p2), Arc::new(r_nf.clone())), session)
         }
         // Recurse into PLam so that e.g. `PLam(k, cube3 @ i0 @ j @ k)` reduces too.
         Term::PLam(name, body) => Term::PLam(
             name.clone(),
-            Box::new(reduce_pcon_endpoints_dt(dts, body, session)),
+            Arc::new(reduce_pcon_endpoints_dt(dts, body, session)),
         ),
         _ => t,
     }
@@ -3567,8 +3572,8 @@ fn check_dt_inner(
                             let shifted_t_ty = shift(1, 0, &t_ty);
                             Term::TPi(
                                 "_".into(),
-                                Box::new(Term::TIntervalTy),
-                                Box::new(shifted_t_ty),
+                                Arc::new(Term::TIntervalTy),
+                                Arc::new(shifted_t_ty),
                                 false,
                             )
                         }
@@ -4180,7 +4185,7 @@ pub fn check_sqcon_coherence(
         // PApp(face_j0, I0) == face_i0
         let fj0_at_i0 = reduce_pcon_endpoints_dt(
             dts,
-            &Term::PApp(Box::new(sqcon.face_j0.clone()), Box::new(i0.clone())),
+            &Term::PApp(Arc::new(sqcon.face_j0.clone()), Arc::new(i0.clone())),
             session,
         );
         let fi0_reduced = reduce_pcon_endpoints_dt(dts, &sqcon.face_i0, session);
@@ -4206,7 +4211,7 @@ pub fn check_sqcon_coherence(
         // PApp(face_j0, I1) == face_i1
         let fj0_at_i1 = reduce_pcon_endpoints_dt(
             dts,
-            &Term::PApp(Box::new(sqcon.face_j0.clone()), Box::new(i1.clone())),
+            &Term::PApp(Arc::new(sqcon.face_j0.clone()), Arc::new(i1.clone())),
             session,
         );
         let fi1_reduced = reduce_pcon_endpoints_dt(dts, &sqcon.face_i1, session);
@@ -4231,7 +4236,7 @@ pub fn check_sqcon_coherence(
         // PApp(face_j1, I0) == face_i0
         let fj1_at_i0 = reduce_pcon_endpoints_dt(
             dts,
-            &Term::PApp(Box::new(sqcon.face_j1.clone()), Box::new(i0.clone())),
+            &Term::PApp(Arc::new(sqcon.face_j1.clone()), Arc::new(i0.clone())),
             session,
         );
         let eq3 = definitionally_equal_ctx_r(&empty_ctx, &fi0_reduced, &fj1_at_i0, session);
@@ -4255,7 +4260,7 @@ pub fn check_sqcon_coherence(
         // PApp(face_j1, I1) == face_i1
         let fj1_at_i1 = reduce_pcon_endpoints_dt(
             dts,
-            &Term::PApp(Box::new(sqcon.face_j1.clone()), Box::new(i1.clone())),
+            &Term::PApp(Arc::new(sqcon.face_j1.clone()), Arc::new(i1.clone())),
             session,
         );
         let eq4 = definitionally_equal_ctx_r(&empty_ctx, &fi1_reduced, &fj1_at_i1, session);
@@ -4403,8 +4408,8 @@ mod tests {
                 "D",
                 vec![Term::TPi(
                     "_".into(),
-                    Box::new(Term::TVar(0)),
-                    Box::new(Term::TUniv(0)),
+                    Arc::new(Term::TVar(0)),
+                    Arc::new(Term::TUniv(0)),
                     false,
                 )],
             )];
@@ -4429,8 +4434,8 @@ mod tests {
                     Term::TVar(0),
                     Term::TPi(
                         "_".into(),
-                        Box::new(Term::TVar(0)),
-                        Box::new(Term::TUniv(0)),
+                        Arc::new(Term::TVar(0)),
+                        Arc::new(Term::TUniv(0)),
                         false,
                     ),
                 ],
@@ -4468,8 +4473,8 @@ mod tests {
                     "Bar",
                     vec![Term::TPi(
                         "_".into(),
-                        Box::new(Term::TVar(0)),
-                        Box::new(Term::TUniv(0)),
+                        Arc::new(Term::TVar(0)),
+                        Arc::new(Term::TUniv(0)),
                         false,
                     )],
                 ),
@@ -4573,11 +4578,11 @@ mod tests {
             let pi_x_to = |cod: Term| {
                 Term::TPi(
                     "x".into(),
-                    Box::new(Term::TUniv(0)),
-                    Box::new(Term::TPi(
+                    Arc::new(Term::TUniv(0)),
+                    Arc::new(Term::TPi(
                         String::new(),
-                        Box::new(Term::TVar(1)),
-                        Box::new(cod),
+                        Arc::new(Term::TVar(1)),
+                        Arc::new(cod),
                         false,
                     )),
                     false,
@@ -4610,18 +4615,18 @@ mod tests {
     fn lift_and_lower_cumulativity() {
         crate::cubical::session::with_session_mut(|session| {
             assert!(sub_t(
-                &Term::TLift(Box::new(t_univ(1)), 1),
-                &Term::TLift(Box::new(t_univ(0)), 1),
+                &Term::TLift(Arc::new(t_univ(1)), 1),
+                &Term::TLift(Arc::new(t_univ(0)), 1),
                 session,
             ));
             assert!(sub_t(
-                &Term::TLower(Box::new(t_univ(1))),
-                &Term::TLower(Box::new(t_univ(0))),
+                &Term::TLower(Arc::new(t_univ(1))),
+                &Term::TLower(Arc::new(t_univ(0))),
                 session,
             ));
             assert!(!sub_t(
-                &Term::TLift(Box::new(t_univ(0)), 1),
-                &Term::TLift(Box::new(t_univ(1)), 1),
+                &Term::TLift(Arc::new(t_univ(0)), 1),
+                &Term::TLift(Arc::new(t_univ(1)), 1),
                 session,
             ));
         });
