@@ -90,7 +90,7 @@ A consequence of A1. Cubical Agda's `transp` computes through indexed types by s
 
 **Done**: Fixed all four transport functions (`transport_data_con`, `transport_data_pcon`, `transport_data_sqcon`, `transport_data_cellcon`). The old approach tried to extract Pi types from `VData(d, params_at_i)`, which immediately fell through. The new approach: evaluate the closure at the formal interval variable to get `VData(d, params_at_i)`, then for each constructor arg type `T_k`, substitute each data type param variable `TVar(n + m - j)` with `quote(params_at_i[j])` — the param's interval-dependent value. This correctly builds type families where the data type parameters change along the interval.
 
-**Limitation**: Creating a test that triggers the non-constant path (`is_constant = false`) requires a `Path Type A B` with `A ≠ B`, which needs Glue/univalence + an equivalence between different types — not feasible without significant new infrastructure. All 253 existing tests pass (constant-family transport is unaffected).
+**Test**: `examples/indexed_transp_test.owl` exercises the non-constant path (`is_constant = false`) by constructing `Bool ≃ Bool'` via `mkEquiv`, using `ua` to build a `Path U0 Bool Bool'`, then transporting `cons tt nil : List Bool` through `List (ua bool_bool' @ i)` to produce `List Bool'`. Also added `VUa` PApp endpoint reduction (`ua e @ 0 = equiv_dom(e)`, `ua e @ 1 = equiv_cod(e)`) in `elim.rs` so that `is_constant` correctly detects non-constant families. All 254 tests pass.
 
 #### A3. Frontier-of-instability — Phase 4 (quoting) 🟡
 

@@ -2445,6 +2445,24 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn indexed_transp_example_checks() {
+        // Guard against regressions in non-constant indexed inductive type
+        // transport: Bool ≃ Bool' via univalence, then transport a List Bool
+        // through the interval-dependent family List (ua e @ i) to List Bool'.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("indexed_transp_test.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn indexed transp check thread");
+        handle
+            .join()
+            .expect("indexed transp check thread panicked")
+            .expect("examples/indexed_transp_test.owl should typecheck");
+    }
+
+    #[test]
     fn all_example_files_check() {
         // Sweep every examples/*.owl file not already covered by a dedicated
         // test above (cubical/HIT/path/param/quotient/tactics/record demos and
@@ -2462,6 +2480,7 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
             "comm_ring_demo.owl",
             "stress_mul_algebra.owl",
             "field_demo.owl",
+            "indexed_transp_test.owl",
             // Skipped: isNType 1/2 generate deeply nested terms that overflow
             // even 64 MiB stacks. See TODO.md §I3. Fix the parser sugar, not
             // the stack size.

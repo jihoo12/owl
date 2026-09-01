@@ -1,0 +1,62 @@
+-- indexed_transp_test.owl — Non-constant indexed inductive type transport
+--
+-- Exercises: transport through a data type family where the parameter
+-- changes along the interval. This requires Glue + univalence to create
+-- a Path Type A B with A ≠ B.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Bool where
+  | tt : Bool
+  | ff : Bool
+
+inductive Bool' where
+  | tt' : Bool'
+  | ff' : Bool'
+
+-- Forward map: Bool -> Bool'
+def bf : Bool -> Bool' :=
+  fun b => match b return Bool' with
+  | tt => tt'
+  | ff => ff'
+
+-- Backward map: Bool' -> Bool
+def bb : Bool' -> Bool :=
+  fun b' => match b' return Bool with
+  | tt' => tt
+  | ff' => ff
+
+-- eta : (a : A) -> Path A a (g (f a))
+def bf_bb_eta : forall (b : Bool), Path Bool b (bb (bf b)) :=
+  fun b => match b return Path Bool b (bb (bf b)) with
+  | tt => <i> tt
+  | ff => <i> ff
+
+-- eps : (b : B) -> Path B (f (g b)) b
+def bf_bb_eps : forall (b' : Bool'), Path Bool' (bf (bb b')) b' :=
+  fun b' => match b' return Path Bool' (bf (bb b')) b' with
+  | tt' => <i> tt'
+  | ff' => <i> ff'
+
+-- Equivalence Bool ≃ Bool'
+def bool_bool'_equiv : Equiv Bool Bool' :=
+  mkEquiv Bool Bool' bf bb bf_bb_eta bf_bb_eps
+
+-- Path from Bool to Bool' in the universe via univalence
+def ua_bool_bool' : Path U0 Bool Bool' :=
+  ua bool_bool'_equiv
+
+-- List type
+inductive List (A : Type) where
+  | nil : List A
+  | cons : A -> List A -> List A
+
+-- Non-constant indexed transport:
+-- transport (λi. List (ua bool_bool' @ i)) from (cons tt nil)
+-- This transports a List Bool to a List Bool' via the equivalence.
+def indexed_transp_result : List Bool' :=
+  transport (<i> List (ua_bool_bool' @ i)) (cons tt nil)
+
+def main : Nat := zero
