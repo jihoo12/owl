@@ -386,6 +386,17 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
                 || uses_var_at_level(u, level)
                 || uses_var_at_level(v, level)
         }
+        Term::TId(a, u, v) => {
+            uses_var_at_level(a, level)
+                || uses_var_at_level(u, level)
+                || uses_var_at_level(v, level)
+        }
+        Term::TRefl(a) => uses_var_at_level(a, level),
+        Term::TJ(motive, base, p) => {
+            uses_var_at_level(motive, level)
+                || uses_var_at_level(base, level)
+                || uses_var_at_level(p, level)
+        }
         Term::PLam(_, b) => uses_var_at_level(b, level + 1),
         Term::PApp(p, r) => uses_var_at_level(p, level) || uses_var_at_level(r, level),
         Term::THComp(a, sys, base) => {

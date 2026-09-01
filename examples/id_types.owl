@@ -1,0 +1,8 @@
+-- Cubical identity types (Id, Refl, J)
+-- Tests: type formation, reflexivity, J eliminator computing on refl
+
+def id_comm : forall (A : Type). forall (x : A). Id A x x := fun A x => Refl x
+
+-- J computes on Refl: J B d (Refl x) = d
+def j_on_refl : forall (A : Type). forall (x : A). A := fun A x =>
+  J (fun (y : A) => A) x (Refl x)

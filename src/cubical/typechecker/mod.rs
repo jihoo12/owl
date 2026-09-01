@@ -1022,6 +1022,89 @@ fn infer_dt_inner(
         Term::TInterval(_) | Term::TCube(_) => Ok(interval_ty()),
         Term::TIntervalTy => Ok(Term::TUniv(0)),
 
+        // TId: Id A a b : U_n  when  A : U_n, a : A, b : A
+        Term::TId(a, x, y) => {
+            let n = type_level_dt(dts, ctx, a, session)?;
+            let a_val = nbe_eval_ctx(ctx.len(), a, session);
+            check_dt(dts, ctx, x, &a_val, session)?;
+            check_dt(dts, ctx, y, &a_val, session)?;
+            Ok(Term::TUniv(n))
+        }
+
+        // TRefl: Refl x : Id A x x  when  x : A
+        Term::TRefl(x) => {
+            let x_ty = infer_dt(dts, ctx, x, session)?;
+            Ok(Term::TId(
+                Arc::new(x_ty),
+                Arc::new((**x).clone()),
+                Arc::new((**x).clone()),
+            ))
+        }
+
+        // J motive base p : B y p
+        //
+        // Requires:
+        //   p   : Id A x y          (for some x, y)
+        //   B   : (y : A) → Type   (the motive; simplified non-dependent version)
+        //   d   : B x               (the reflexivity case)
+        // Returns: B y
+        Term::TJ(motive, base, p) => {
+            // Infer the type of p — must be Id A x y.
+            let p_ty = infer_dt(dts, ctx, p, session)?;
+            let (a_ty, x_val, y_val) = match nbe_eval_ctx(ctx.len(), &p_ty, session) {
+                Term::TId(a, x, y) => (a, x, y),
+                other => {
+                    return Err(TypeError::ExpectedPath {
+                        // reuse ExpectedPath error for Id too
+                        ty: other,
+                        names: err_names(ctx),
+                        pos: err_pos(ctx, p, session),
+                    });
+                }
+            };
+
+            // Infer the type of motive — must be (y : A) → Type.
+            // Handle TAbs (no type annotation) by checking the body.
+            match motive.as_ref() {
+                Term::TAbs(y_name, body) => {
+                    // Extend context with y : A, check body is a type
+                    let ctx2 = extend_ctx(y_name.clone(), a_ty.as_ref().clone(), ctx);
+                    type_level_dt(dts, &ctx2, body, session)?;
+                }
+                _ => {
+                    let motive_ty = infer_dt(dts, ctx, motive, session)?;
+                    match nbe_eval_ctx(ctx.len(), &motive_ty, session) {
+                        Term::TPi(_y_name, dom, _cod, _) => {
+                            let dom_val = nbe_eval_ctx(ctx.len(), &dom, session);
+                            require_equal(ctx, &a_ty, &dom_val, session)?;
+                        }
+                        other => {
+                            return Err(TypeError::ExpectedPi {
+                                ty: other,
+                                names: err_names(ctx),
+                                pos: err_pos(ctx, motive, session),
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Check that base : B x.
+            let base_expected = nbe_eval_ctx(
+                ctx.len(),
+                &Term::TApp(motive.clone(), x_val.clone()),
+                session,
+            );
+            check_dt(dts, ctx, base, &base_expected, session)?;
+
+            // Return B y.
+            Ok(nbe_eval_ctx(
+                ctx.len(),
+                &Term::TApp(motive.clone(), y_val.clone()),
+                session,
+            ))
+        }
+
         // Lambdas cannot be inferred
         t @ Term::TAbs(_, _) | t @ Term::PLam(_, _) => Err(TypeError::CannotInfer {
             t: t.clone(),
@@ -3932,6 +4015,34 @@ fn check_dt_inner(
             session.set_meta_expected(*id, expected_nf.clone());
             let _ = type_level_dt(dts, ctx, ty, session)?;
             Ok(())
+        }
+
+        // Refl introduction: Refl x : Id A x x  when  x : A
+        Term::TRefl(x) => {
+            match nbe_eval_ctx(ctx.len(), ty, session) {
+                Term::TId(a, _exp_x, _exp_y) => {
+                    // Check that x : A (the type component of Id)
+                    check_dt(dts, ctx, x, &nbe_eval_ctx(ctx.len(), &a, session), session)?;
+                    Ok(())
+                }
+                other => {
+                    return Err(TypeError::Other(format!(
+                        "Refl must be checked against Id type, got {}",
+                        show_term(&names, &other)
+                    )));
+                }
+            }
+        }
+
+        // J elimination: infer and compare
+        Term::TJ(_, _, _) => {
+            let inferred = infer_dt(dts, ctx, t, session)?;
+            require_equal(
+                ctx,
+                &nbe_eval_ctx(ctx.len(), ty, session),
+                &nbe_eval_ctx(ctx.len(), &inferred, session),
+                session,
+            )
         }
 
         // Fall through to inference + cumulativity.

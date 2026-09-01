@@ -49,7 +49,12 @@ pub fn term_size(t: &Term) -> usize {
         Term::TPath(a, u, v)
         | Term::TGlue(a, u, v)
         | Term::TGlueElem(a, u, v)
-        | Term::TUnglue(a, u, v) => 1 + term_size(a) + term_size(u) + term_size(v),
+        | Term::TUnglue(a, u, v)
+        | Term::TId(a, u, v) => 1 + term_size(a) + term_size(u) + term_size(v),
+
+        Term::TRefl(a) => 1 + term_size(a),
+
+        Term::TJ(motive, base, p) => 1 + term_size(motive) + term_size(base) + term_size(p),
 
         Term::TPartial(a, u) => 1 + term_size(a) + term_size(u),
 

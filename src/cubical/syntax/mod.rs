@@ -40,6 +40,10 @@ pub enum Term {
     TPath(Arc<Term>, Arc<Term>, Arc<Term>),
     PLam(Name, Arc<Term>),
     PApp(Arc<Term>, Arc<Term>),
+    // -- Cubical identity types (A4) ----------------------------------------
+    TId(Arc<Term>, Arc<Term>, Arc<Term>),
+    TRefl(Arc<Term>),
+    TJ(Arc<Term>, Arc<Term>, Arc<Term>),
     THComp(Arc<Term>, System, Arc<Term>),
     TComp(Arc<Term>, System, Arc<Term>),
     TFill(Arc<Term>, System, Arc<Term>),
@@ -427,6 +431,13 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TPath(a, u, v) => {
             Term::TPath(b(shift(d, c, a)), b(shift(d, c, u)), b(shift(d, c, v)))
         }
+        Term::TId(a, u, v) => Term::TId(b(shift(d, c, a)), b(shift(d, c, u)), b(shift(d, c, v))),
+        Term::TRefl(a) => Term::TRefl(b(shift(d, c, a))),
+        Term::TJ(motive, base, p) => Term::TJ(
+            b(shift(d, c, motive)),
+            b(shift(d, c, base)),
+            b(shift(d, c, p)),
+        ),
         Term::PLam(x, body) => Term::PLam(x.clone(), b(shift(d, c + 1, body))),
         Term::PApp(p, r) => Term::PApp(b(shift(d, c, p)), b(shift(d, c, r))),
         Term::THComp(a, sys, u0) => Term::THComp(
@@ -615,6 +626,13 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
         Term::TPath(a, u, v) => {
             Term::TPath(b(subst(j, s, a)), b(subst(j, s, u)), b(subst(j, s, v)))
         }
+        Term::TId(a, u, v) => Term::TId(b(subst(j, s, a)), b(subst(j, s, u)), b(subst(j, s, v))),
+        Term::TRefl(a) => Term::TRefl(b(subst(j, s, a))),
+        Term::TJ(motive, base, p) => Term::TJ(
+            b(subst(j, s, motive)),
+            b(subst(j, s, base)),
+            b(subst(j, s, p)),
+        ),
         Term::PLam(x, body) => {
             let s1 = shift(1, 0, s);
             Term::PLam(x.clone(), b(subst(j + 1, &s1, body)))
@@ -801,6 +819,9 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TInterval(_) => -1,
         Term::TCube(_) => -1,
         Term::TPath(a, u, v) => max_var(a).max(max_var(u)).max(max_var(v)),
+        Term::TId(a, u, v) => max_var(a).max(max_var(u)).max(max_var(v)),
+        Term::TRefl(a) => max_var(a),
+        Term::TJ(motive, base, p) => max_var(motive).max(max_var(base)).max(max_var(p)),
         Term::PLam(_, b) => (max_var(b) - 1).max(-1),
         Term::PApp(p, r) => max_var(p).max(max_var(r)),
         Term::THComp(a, sys, u0) => {

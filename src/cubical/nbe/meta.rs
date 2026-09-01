@@ -24,6 +24,11 @@ pub fn meta_mentions(id: i32, t: &Term) -> bool {
         Term::TPath(a, u, v) => {
             meta_mentions(id, a) || meta_mentions(id, u) || meta_mentions(id, v)
         }
+        Term::TId(a, u, v) => meta_mentions(id, a) || meta_mentions(id, u) || meta_mentions(id, v),
+        Term::TRefl(a) => meta_mentions(id, a),
+        Term::TJ(motive, base, p) => {
+            meta_mentions(id, motive) || meta_mentions(id, base) || meta_mentions(id, p)
+        }
         Term::PApp(p, r) => meta_mentions(id, p) || meta_mentions(id, r),
         Term::THComp(a, sys, base)
         | Term::TComp(a, sys, base)
@@ -156,6 +161,17 @@ pub fn zonk(t: &Term, session: &Session) -> Term {
                 Arc::new(zonk_inner(a, session)),
                 Arc::new(zonk_inner(u, session)),
                 Arc::new(zonk_inner(v, session)),
+            ),
+            Term::TId(a, u, v) => Term::TId(
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(u, session)),
+                Arc::new(zonk_inner(v, session)),
+            ),
+            Term::TRefl(a) => Term::TRefl(Arc::new(zonk_inner(a, session))),
+            Term::TJ(motive, base, p) => Term::TJ(
+                Arc::new(zonk_inner(motive, session)),
+                Arc::new(zonk_inner(base, session)),
+                Arc::new(zonk_inner(p, session)),
             ),
             Term::PApp(p, r) => Term::PApp(
                 Arc::new(zonk_inner(p, session)),
@@ -323,6 +339,9 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         Term::TAbs(_, b) | Term::PLam(_, b) => vec![b.as_ref()],
         Term::TPi(_, a, b, _) | Term::TSigma(_, a, b) => vec![a.as_ref(), b.as_ref()],
         Term::TPath(a, u, v) => vec![a.as_ref(), u.as_ref(), v.as_ref()],
+        Term::TId(a, u, v) => vec![a.as_ref(), u.as_ref(), v.as_ref()],
+        Term::TRefl(a) => vec![a.as_ref()],
+        Term::TJ(motive, base, p) => vec![motive.as_ref(), base.as_ref(), p.as_ref()],
         Term::PApp(p, r) => vec![p.as_ref(), r.as_ref()],
         Term::THComp(a, sys, base)
         | Term::TComp(a, sys, base)

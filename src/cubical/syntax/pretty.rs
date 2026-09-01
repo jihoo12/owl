@@ -72,6 +72,19 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             show_term(env, u),
             show_term(env, v)
         ),
+        Term::TId(a, u, v) => format!(
+            "Id {} {} {}",
+            show_term(env, a),
+            show_term(env, u),
+            show_term(env, v)
+        ),
+        Term::TRefl(a) => format!("Refl {}", show_term(env, a)),
+        Term::TJ(motive, base, p) => format!(
+            "J {} {} {}",
+            show_term(env, motive),
+            show_term(env, base),
+            show_term(env, p)
+        ),
         Term::PLam(i, b) => {
             let mut env2 = vec![i.clone()];
             env2.extend_from_slice(env);

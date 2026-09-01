@@ -346,6 +346,18 @@ fn eval_nbe_inner(
             Arc::new(eval_nbe(env, globals, global_offset, u, session)),
             Arc::new(eval_nbe(env, globals, global_offset, v, session)),
         ),
+        Term::TId(a, u, v) => Value::VId(
+            Arc::new(eval_nbe(env, globals, global_offset, a, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, u, session)),
+            Arc::new(eval_nbe(env, globals, global_offset, v, session)),
+        ),
+        Term::TRefl(x) => Value::VRefl(Arc::new(eval_nbe(env, globals, global_offset, x, session))),
+        Term::TJ(motive, base, p) => {
+            let m = eval_nbe(env, globals, global_offset, motive, session);
+            let b = eval_nbe(env, globals, global_offset, base, session);
+            let pv = eval_nbe(env, globals, global_offset, p, session);
+            do_j(globals, global_offset, m, b, pv, session)
+        }
         Term::PLam(x, b) => Value::VPLam(
             x.clone(),
             IClosure {
@@ -827,4 +839,31 @@ pub fn eval_system(
             (phi_dnf, t_val)
         })
         .collect()
+}
+
+/// J eliminator for cubical identity types.
+/// Key computation rule: J B d (Refl x) = d
+fn do_j(
+    _globals: &Globals,
+    _global_offset: usize,
+    _motive: Value,
+    base: Value,
+    p: Value,
+    _session: &mut Session,
+) -> Value {
+    match &p {
+        Value::VRefl(_) => {
+            // J B d (Refl x) = d — the key definitional reduction
+            base
+        }
+        Value::VNeutral(_) => {
+            // Stuck: J applied to a neutral proof
+            Value::VJelim(Arc::new(_motive), Arc::new(base), Arc::new(p))
+        }
+        _ => {
+            // Shouldn't happen if typechecking is correct.
+            // Defensively, produce a stuck neutral.
+            Value::VJelim(Arc::new(_motive), Arc::new(base), Arc::new(p))
+        }
+    }
 }

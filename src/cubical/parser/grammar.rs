@@ -984,6 +984,16 @@ impl Parser {
         if self.consume_ident("Next") {
             return Ok(Term::TNext(Arc::new(self.parse_prefix_or_atom()?)));
         }
+        if self.consume_ident("Refl") {
+            let x = self.parse_prefix_or_atom()?;
+            return Ok(Term::TRefl(Arc::new(x)));
+        }
+        if self.consume_ident("J") {
+            let motive = self.parse_prefix_or_atom()?;
+            let base = self.parse_prefix_or_atom()?;
+            let p = self.parse_prefix_or_atom()?;
+            return Ok(Term::TJ(Arc::new(motive), Arc::new(base), Arc::new(p)));
+        }
         // Module-qualified reference: `M.name`, `M.Nat`, `M.Nat.zero`.  Only
         // fires when the leading segment is a module prefix; otherwise the
         // name falls through to the plain atom / record-projection path.
@@ -1067,6 +1077,12 @@ impl Parser {
             let u = self.parse_prefix_or_atom()?;
             let v = self.parse_prefix_or_atom()?;
             return Ok(Term::TPath(Arc::new(a), Arc::new(u), Arc::new(v)));
+        }
+        if self.consume_ident("Id") {
+            let a = self.parse_prefix_or_atom()?;
+            let x = self.parse_prefix_or_atom()?;
+            let y = self.parse_prefix_or_atom()?;
+            return Ok(Term::TId(Arc::new(a), Arc::new(x), Arc::new(y)));
         }
         if self.consume_ident("isProp") {
             let a = self.parse_prefix_or_atom()?;

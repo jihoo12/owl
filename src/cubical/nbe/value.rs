@@ -121,6 +121,10 @@ pub enum Value {
     VPath(Arc<Value>, Arc<Value>, Arc<Value>),
     VPLam(Name, IClosure),
     VPApp(Arc<Value>, Arc<Value>),
+    // -- Cubical identity types (A4) ----------------------------------------
+    VId(Arc<Value>, Arc<Value>, Arc<Value>),
+    VRefl(Arc<Value>),
+    VJelim(Arc<Value>, Arc<Value>, Arc<Value>),
     VUniv(Level),
     VProp,
     VSSet,

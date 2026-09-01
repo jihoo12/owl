@@ -45,6 +45,17 @@ fn head_var_idx(t: &Term) -> Option<i32> {
                 go(u, best);
                 go(v, best);
             }
+            Term::TId(a, u, v) => {
+                go(a, best);
+                go(u, best);
+                go(v, best);
+            }
+            Term::TRefl(a) => go(a, best),
+            Term::TJ(motive, base, p) => {
+                go(motive, best);
+                go(base, best);
+                go(p, best);
+            }
             Term::PLam(_, b) => go(b, best),
             Term::PApp(a, b) => {
                 go(a, best);

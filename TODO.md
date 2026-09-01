@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **A4 — Cubical identity types (`Id`).** ✅ Added `TId(A, a, b)`, `TRefl(x)`, `TJ(motive, base, p)` to `Term` enum. Parser: `Id A x y`, `Refl x`, `J motive base p`. NbE: `VId`, `VRefl`, `VJelim` values; `do_j` computes `J B d (Refl x) = d` (key definitional reduction). Quote: bidirectional reconstruction. Typechecker: `Id A a b : U_n`, `Refl x : Id A x x`, `J motive base p : B y p`. Example `examples/id_types.owl` tests type formation, reflexivity, and J computing on refl. 257/257 tests pass, `cargo fmt` clean.
+
 - [x] **A3 — Frontier-of-instability Phase 4 (quoting).** ✅ Made `try_destabilize` `pub(super)` in `elim.rs`. In `quote_case_body`, the `_ => quote(...)` fallback now checks if the value is a `VNeutral` with a satisfied frontier and attempts destabilization before quoting. This hardens quoting for stuck elim case bodies that capture interval-bound neutrals. Defensive — kernel re-checks everything. 256/256 tests pass, `cargo fmt` clean.
 
 - [x] **NbE eval depth guard + Arc-based O(1) clone + TApp spine trampoline.** `EVAL_NBE_MAX_DEPTH=2000` in `eval.rs` prevents stack overflow. All `Term`/`Value`/`Neutral`/`I`/`Frontier` subterms migrated from `Box` to `Arc` — `Term::clone()` is now O(1) (atomic refcount). `meta.rs` zonk rewritten as recursive rebuild (no in-place mutation). TApp evaluation collects the left spine iteratively: `TApp(TApp(TApp(f, a1), a2), a3)` → head=f, spine=[a1,a2,a3], then iteratively apply. This eliminates O(n) stack depth for deep application chains. Deep TApp chains (2,500+ applications) work on a 2 MiB stack thread. 256/256 tests pass, `cargo fmt` clean.
@@ -98,16 +100,16 @@ A consequence of A1. Cubical Agda's `transp` computes through indexed types by s
 
 - [x] **A3 — Frontier-of-instability Phase 4 (quoting).** ✅ Made `try_destabilize` `pub(super)` in `elim.rs`. In `quote_case_body`, the `_ => quote(...)` fallback now checks if the value is a `VNeutral` with a satisfied frontier and attempts destabilization before quoting. Defensive — kernel re-checks everything. `src/cubical/nbe/quote.rs`, `src/cubical/nbe/elim.rs`. 256/256 tests pass.
 
-#### A4. Cubical identity types (`Id`) 🟡
+#### A4. Cubical identity types (`Id`) ✅
 
 Cubical Agda has a separate `Id` type where `J` computes **definitionally** on `refl` (unlike `Path`-based `J`). `Id` and `Path` are equivalent but `Id` has better computational behavior for Martin-Löf-style proofs.
 
 **Plan**:
-1. Add `Id A a b` term constructor with `refl : Id A a a`.
-2. Add `J` eliminator that computes on `refl`.
-3. Prove `Id ≃ Path` in the standard library.
+1. ~~Add `Id A a b` term constructor with `refl : Id A a a`.~~ ✅
+2. ~~Add `J` eliminator that computes on `refl`.~~ ✅
+3. Prove `Id ≃ Path` in the standard library. (Future work)
 
-**Files**: `src/cubical/syntax/mod.rs`, `src/cubical/parser/grammar.rs`, `src/cubical/nbe/eval.rs`, `src/cubical/typechecker/mod.rs`.
+**Files**: `syntax/mod.rs`, `nbe/value.rs`, `nbe/eval.rs`, `nbe/quote.rs`, `parser/grammar.rs`, `typechecker/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs`, `syntax/pretty.rs`, `syntax/positivity.rs`, `equality.rs`, `nbe/meta.rs`, `nbe/transport.rs`. **Example**: `examples/id_types.owl`.
 
 #### A5. Higher-dimensional `hcomp` 🟢
 

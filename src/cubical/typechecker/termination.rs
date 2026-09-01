@@ -201,6 +201,19 @@ fn check_body_guard(
             check_body_guard(d, v, binder_count, def_idx)
         }
 
+        // Identity type.
+        Term::TId(a, u, v) => {
+            check_body_guard(d, a, binder_count, def_idx)?;
+            check_body_guard(d, u, binder_count, def_idx)?;
+            check_body_guard(d, v, binder_count, def_idx)
+        }
+        Term::TRefl(a) => check_body_guard(d, a, binder_count, def_idx),
+        Term::TJ(motive, base, p) => {
+            check_body_guard(d, motive, binder_count, def_idx)?;
+            check_body_guard(d, base, binder_count, def_idx)?;
+            check_body_guard(d, p, binder_count, def_idx)
+        }
+
         // Kan operations.
         Term::THComp(a, sys, base)
         | Term::TComp(a, sys, base)

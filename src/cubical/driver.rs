@@ -2464,6 +2464,21 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn id_types_example_checks() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("id_types.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("id_types thread spawn");
+        handle
+            .join()
+            .expect("id_types check thread panicked")
+            .expect("examples/id_types.owl should typecheck");
+    }
+
+    #[test]
     fn all_example_files_check() {
         // Sweep every examples/*.owl file not already covered by a dedicated
         // test above (cubical/HIT/path/param/quotient/tactics/record demos and

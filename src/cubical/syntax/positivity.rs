@@ -460,6 +460,17 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             check_positivity_in(target, u, negative)?;
             check_positivity_in(target, v, negative)
         }
+        Term::TId(a, u, v) => {
+            check_positivity_in(target, a, negative)?;
+            check_positivity_in(target, u, negative)?;
+            check_positivity_in(target, v, negative)
+        }
+        Term::TRefl(a) => check_positivity_in(target, a, negative),
+        Term::TJ(motive, base, p) => {
+            check_positivity_in(target, motive, negative)?;
+            check_positivity_in(target, base, negative)?;
+            check_positivity_in(target, p, negative)
+        }
         Term::TPartial(phi, a) => {
             check_positivity_in(target, phi, negative)?;
             check_positivity_in(target, a, negative)
