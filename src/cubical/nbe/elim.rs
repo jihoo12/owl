@@ -8,7 +8,7 @@ use super::eval::eval_nbe;
 use super::hcomp::{do_comp, do_hcomp};
 use super::quote::quote;
 use super::trace::record_step;
-use super::util::value_to_endpoint;
+use super::util::{equiv_cod_value, equiv_dom_value, value_to_endpoint};
 use super::value::{Globals, Neutral, NeutralInner, Scope, Value, value_str};
 use crate::cubical::interval::I;
 use crate::cubical::session::Session;
@@ -542,6 +542,36 @@ pub fn do_papp(
                     Box::new(Value::VGlueElem(phi.clone(), t.clone(), a.clone())),
                     Box::new(r),
                 )
+            }
+        }
+        // ua endpoint reduction: (ua e) @ 0 = A, (ua e) @ 1 = B
+        // where e : Equiv A B. This implements the semantic content of univalence:
+        // ua e is a path from A to B in the universe.
+        Value::VUa(e) => {
+            if let Some(endpoint) = value_to_endpoint(&r) {
+                match endpoint {
+                    I::I0 => {
+                        let result = equiv_dom_value(*e);
+                        record_step(
+                            "ua-papp-0".into(),
+                            "ua _ @ 0".into(),
+                            value_str(globals, global_offset, &result, session),
+                        );
+                        result
+                    }
+                    I::I1 => {
+                        let result = equiv_cod_value(*e);
+                        record_step(
+                            "ua-papp-1".into(),
+                            "ua _ @ 1".into(),
+                            value_str(globals, global_offset, &result, session),
+                        );
+                        result
+                    }
+                    _ => Value::VPApp(Box::new(Value::VUa(e)), Box::new(r)),
+                }
+            } else {
+                Value::VPApp(Box::new(Value::VUa(e)), Box::new(r))
             }
         }
         other => Value::VPApp(Box::new(other), Box::new(r)),

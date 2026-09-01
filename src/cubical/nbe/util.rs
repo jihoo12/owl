@@ -44,6 +44,14 @@ pub(super) fn equiv_dom_value(v: Value) -> Value {
     }
 }
 
+pub(super) fn equiv_cod_value(v: Value) -> Value {
+    match v {
+        Value::VMkEquiv(_, b, _, _, _, _) | Value::VEquiv(_, b) => *b,
+        Value::VPair(_, b) => *b,
+        other => other,
+    }
+}
+
 // -- util: value_to_dnf ------------------------------------------------------
 
 pub(super) fn value_to_dnf(v: Value, session: &mut Session) -> DNF {
