@@ -874,7 +874,7 @@ pub fn infer_dt(
     t: &Term,
     session: &mut Session,
 ) -> Result<Term, TypeError> {
-    const INFER_DT_MAX_DEPTH: usize = 500;
+    const INFER_DT_MAX_DEPTH: usize = 2000;
     let d = session.infer_depth_enter();
     if d >= INFER_DT_MAX_DEPTH {
         session.infer_depth_restore(d);
@@ -3405,7 +3405,7 @@ pub fn check_dt(
     ty: &Term,
     session: &mut Session,
 ) -> Result<(), TypeError> {
-    const CHECK_DT_MAX_DEPTH: usize = 500;
+    const CHECK_DT_MAX_DEPTH: usize = 2000;
     let d = session.check_depth_enter();
     if d >= CHECK_DT_MAX_DEPTH {
         session.check_depth_restore(d);
