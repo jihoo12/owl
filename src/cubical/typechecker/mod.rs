@@ -874,6 +874,25 @@ pub fn infer_dt(
     t: &Term,
     session: &mut Session,
 ) -> Result<Term, TypeError> {
+    const INFER_DT_MAX_DEPTH: usize = 500;
+    let d = session.infer_depth_enter();
+    if d >= INFER_DT_MAX_DEPTH {
+        session.infer_depth_restore(d);
+        return Err(TypeError::Other(format!(
+            "infer_dt depth exceeded ({INFER_DT_MAX_DEPTH})"
+        )));
+    }
+    let result = infer_dt_inner(dts, ctx, t, session);
+    session.infer_depth_restore(d);
+    result
+}
+
+fn infer_dt_inner(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    t: &Term,
+    session: &mut Session,
+) -> Result<Term, TypeError> {
     let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
     crate::debug_scope!("infer {} : ctx[{}]", show_term(&names, t), ctx.len());
     session.set_current_dts(dts);
@@ -3380,6 +3399,26 @@ pub fn check(ctx: &Ctx, t: &Term, ty: &Term, session: &mut Session) -> Result<()
 /// Like `check` but with access to declared datatypes.
 /// Pass `&[]` when no datatypes are in scope.
 pub fn check_dt(
+    dts: &[Datatype],
+    ctx: &Ctx,
+    t: &Term,
+    ty: &Term,
+    session: &mut Session,
+) -> Result<(), TypeError> {
+    const CHECK_DT_MAX_DEPTH: usize = 500;
+    let d = session.check_depth_enter();
+    if d >= CHECK_DT_MAX_DEPTH {
+        session.check_depth_restore(d);
+        return Err(TypeError::Other(format!(
+            "check_dt depth exceeded ({CHECK_DT_MAX_DEPTH})"
+        )));
+    }
+    let result = check_dt_inner(dts, ctx, t, ty, session);
+    session.check_depth_restore(d);
+    result
+}
+
+fn check_dt_inner(
     dts: &[Datatype],
     ctx: &Ctx,
     t: &Term,

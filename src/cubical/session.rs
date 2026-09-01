@@ -30,6 +30,10 @@ pub struct Session {
     pub quote_depth: usize,
     pub all_tubes_depth: usize,
 
+    // ── Typechecker depth guards ────────────────────────────────────
+    pub check_depth: usize,
+    pub infer_depth: usize,
+
     // ── Metavariable state ──────────────────────────────────────────
     pub meta_solutions: Vec<Option<Term>>,
     pub meta_names: Vec<Option<Name>>,
@@ -64,6 +68,8 @@ impl Session {
             eval_depth: 0,
             quote_depth: 0,
             all_tubes_depth: 0,
+            check_depth: 0,
+            infer_depth: 0,
             meta_solutions: Vec::new(),
             meta_names: Vec::new(),
             meta_expected: Vec::new(),
@@ -139,6 +145,24 @@ impl Session {
     }
     pub fn all_tubes_depth_restore(&mut self, d: usize) {
         self.all_tubes_depth = d;
+    }
+
+    // ── Typechecker: check/infer depth guards ───────────────────────
+    pub fn check_depth_enter(&mut self) -> usize {
+        let d = self.check_depth;
+        self.check_depth += 1;
+        d
+    }
+    pub fn check_depth_restore(&mut self, d: usize) {
+        self.check_depth = d;
+    }
+    pub fn infer_depth_enter(&mut self) -> usize {
+        let d = self.infer_depth;
+        self.infer_depth += 1;
+        d
+    }
+    pub fn infer_depth_restore(&mut self, d: usize) {
+        self.infer_depth = d;
     }
 
     // ── Metavariable store ─────────────────────────────────────────
