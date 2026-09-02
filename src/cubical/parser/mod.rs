@@ -23,6 +23,7 @@ use std::fmt;
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Name, Term};
 use crate::cubical::typechecker::errors::Pos;
+use crate::cubical::typechecker::infer_closed_dt;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -98,6 +99,11 @@ pub enum Decl {
     },
     /// `end` — closes the innermost `module ... where` block.
     ModuleEnd,
+    /// `postulate x : T` — declares `x` as an axiom with type `T` but no body.
+    Postulate {
+        name: Name,
+        ty: Term,
+    },
 }
 
 #[allow(dead_code)]
@@ -198,6 +204,8 @@ impl ProgramParser {
         } else if self.parser.consume_ident("import") {
             self.parser.reject_inside_parameterized_module("import")?;
             self.parser.parse_import()?
+        } else if self.parser.consume_ident("postulate") {
+            self.parser.parse_postulate()?
         } else {
             return Err(self.parser.error_here("expected top-level declaration"));
         };
@@ -218,6 +226,7 @@ impl ProgramParser {
                 self.parser.datatypes.push(dt.clone());
             }
             Decl::Import { .. } => {}
+            Decl::Postulate { .. } => {}
         }
         Ok(Some(decl))
     }
@@ -382,6 +391,22 @@ pub fn typecheck_program(
                 check_closed_dt(&dts, &val, &ty, session)
                     .map_err(|e| format!("type error in '{}': {}", name, e))?;
                 defs.push((name, ty, val));
+            }
+            Decl::Postulate { name, ty } => {
+                // Postulates: check the type is well-formed (in a universe).
+                let ty_ty = infer_closed_dt(&dts, &ty, session)
+                    .map_err(|e| format!("type error in postulate '{}': {}", name, e))?;
+                match ty_ty {
+                    Term::TUniv(_) => {}
+                    other => {
+                        return Err(format!(
+                            "postulate '{}' type must be in a universe, got {}",
+                            name,
+                            crate::cubical::syntax::show_term(&[], &other)
+                        ));
+                    }
+                }
+                defs.push((name, ty, Term::TVar(0)));
             }
         }
     }

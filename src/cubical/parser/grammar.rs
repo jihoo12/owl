@@ -150,6 +150,20 @@ impl Parser {
         })
     }
 
+    pub(super) fn parse_postulate(&mut self) -> Result<Decl, ParseError> {
+        let raw_name = self.expect_ident("expected postulate name")?;
+        let name = self.qualify(&raw_name);
+        let (line, col) = self.token_pos();
+        self.record_name_pos(&name, line, col, true);
+        self.expect(
+            TokenKind::Colon,
+            format!("expected ':' after postulate '{}'", name),
+        )?;
+        let ty = self.parse_term()?;
+        let (ty,) = self.wrap_with_module_params_one(ty);
+        Ok(Decl::Postulate { name, ty })
+    }
+
     pub(super) fn parse_data_decl(&mut self) -> Result<Decl, ParseError> {
         let first_dt = self.parse_data_decl_inner()?;
 
@@ -2221,6 +2235,20 @@ impl Parser {
         }
     }
 
+    /// Wrap a type with the enclosing parameterized module's parameters as Pi.
+    fn wrap_with_module_params_one(&self, ty: Term) -> (Term,) {
+        match self.active_param_module() {
+            Some((_, params)) => {
+                let mut ty_w = ty;
+                for (pname, pty) in params.iter().rev() {
+                    ty_w = Term::TPi(pname.clone(), Arc::new(pty.clone()), Arc::new(ty_w), false);
+                }
+                (ty_w,)
+            }
+            None => (ty,),
+        }
+    }
+
     /// Wrap a resolved global reference into applications of the enclosing
     /// parameterized module's parameters (outermost parameter applied first).
     ///
@@ -2621,6 +2649,7 @@ impl Parser {
                     || name == "import"
                     || name == "module"
                     || name == "end"
+                    || name == "postulate"
         )
     }
 

@@ -98,6 +98,7 @@ The following words are reserved and cannot be used as variable names:
 | Keyword       | Purpose                                    |
 | ------------- | ------------------------------------------ |
 | `def`         | Define a new constant                      |
+| `postulate`   | Declare an axiom without a body            |
 | `inductive`   | Declare an inductive datatype              |
 | `record`      | Declare a record type (sugar for inductive) |
 | `field`       | Field declaration in a record              |
@@ -518,6 +519,7 @@ def swap : ∀ A B, Pair A B -> Pair B A :=
 ```
 def name : Type := value
 def name : Type := by tactic1; tactic2
+postulate name : Type
 ```
 
 Definitions bind a name to a typed value. The value is checked against the
@@ -576,6 +578,75 @@ owl: type error:
 
 This lets you sketch a proof with holes and fill them incrementally, knowing
 exactly which goals remain open.
+
+### Postulates
+
+A **postulate** declares a constant without providing a body:
+
+```
+postulate name : Type
+```
+
+Postulates are axioms: they assert the existence of a value of the given type
+without constructing it. The type is checked (it must be a valid type in a
+universe), but no value is provided. Postulates are opaque — they never
+normalize and remain as stuck neutral terms.
+
+#### Syntax
+
+```
+postulate A : U0                  -- postulate a type
+postulate a : A                   -- postulate a constant of type A
+postulate f : A -> B              -- postulate a function
+```
+
+#### Use Cases
+
+Postulates are useful for:
+
+- Declaring axioms (e.g. excluded middle, choice principles)
+- Assuming the existence of structures (e.g. a field structure on a type)
+- Prototyping — sketching a module's interface before implementing bodies
+- Referencing types from external systems or libraries
+
+#### Semantics
+
+A postulated name behaves like a global variable that the typechecker trusts.
+It can be used in type annotations and definition bodies, but it never reduces:
+
+```
+postulate A : U0
+postulate a : A
+
+def f : A -> A := fun x => x    -- uses postulated A and a
+```
+
+When normalized, a postulated constant stays as itself (a neutral term):
+
+```
+-- eval postulate owl: a : A = a    (not reduced)
+```
+
+#### Restrictions
+
+- Postulates cannot be recursive (they have no body to recurse on)
+- A postulate's type must be well-formed and live in some universe
+- Postulates in parameterized modules are wrapped with the module parameters
+
+**Example:**
+
+```owl
+postulate A : U0
+postulate a : A
+postulate f : A -> A
+
+def g : A -> A := fun x => f (f x)
+
+postulate MyType : U0 -> U0
+postulate my_intro : forall (B : U0), B -> MyType B
+```
+
+See `examples/postulate.owl` for a working example.
 
 ### Entry Point
 

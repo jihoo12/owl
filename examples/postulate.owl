@@ -1,0 +1,12 @@
+-- Postulates: declare axioms without bodies.
+
+postulate A : U0
+postulate a : A
+postulate f : A -> A
+
+-- Use a postulated constant in a definition.
+def g : A -> A := fun x => f (f x)
+
+-- Postulate a type former and its constructor.
+postulate MyType : U0 -> U0
+postulate my_intro : forall (B : U0), B -> MyType B

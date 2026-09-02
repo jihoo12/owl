@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **E2 — Postulates.** ✅ Added `postulate x : T` declarations. `Decl::Postulate` variant in parser/driver, `Env::postulate()` method, `process_postulate()` typechecks `T : U_n`, postulates stored as opaque `VNeutral(NVar(i))` neutrals. `build_definition_values` fixes NVar level after eval so quoting works correctly in any context. `examples/postulate.owl` exercises postulated types, constants, type formers, and use in definitions. 259/259 tests pass.
+
 - [x] **A5 — Higher-dimensional hcomp (Path type decomposition).** ✅ Added Path type decomposition to `hcomp`, `comp`, `fill`, and `hfill` in `nbe/hcomp.rs`. When the carrier type is `VPath(A, x, y)`, the operations decompose by composing at each point of the interval, reducing square composition (2D hcomp) to 1D composition in the carrier type. Example: `examples/higher_dim_hcomp.owl`. 258/258 tests pass.
 
 - [x] **D1 — Universe polymorphism.** ✅ Added `LevelExpr` enum (`LVar(i32)`, `LConst(i32)`, `LSuc(Box<LevelExpr>)`, `LMax(Box<LevelExpr>, Box<LevelExpr>)`) to `syntax/mod.rs`. Changed `TUniv(Level)` and `TLift(Arc<Term>, Level)` to hold `LevelExpr` instead of bare `i32`. Level expressions support `shift`/`subst`/`max_var` — level variables share the term variable de Bruijn namespace. Added `TLevelTy`/`VLevelTy` for the `Level` type. Parser: `U (lsuc l)`, `U (max l1 l2)`, `U l`, `U0`/`U1` backward compat. `Level` keyword recognized. `lift`/`lower` are prefix keywords. NbE: `VUniv`/`VLift` hold `LevelExpr`. Typechecker: `type_level_dt` returns `LevelExpr`, `U_n : U_{n+1}` via `LevelExpr::suc`, Pi/Sigma/Glue/Equiv/Partial/SystemType use `LevelExpr::max`. Cumulativity: `leq` with structural equality fallback for stuck level variables. Files: `syntax/mod.rs`, `syntax/pretty.rs`, `parser/grammar.rs`, `nbe/value.rs`, `nbe/eval.rs`, `nbe/quote.rs`, `nbe/transport.rs`, `nbe/meta.rs`, `typechecker/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs`, `driver.rs`, `equality.rs`, `syntax/positivity.rs`. Example: `examples/universe_poly.owl`. 257/257 tests pass.
@@ -221,11 +223,13 @@ Cubical Agda exposes `Agda.Builtin.Reflection` for meta-programming: `TC` monad,
 
 This is a large feature but enables all subsequent automation.
 
-#### E2. Postulates 🟡
+#### E2. Postulates ✅
 
 Cubical Agda supports `postulate` — declared but unimplemented constants. Useful for assuming axioms (carefully).
 
 **Plan**: Add `postulate x : T` declaration. Typecheck `T` but skip body checking. Mark the name as postulated so normalization doesn't try to evaluate it.
+
+**Done** (2026-09-02): Added `Decl::Postulate { name, ty }` variant, parser (`postulate name : T`), `Env::postulate()`, `process_postulate()` in driver, `sync_from_env` integration. Postulates store `TVar(0)` placeholder as NbE value; a post-evaluation fixup in `build_definition_values` corrects the NVar level so quoting produces correct de Bruijn indices in any context. Postulates are opaque neutrals that never reduce. File: `examples/postulate.owl`. 259/259 tests pass.
 
 #### E3. Rewriting 🟢
 
@@ -344,7 +348,7 @@ Spectrum types for stable homotopy theory. Research-level.
 4. ~~**F2 (`forall` after `->`)**~~ — ✅ done.
 5. **B2 (absurd patterns)** — trivial parser sugar, immediate ergonomic win.
 6. **F1 (interactive REPL)** — biggest UX win once holes/tactics exist.
-7. **E2 (postulates)** — small, useful for assuming axioms in algebraic geometry.
+7. ~~**E2 (postulates)**~~ — ✅ done.
 8. **E1 (reflection API)** — large but enables all subsequent automation.
 9. ~~**D1 (universe polymorphism)**~~ — ✅ done.
 10. **G1–G6 (standard library)** — breadth work, can proceed in parallel.

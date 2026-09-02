@@ -1,0 +1,3 @@
+postulate A : U0
+
+def id : A -> A := fun x => x

@@ -4,6 +4,7 @@
 //   crate::syntax::{Name, Term, Datatype, shift, subst}
 //   crate::typechecker::{Ctx, TypeError, infer, check, infer_dt, check_dt}
 
+use crate::cubical::nbe::value::NeutralInner;
 use crate::cubical::nbe::{Globals, Neutral, Scope, Value, eval_nbe};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Name, Term, shift, subst};
@@ -49,6 +50,13 @@ impl Env {
     /// has been called on them if they contain global references).
     pub fn define(&mut self, name: Name, ty: Term, val: Term) {
         self.defs.insert(0, (name, ty, val));
+    }
+
+    /// Declare a postulate (axiom): `name : ty` with no body.
+    /// The value is a neutral variable referencing the definition's own slot,
+    /// so it never reduces — exactly the semantics of an opaque axiom.
+    pub fn postulate(&mut self, name: Name, ty: Term) {
+        self.defs.insert(0, (name, ty, Term::TVar(0)));
     }
 
     /// Register a datatype declaration.
@@ -172,6 +180,21 @@ pub fn build_definition_values(env: &Env, session: &mut Session) -> Globals {
     for index in (0..env.defs.len()).rev() {
         let (_, _, value) = &env.defs[index];
         globals.lock().unwrap()[index] = eval_nbe(&Scope::empty(), &globals, index, value, session);
+    }
+    // Postulates (and self-referential stuck defs) evaluate to VNeutral(NVar(0))
+    // because globals[index] is still the placeholder at eval time. Fix up the
+    // NVar level so quoting produces the correct global de Bruijn index: NVar(0)
+    // → NVar(index). Without this, the neutral would be misinterpreted as a local
+    // variable when quoted in contexts with >0 local binders.
+    {
+        let mut g = globals.lock().unwrap();
+        for i in 0..g.len() {
+            if let Value::VNeutral(n) = &g[i] {
+                if matches!(n.inner(), NeutralInner::NVar(0)) {
+                    g[i] = Value::VNeutral(Neutral::nvar(i));
+                }
+            }
+        }
     }
     globals
 }

@@ -314,6 +314,17 @@ fn process_file_source(
                         hide_front_def(env);
                     }
                 }
+                Decl::Postulate { name, ty } => {
+                    process_postulate(&name, &ty, env, session)?;
+                    if import_selection_active(&name, only, forced_prefix) {
+                        if let Some(p) = origin {
+                            note_imported_def(&name, p, def_sources)?;
+                        }
+                    } else {
+                        hide_front_def(env);
+                    }
+                    parser.sync_from_env(env);
+                }
             }
             Ok(())
         })();
@@ -873,6 +884,34 @@ impl<'a> PhaseTiming<'a> {
             );
         }
     }
+}
+
+fn process_postulate(
+    name: &Name,
+    ty: &Term,
+    env: &mut Env,
+    session: &mut Session,
+) -> Result<(), RunError> {
+    session.clear_nbe_cache();
+    crate::debug_log!("process_postulate '{}':", name);
+
+    // Verify the type is in a universe.
+    if !matches!(ty, Term::Meta(_)) {
+        match nbe_eval(&infer_with_full_env(env, ty, session)?, session) {
+            Term::TUniv(_) => {}
+            other => {
+                return Err(RunError::Type(Box::new(TypeError::ExpectedUniverse {
+                    ty: other,
+                    names: vec![],
+                    pos: None,
+                })));
+            }
+        }
+    }
+
+    // Register as a postulate — no body, opaque neutral value.
+    env.postulate(name.clone(), ty.clone());
+    Ok(())
 }
 
 fn process_def(
@@ -2495,6 +2534,21 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
             .join()
             .expect("higher_dim_hcomp check thread panicked")
             .expect("examples/higher_dim_hcomp.owl should typecheck");
+    }
+
+    #[test]
+    fn postulate_example_checks() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("postulate.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("postulate thread spawn");
+        handle
+            .join()
+            .expect("postulate check thread panicked")
+            .expect("examples/postulate.owl should typecheck");
     }
 
     #[test]
