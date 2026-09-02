@@ -18,7 +18,7 @@ use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_leq, dnf_meet};
 use crate::cubical::nbe::{nbe_eval, nbe_eval_ctx};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{
-    Datatype, ElimCase, Level, Name, Term, beta, shift, show_term, subst,
+    Datatype, ElimCase, LevelExpr, Name, Term, beta, shift, show_term, subst,
 };
 use crate::cubical::syntax::{Variance, compute_param_variances};
 use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
@@ -147,7 +147,11 @@ pub fn require_equal_endpt(
 }
 
 #[allow(dead_code)]
-pub fn require_universe(ctx: &Ctx, t: &Term, session: &mut Session) -> Result<Level, TypeError> {
+pub fn require_universe(
+    ctx: &Ctx,
+    t: &Term,
+    session: &mut Session,
+) -> Result<LevelExpr, TypeError> {
     require_universe_dt(&[], ctx, t, session)
 }
 
@@ -157,10 +161,10 @@ fn require_universe_dt(
     ctx: &Ctx,
     t: &Term,
     session: &mut Session,
-) -> Result<Level, TypeError> {
+) -> Result<LevelExpr, TypeError> {
     let ty = infer_dt(dts, ctx, t, session)?;
     match nbe_eval_ctx(ctx.len(), &ty, session) {
-        Term::TUniv(n) => Ok(n),
+        Term::TUniv(n) => Ok(n.clone()),
         other => Err(TypeError::ExpectedUniverse {
             ty: other.clone(),
             names: err_names(ctx),
@@ -174,7 +178,7 @@ fn type_level_dt(
     ctx: &Ctx,
     t: &Term,
     session: &mut Session,
-) -> Result<Level, TypeError> {
+) -> Result<LevelExpr, TypeError> {
     // Match type formers structurally first. `nbe_eval` on a Π-type that still
     // mentions outer binders can collapse free de Bruijn indices and break
     // universe-level checking for dependent arrows like `(A : U0) -> A -> A`.
@@ -183,7 +187,7 @@ fn type_level_dt(
             let i = type_level_dt(dts, ctx, a, session)?;
             let ctx2 = extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), a, session), ctx);
             let j = type_level_dt(dts, &ctx2, b, session)?;
-            Ok(i.max(j))
+            Ok(LevelExpr::max(i, j))
         }
         Term::TPath(a, u, v) => {
             // For PathP-style dependent paths, a may be a PLam (type family).
@@ -221,36 +225,36 @@ fn type_level_dt(
         Term::Meta(_) => {
             // Metavariable holes are assumed to be types at some level;
             // they will be solved during checking and the real level checked then.
-            Ok(0)
+            Ok(LevelExpr::LConst(0))
         }
         Term::TEquiv(a, b) => {
             let n = type_level_dt(dts, ctx, a, session)?;
             let m = type_level_dt(dts, ctx, b, session)?;
-            Ok(n.max(m))
+            Ok(LevelExpr::max(n, m))
         }
         Term::TSigma(x, a, b) => {
             let i = type_level_dt(dts, ctx, a, session)?;
             let ctx2 = extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), a, session), ctx);
             let j = type_level_dt(dts, &ctx2, b, session)?;
-            Ok(i.max(j))
+            Ok(LevelExpr::max(i, j))
         }
         _ => match nbe_eval_ctx(ctx.len(), t, session) {
-            Term::TProp => Ok(0), // Prop : U0
-            Term::TSSet => Ok(1), // SSet : U1
-            Term::TUniv(n) => Ok(n),
+            Term::TProp => Ok(LevelExpr::LConst(0)), // Prop : U0
+            Term::TSSet => Ok(LevelExpr::LConst(1)), // SSet : U1
+            Term::TUniv(n) => Ok(n.clone()),
             Term::TData(d, _) => {
                 let level = dts
                     .iter()
                     .find(|dt| dt.name == d)
-                    .and_then(|dt| dt.universe_level)
-                    .unwrap_or(0);
+                    .and_then(|dt| dt.universe_level.clone())
+                    .unwrap_or(LevelExpr::LConst(0));
                 Ok(level)
             }
-            Term::TIntervalTy => Ok(0),
+            Term::TIntervalTy => Ok(LevelExpr::LConst(0)),
             _ => {
                 let ty = infer_dt(dts, ctx, t, session)?;
                 match nbe_eval_ctx(ctx.len(), &ty, session) {
-                    Term::TUniv(n) => Ok(n),
+                    Term::TUniv(n) => Ok(n.clone()),
                     other => Err(TypeError::ExpectedUniverse {
                         ty: other,
                         names: err_names(ctx),
@@ -902,16 +906,16 @@ fn infer_dt_inner(
         Term::TVar(i) => lookup_ctx(*i, ctx),
 
         // Universe: U_n : U_{n+1}
-        Term::TUniv(n) => Ok(Term::TUniv(n + 1)),
+        Term::TUniv(n) => Ok(Term::TUniv(LevelExpr::suc(n.clone()))),
 
         // Subuniverses
-        Term::TProp => Ok(Term::TUniv(0)), // Prop : U0
-        Term::TSSet => Ok(Term::TUniv(1)), // SSet : U1
+        Term::TProp => Ok(Term::TUniv(LevelExpr::LConst(0))), // Prop : U0
+        Term::TSSet => Ok(Term::TUniv(LevelExpr::LConst(1))), // SSet : U1
 
         // Universe lifting: lift A m : U_{max(n,m)} when A : U_n
         Term::TLift(a, m) => {
             let n = type_level_dt(dts, ctx, a, session)?;
-            Ok(Term::TUniv(n.max(*m)))
+            Ok(Term::TUniv(LevelExpr::max(n.clone(), m.clone())))
         }
         // Universe lowering: lower A : U_n when A : U_{n+1}
         Term::TLower(a) => match nbe_eval_ctx(ctx.len(), a, session) {
@@ -921,10 +925,14 @@ fn infer_dt_inner(
             }
             other => {
                 let ty = type_level_dt(dts, ctx, &other, session)?;
-                if ty > 0 {
-                    Ok(Term::TUniv(ty - 1))
+                if ty.as_const().map_or(false, |c| c > 0) {
+                    Ok(Term::TUniv(if let Some(c) = ty.as_const() {
+                        LevelExpr::LConst(c - 1)
+                    } else {
+                        LevelExpr::LSuc(Box::new(ty))
+                    }))
                 } else {
-                    Ok(Term::TUniv(0))
+                    Ok(Term::TUniv(LevelExpr::LConst(0)))
                 }
             }
         },
@@ -966,7 +974,7 @@ fn infer_dt_inner(
             let i = type_level_dt(dts, ctx, a_ty, session)?;
             let ctx2 = extend_ctx(x.clone(), nbe_eval_ctx(ctx.len(), a_ty, session), ctx);
             let j = type_level_dt(dts, &ctx2, b_ty, session)?;
-            Ok(Term::TUniv(i.max(j)))
+            Ok(Term::TUniv(LevelExpr::max(i, j)))
         }
 
         // Path type: Path A u v : U n
@@ -995,7 +1003,7 @@ fn infer_dt_inner(
             };
             check_dt(dts, ctx, u, &u_ty, session)?;
             check_dt(dts, ctx, v, &v_ty, session)?;
-            Ok(Term::TUniv(n))
+            Ok(Term::TUniv(n.clone()))
         }
 
         // Path application: p @ r
@@ -1020,7 +1028,8 @@ fn infer_dt_inner(
 
         // Interval atoms
         Term::TInterval(_) | Term::TCube(_) => Ok(interval_ty()),
-        Term::TIntervalTy => Ok(Term::TUniv(0)),
+        Term::TIntervalTy => Ok(Term::TUniv(LevelExpr::LConst(0))),
+        Term::TLevelTy => Ok(Term::TUniv(LevelExpr::LConst(0))),
 
         // TId: Id A a b : U_n  when  A : U_n, a : A, b : A
         Term::TId(a, x, y) => {
@@ -1028,7 +1037,7 @@ fn infer_dt_inner(
             let a_val = nbe_eval_ctx(ctx.len(), a, session);
             check_dt(dts, ctx, x, &a_val, session)?;
             check_dt(dts, ctx, y, &a_val, session)?;
-            Ok(Term::TUniv(n))
+            Ok(Term::TUniv(n.clone()))
         }
 
         // TRefl: Refl x : Id A x x  when  x : A
@@ -1145,7 +1154,7 @@ fn infer_dt_inner(
         Term::TEquiv(a, b) => {
             let n = type_level_dt(dts, ctx, a, session)?;
             let m = type_level_dt(dts, ctx, b, session)?;
-            Ok(Term::TUniv(n.max(m)))
+            Ok(Term::TUniv(LevelExpr::max(n.clone(), m.clone())))
         }
 
         // mkEquiv: build an equivalence record
@@ -1334,7 +1343,7 @@ fn infer_dt_inner(
                 Term::TPair(te_a, _) => {
                     let sigma = Term::TSigma(
                         "X".to_string(),
-                        Arc::new(Term::TUniv(n)),
+                        Arc::new(Term::TUniv(n.clone())),
                         Arc::new(Term::TEquiv(
                             Arc::new(Term::TVar(0)),
                             Arc::new(shift(1, 0, &a_ty_)),
@@ -1350,7 +1359,7 @@ fn infer_dt_inner(
                         Term::TPair(te_a, _) => {
                             let sigma = Term::TSigma(
                                 "X".to_string(),
-                                Arc::new(Term::TUniv(n)),
+                                Arc::new(Term::TUniv(n.clone())),
                                 Arc::new(Term::TEquiv(
                                     Arc::new(Term::TVar(0)),
                                     Arc::new(shift(1, 0, &a_ty_)),
@@ -1370,14 +1379,14 @@ fn infer_dt_inner(
                 _ => {
                     let te_ty = infer_dt(dts, ctx, te, session)?;
                     match nbe_eval(&te_ty, session) {
-                        Term::TUniv(k) => k,
+                        Term::TUniv(k) => k.clone(),
                         Term::TEquiv(a, b) => {
                             let a_ = nbe_eval(&a, session);
                             let b_ = nbe_eval(&b, session);
                             require_equal(ctx, &b_, &a_ty_, session)?;
                             let p = type_level_dt(dts, ctx, &a_, session)?;
                             let q = type_level_dt(dts, ctx, &b_, session)?;
-                            p.max(q)
+                            LevelExpr::max(p.clone(), q.clone())
                         }
                         Term::TMkEquiv(a, b, _, _, _, _) => {
                             let a_ = nbe_eval(&a, session);
@@ -1385,7 +1394,7 @@ fn infer_dt_inner(
                             require_equal(ctx, &b_, &a_ty_, session)?;
                             let p = type_level_dt(dts, ctx, &a_, session)?;
                             let q = type_level_dt(dts, ctx, &b_, session)?;
-                            p.max(q)
+                            LevelExpr::max(p.clone(), q.clone())
                         }
                         other => {
                             return Err(TypeError::Other(format!(
@@ -1396,7 +1405,7 @@ fn infer_dt_inner(
                     }
                 }
             };
-            Ok(Term::TUniv(n.max(m)))
+            Ok(Term::TUniv(LevelExpr::max(n.clone(), m.clone())))
         }
 
         // Partial type: [_ | phi] A — partial elements of A on face phi
@@ -1404,18 +1413,18 @@ fn infer_dt_inner(
         Term::TPartial(phi, a) => {
             check_interval_dt(dts, ctx, phi, session)?;
             let n = type_level_dt(dts, ctx, a, session)?;
-            Ok(Term::TUniv(n))
+            Ok(Term::TUniv(n.clone()))
         }
 
         // System type: [phi => A, psi => B] — partial type families
         // Inference: TSystemType(sys) : U_n where each A_k : U_n
         // and system coherence is satisfied (overlapping faces agree).
         Term::TSystemType(sys) => {
-            let mut level = 0;
+            let mut level = LevelExpr::LConst(0);
             for (phi, a) in sys {
                 check_interval_dt(dts, ctx, phi, session)?;
                 let n = type_level_dt(dts, ctx, a, session)?;
-                level = level.max(n);
+                level = LevelExpr::max(level, n);
             }
             // Coherence check: for any two entries (phi, A) and (psi, B),
             // on their overlap (phi ∩ psi), A and B must agree.
@@ -1484,7 +1493,7 @@ fn infer_dt_inner(
             let i = type_level_dt(dts, ctx, a_ty, session)?;
             let ctx2 = extend_ctx(x.clone(), nbe_eval(a_ty, session), ctx);
             let j = type_level_dt(dts, &ctx2, b_ty, session)?;
-            Ok(Term::TUniv(i.max(j)))
+            Ok(Term::TUniv(LevelExpr::max(i, j)))
         }
 
         // fst p : A   where  p : Σ(x:A).B
@@ -1906,7 +1915,7 @@ fn infer_dt_inner(
             // If the datatype has a universe-level annotation, use it directly
             // for the fully-applied case.
             if args.len() >= dt.params.len() {
-                if let Some(level) = dt.universe_level {
+                if let Some(level) = dt.universe_level.clone() {
                     return Ok(Term::TUniv(level));
                 }
             }
@@ -1916,7 +1925,7 @@ fn infer_dt_inner(
             // the arg_tys before computing levels, so that TVar(0) etc.
             // referencing parameters get resolved.
             let num_params = dt.params.len();
-            let mut max_level: Level = 0;
+            let mut max_level: LevelExpr = LevelExpr::LConst(0);
 
             // Ordinary constructors
             for con_sig in &dt.cons {
@@ -1939,7 +1948,7 @@ fn infer_dt_inner(
                         .rev()
                         .fold(substituted, |ty, a| beta(&ty, a));
                     let lvl = type_level_dt(dts, &tel_ctx, &arg_ty_inst, session)?;
-                    max_level = max_level.max(lvl);
+                    max_level = LevelExpr::max(max_level, lvl);
                     // Record fields never reference earlier fields, and their
                     // types reference the datatype parameters at depths that
                     // include the field's own binders (handled by `subst`
@@ -1971,7 +1980,7 @@ fn infer_dt_inner(
                         .rev()
                         .fold(substituted, |ty, a| beta(&ty, a));
                     let lvl = type_level_dt(dts, &tel_ctx, &arg_ty_inst, session)?;
-                    max_level = max_level.max(lvl);
+                    max_level = LevelExpr::max(max_level, lvl);
                     let var_name = format!("_pcon_arg_{}", k);
                     let depth = k as i32;
                     prev_args.push(shift(depth + 1, 0, &Term::TVar(0)));
@@ -4122,9 +4131,9 @@ fn cumulativity_check(
 ) -> bool {
     match (expected, inferred) {
         // Prop ≤ U0 (cumulativity: Prop is a subuniverse of U0)
-        (Term::TUniv(m), Term::TProp) if *m >= 0 => true,
+        (Term::TUniv(m), Term::TProp) if m.as_const().map_or(false, |c| c >= 0) => true,
         // SSet ≤ U1
-        (Term::TUniv(m), Term::TSSet) if *m >= 1 => true,
+        (Term::TUniv(m), Term::TSSet) if m.as_const().map_or(false, |c| c >= 1) => true,
         // Prop ≤ Prop
         (Term::TProp, Term::TProp) => true,
         // SSet ≤ SSet
@@ -4139,7 +4148,9 @@ fn cumulativity_check(
         }
 
         // Universe cumulativity: U_n is subtype of U_m when n ≤ m
-        (Term::TUniv(m), Term::TUniv(n)) => n <= m,
+        // When level expressions can't be evaluated (contain variables),
+        // fall through to structural equality.
+        (Term::TUniv(m), Term::TUniv(n)) => n.leq(m, &[]).unwrap_or_else(|| n == m),
 
         // Pi cumulativity: contravariant in domain, covariant in codomain
         (Term::TPi(_, a_exp, b_exp, _), Term::TPi(_, a_inf, b_inf, _)) => {
@@ -4471,8 +4482,8 @@ mod tests {
         Term::TData(name.to_string(), params)
     }
 
-    fn t_univ(n: Level) -> Term {
-        Term::TUniv(n)
+    fn t_univ(n: i32) -> Term {
+        Term::TUniv(LevelExpr::LConst(n))
     }
 
     /// `cumulativity_check` against a concrete datatype environment, so the
@@ -4496,7 +4507,7 @@ mod tests {
     fn dt_one_param(name: &str, arg_tys: Vec<Term>) -> Datatype {
         Datatype {
             name: name.to_string(),
-            params: vec![("A".into(), Term::TUniv(0))],
+            params: vec![("A".into(), Term::TUniv(LevelExpr::LConst(0)))],
             cons: vec![crate::cubical::syntax::ConSig {
                 name: "mk".into(),
                 arg_tys,
@@ -4520,7 +4531,7 @@ mod tests {
                 vec![Term::TPi(
                     "_".into(),
                     Arc::new(Term::TVar(0)),
-                    Arc::new(Term::TUniv(0)),
+                    Arc::new(Term::TUniv(LevelExpr::LConst(0))),
                     false,
                 )],
             )];
@@ -4546,7 +4557,7 @@ mod tests {
                     Term::TPi(
                         "_".into(),
                         Arc::new(Term::TVar(0)),
-                        Arc::new(Term::TUniv(0)),
+                        Arc::new(Term::TUniv(LevelExpr::LConst(0))),
                         false,
                     ),
                 ],
@@ -4585,7 +4596,7 @@ mod tests {
                     vec![Term::TPi(
                         "_".into(),
                         Arc::new(Term::TVar(0)),
-                        Arc::new(Term::TUniv(0)),
+                        Arc::new(Term::TUniv(LevelExpr::LConst(0))),
                         false,
                     )],
                 ),
@@ -4689,7 +4700,7 @@ mod tests {
             let pi_x_to = |cod: Term| {
                 Term::TPi(
                     "x".into(),
-                    Arc::new(Term::TUniv(0)),
+                    Arc::new(Term::TUniv(LevelExpr::LConst(0))),
                     Arc::new(Term::TPi(
                         String::new(),
                         Arc::new(Term::TVar(1)),
@@ -4726,8 +4737,8 @@ mod tests {
     fn lift_and_lower_cumulativity() {
         crate::cubical::session::with_session_mut(|session| {
             assert!(sub_t(
-                &Term::TLift(Arc::new(t_univ(1)), 1),
-                &Term::TLift(Arc::new(t_univ(0)), 1),
+                &Term::TLift(Arc::new(t_univ(1)), LevelExpr::LConst(1)),
+                &Term::TLift(Arc::new(t_univ(0)), LevelExpr::LConst(1)),
                 session,
             ));
             assert!(sub_t(
@@ -4736,8 +4747,8 @@ mod tests {
                 session,
             ));
             assert!(!sub_t(
-                &Term::TLift(Arc::new(t_univ(0)), 1),
-                &Term::TLift(Arc::new(t_univ(1)), 1),
+                &Term::TLift(Arc::new(t_univ(0)), LevelExpr::LConst(1)),
+                &Term::TLift(Arc::new(t_univ(1)), LevelExpr::LConst(1)),
                 session,
             ));
         });

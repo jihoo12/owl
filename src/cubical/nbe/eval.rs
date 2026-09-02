@@ -317,12 +317,13 @@ fn eval_nbe_inner(
                 body: (**b).clone(),
             },
         ),
-        Term::TUniv(n) => Value::VUniv(*n),
+        Term::TUniv(n) => Value::VUniv(n.clone()),
         Term::TProp => Value::VProp,
         Term::TSSet => Value::VSSet,
+        Term::TLevelTy => Value::VLevelTy,
         Term::TLift(a, lvl) => Value::VLift(
             Arc::new(eval_nbe(env, globals, global_offset, a, session)),
-            *lvl,
+            lvl.clone(),
         ),
         Term::TLower(a) => {
             Value::VLower(Arc::new(eval_nbe(env, globals, global_offset, a, session)))

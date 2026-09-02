@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **D1 — Universe polymorphism.** ✅ Added `LevelExpr` enum (`LVar(i32)`, `LConst(i32)`, `LSuc(Box<LevelExpr>)`, `LMax(Box<LevelExpr>, Box<LevelExpr>)`) to `syntax/mod.rs`. Changed `TUniv(Level)` and `TLift(Arc<Term>, Level)` to hold `LevelExpr` instead of bare `i32`. Level expressions support `shift`/`subst`/`max_var` — level variables share the term variable de Bruijn namespace. Added `TLevelTy`/`VLevelTy` for the `Level` type. Parser: `U (lsuc l)`, `U (max l1 l2)`, `U l`, `U0`/`U1` backward compat. `Level` keyword recognized. `lift`/`lower` are prefix keywords. NbE: `VUniv`/`VLift` hold `LevelExpr`. Typechecker: `type_level_dt` returns `LevelExpr`, `U_n : U_{n+1}` via `LevelExpr::suc`, Pi/Sigma/Glue/Equiv/Partial/SystemType use `LevelExpr::max`. Cumulativity: `leq` with structural equality fallback for stuck level variables. Files: `syntax/mod.rs`, `syntax/pretty.rs`, `parser/grammar.rs`, `nbe/value.rs`, `nbe/eval.rs`, `nbe/quote.rs`, `nbe/transport.rs`, `nbe/meta.rs`, `typechecker/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs`, `driver.rs`, `equality.rs`, `syntax/positivity.rs`. Example: `examples/universe_poly.owl`. 257/257 tests pass.
+
 - [x] **A4 — Cubical identity types (`Id`).** ✅ Added `TId(A, a, b)`, `TRefl(x)`, `TJ(motive, base, p)` to `Term` enum. Parser: `Id A x y`, `Refl x`, `J motive base p`. NbE: `VId`, `VRefl`, `VJelim` values; `do_j` computes `J B d (Refl x) = d` (key definitional reduction). Quote: bidirectional reconstruction. Typechecker: `Id A a b : U_n`, `Refl x : Id A x x`, `J motive base p : B y p`. Example `examples/id_types.owl` tests type formation, reflexivity, and J computing on refl. 257/257 tests pass, `cargo fmt` clean.
 
 - [x] **A3 — Frontier-of-instability Phase 4 (quoting).** ✅ Made `try_destabilize` `pub(super)` in `elim.rs`. In `quote_case_body`, the `_ => quote(...)` fallback now checks if the value is a `VNeutral` with a satisfied frontier and attempts destabilization before quoting. This hardens quoting for stuck elim case bodies that capture interval-bound neutrals. Defensive — kernel re-checks everything. 256/256 tests pass, `cargo fmt` clean.
@@ -181,11 +183,13 @@ Cubical Agda supports general `mutual { ... }` blocks. Owl only has mutual induc
 
 ### D. Universe System — Cubical Agda Parity 🟡
 
-#### D1. Universe polymorphism 🟡
+#### D1. Universe polymorphism ✅
 
 Cubical Agda inherits Agda's full universe polymorphism: `Level`, `_⊔_`, `lsuc`. Owl has fixed-level universes `U0 : U1 : U2 : ...` with cumulativity.
 
-**Plan**: Add `Level` type with `_⊔_` (max) and `lsuc`. Universe-polymorphic definitions: `def f : {ℓ : Level} → Uℓ → Uℓ`. This is a significant parser + typechecker change.
+**Done**: Added `LevelExpr` enum (`LVar`, `LConst`, `LSuc`, `LMax`) to represent universe levels as a sub-language of terms. `TUniv` and `TLift` now hold `LevelExpr` instead of bare `i32`. Level expressions support `shift`/`subst`/`max_var` (level vars share the term variable de Bruijn namespace). Parser: `U (lsuc l)`, `U (max l1 l2)`, `U l`, `U0`/`U1` backward compat. `Level` keyword recognized as a type (`TLevelTy`/`VLevelTy`). `lift` and `lower` are prefix keywords. NbE: `VUniv`/`VLift` hold `LevelExpr`. Typechecker: `type_level_dt` returns `LevelExpr`, `U_n : U_{n+1}` via `LevelExpr::suc`, Pi/Sigma/Glue use `LevelExpr::max`. Cumulativity: `leq` with fallback to structural equality for stuck level variables. 257/257 tests pass, `examples/universe_poly.owl` exercises concrete levels, `Level` type, `lsuc`, `max`, `lift`.
+
+**Deferred**: Full implicit level variable substitution (level vars crossing term binders are shifted but not substituted — `id_poly 0 x` works but `id_poly l x` with level variable `l` does not fully reduce). This requires a separate level context or level-to-term conversion.
 
 #### D2. Fine-grained predicativity control 🟢
 
@@ -331,5 +335,5 @@ Spectrum types for stable homotopy theory. Research-level.
 6. **F1 (interactive REPL)** — biggest UX win once holes/tactics exist.
 7. **E2 (postulates)** — small, useful for assuming axioms in algebraic geometry.
 8. **E1 (reflection API)** — large but enables all subsequent automation.
-9. **D1 (universe polymorphism)** — significant but necessary for library scale.
+9. ~~**D1 (universe polymorphism)**~~ — ✅ done.
 10. **G1–G6 (standard library)** — breadth work, can proceed in parallel.

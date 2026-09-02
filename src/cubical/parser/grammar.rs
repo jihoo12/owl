@@ -7,7 +7,8 @@ use super::patterns::{MatchArm, Pat};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
 use crate::cubical::syntax::{
-    CellConSig, ConSig, Datatype, ElimCase, Name, PConSig, SqConSig, Tactic, Term, shift, subst,
+    CellConSig, ConSig, Datatype, ElimCase, LevelExpr, Name, PConSig, SqConSig, Tactic, Term,
+    shift, subst,
 };
 use crate::cubical::typechecker::errors::Pos;
 use std::sync::Arc;
@@ -239,15 +240,28 @@ impl Parser {
         }
 
         // Optional universe annotation: `data D : U_n = ...`
-        let mut uni_level: Option<i32> = None;
+        let mut uni_level: Option<LevelExpr> = None;
         if self.consume(&TokenKind::Colon) {
-            let uni_name = self.expect_ident("expected universe level after ':'")?;
-            uni_level = Some(parse_universe(&uni_name).ok_or_else(|| {
-                self.error_here(format!(
-                    "expected universe level (e.g. U0, U1) after ':', got '{}'",
-                    uni_name
-                ))
-            })?);
+            // Try level expression first (for `data D : U (lsuc l) = ...`)
+            // Fall back to identifier-based universe (for `data D : U0 = ...`)
+            let save = self.pos;
+            match self.parse_level_expr() {
+                Ok(lvl) => {
+                    uni_level = Some(lvl);
+                }
+                Err(_) => {
+                    self.pos = save;
+                    let uni_name = self.expect_ident("expected universe level after ':'")?;
+                    uni_level = Some(LevelExpr::LConst(parse_universe(&uni_name).ok_or_else(
+                        || {
+                            self.error_here(format!(
+                                "expected universe level (e.g. U0, U1) after ':', got '{}'",
+                                uni_name
+                            ))
+                        },
+                    )?));
+                }
+            }
         }
 
         self.expect_ident("expected 'where' after inductive datatype name")
@@ -984,6 +998,14 @@ impl Parser {
         if self.consume_ident("Next") {
             return Ok(Term::TNext(Arc::new(self.parse_prefix_or_atom()?)));
         }
+        if self.consume_ident("lift") {
+            let a = self.parse_prefix_or_atom()?;
+            let lvl = self.parse_level_expr()?;
+            return Ok(Term::TLift(Arc::new(a), lvl));
+        }
+        if self.consume_ident("lower") {
+            return Ok(Term::TLower(Arc::new(self.parse_prefix_or_atom()?)));
+        }
         if self.consume_ident("Refl") {
             let x = self.parse_prefix_or_atom()?;
             return Ok(Term::TRefl(Arc::new(x)));
@@ -1232,6 +1254,12 @@ impl Parser {
         }
         if self.consume_ident("match") {
             return self.parse_match();
+        }
+
+        // U — universe formation with level expression
+        if self.consume_ident("U") {
+            let level = self.parse_level_expr()?;
+            return Ok(Term::TUniv(level));
         }
 
         // [_ | phi] A — partial element type (bracket syntax)
@@ -2403,13 +2431,16 @@ impl Parser {
 
     fn resolve_ident(&mut self, name: Name) -> Result<Term, ParseError> {
         if name == "Type" {
-            return Ok(Term::TUniv(0));
+            return Ok(Term::TUniv(LevelExpr::LConst(0)));
         }
         if name == "Prop" {
             return Ok(Term::TProp);
         }
         if name == "SSet" {
             return Ok(Term::TSSet);
+        }
+        if name == "Level" {
+            return Ok(Term::TLevelTy);
         }
         if name == "I" || name == "𝕀" {
             return Ok(Term::TIntervalTy);
@@ -2421,7 +2452,7 @@ impl Parser {
             return Ok(Term::TInterval(I::I1));
         }
         if let Some(level) = parse_universe(&name) {
-            return Ok(Term::TUniv(level));
+            return Ok(Term::TUniv(LevelExpr::LConst(level)));
         }
         let (line, col) = self.token_pos();
         if let Some(idx) = self.term_env.iter().position(|n| n == &name) {
@@ -2963,6 +2994,58 @@ fn parse_universe(name: &str) -> Option<i32> {
         return None;
     }
     rest.parse::<i32>().ok()
+}
+
+/// Parse a level expression: `max l1 l2 | lsuc l | (level_expr) | integer | ident`
+impl Parser {
+    fn parse_level_expr(&mut self) -> Result<LevelExpr, ParseError> {
+        self.parse_level_max()
+    }
+
+    fn parse_level_max(&mut self) -> Result<LevelExpr, ParseError> {
+        if self.consume_ident("max") {
+            let left = self.parse_level_atom()?;
+            let right = self.parse_level_max()?;
+            return Ok(LevelExpr::LMax(Box::new(left), Box::new(right)));
+        }
+        self.parse_level_atom()
+    }
+
+    fn parse_level_atom(&mut self) -> Result<LevelExpr, ParseError> {
+        if self.consume_ident("lsuc") {
+            let inner = self.parse_level_atom()?;
+            return Ok(LevelExpr::LSuc(Box::new(inner)));
+        }
+        self.parse_level_base()
+    }
+
+    fn parse_level_base(&mut self) -> Result<LevelExpr, ParseError> {
+        if self.at(&TokenKind::LParen) {
+            self.pos += 1;
+            let inner = self.parse_level_expr()?;
+            self.expect(TokenKind::RParen, "expected ')' after level expression")?;
+            return Ok(inner);
+        }
+        match self.peek().kind.clone() {
+            TokenKind::Int(n) => {
+                self.pos += 1;
+                Ok(LevelExpr::LConst(n))
+            }
+            TokenKind::Ident(name) => {
+                self.pos += 1;
+                // Look up the name in the term environment to get de Bruijn index
+                if let Some(idx) = self.term_env.iter().position(|n| n == &name) {
+                    Ok(LevelExpr::LVar(idx as i32))
+                } else {
+                    Err(self.error_here(format!("unknown level variable '{}'", name)))
+                }
+            }
+            other => Err(self.error_here(format!(
+                "expected level expression, found {}",
+                describe(&other)
+            ))),
+        }
+    }
 }
 
 fn expect_interval(term: Term, parser: &Parser) -> Result<I, ParseError> {

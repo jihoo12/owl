@@ -14,6 +14,7 @@ pub fn meta_mentions(id: i32, t: &Term) -> bool {
         | Term::TProp
         | Term::TSSet
         | Term::TIntervalTy
+        | Term::TLevelTy
         | Term::TInterval(_)
         | Term::TCube(_) => false,
         Term::TApp(f, a) => meta_mentions(id, f) || meta_mentions(id, a),
@@ -132,6 +133,7 @@ pub fn zonk(t: &Term, session: &Session) -> Term {
             | Term::TProp
             | Term::TSSet
             | Term::TIntervalTy
+            | Term::TLevelTy
             | Term::TInterval(_)
             | Term::TCube(_)
             | Term::TBy(_) => term.clone(),
@@ -332,6 +334,7 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         | Term::TProp
         | Term::TSSet
         | Term::TIntervalTy
+        | Term::TLevelTy
         | Term::TInterval(_)
         | Term::TCube(_)
         | Term::Meta(_) => vec![],

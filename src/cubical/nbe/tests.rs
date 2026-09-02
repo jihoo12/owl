@@ -1,5 +1,6 @@
 use super::*;
 use crate::cubical::interval::{DNF, I, Literal};
+use crate::cubical::syntax::LevelExpr;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
@@ -20,26 +21,29 @@ fn beta_reduces_identity_application() {
     crate::cubical::session::with_session_mut(|session| {
         let term = Term::TApp(
             b(Term::TAbs("x".to_string(), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
         );
-        assert_eq!(nbe_eval(&term, session), Term::TUniv(0));
+        assert_eq!(nbe_eval(&term, session), Term::TUniv(LevelExpr::LConst(0)));
     });
 }
 
 #[test]
 fn fst_of_pair_reduces() {
     crate::cubical::session::with_session_mut(|session| {
-        let term = Term::TFst(b(Term::TPair(b(Term::TUniv(0)), b(Term::TUniv(1)))));
-        assert_eq!(nbe_eval(&term, session), Term::TUniv(0));
+        let term = Term::TFst(b(Term::TPair(
+            b(Term::TUniv(LevelExpr::LConst(0))),
+            b(Term::TUniv(LevelExpr::LConst(1))),
+        )));
+        assert_eq!(nbe_eval(&term, session), Term::TUniv(LevelExpr::LConst(0)));
     });
 }
 
 #[test]
 fn transport_over_constant_family_is_identity() {
     crate::cubical::session::with_session_mut(|session| {
-        let family = Term::PLam("i".to_string(), b(Term::TUniv(0)));
-        let term = Term::TTransport(b(family), b(Term::TUniv(1)));
-        assert_eq!(nbe_eval(&term, session), Term::TUniv(1));
+        let family = Term::PLam("i".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
+        let term = Term::TTransport(b(family), b(Term::TUniv(LevelExpr::LConst(1))));
+        assert_eq!(nbe_eval(&term, session), Term::TUniv(LevelExpr::LConst(1)));
     });
 }
 
@@ -49,11 +53,11 @@ fn transport_over_nonconstant_pi_produces_lambda() {
         let body = Term::TPi(
             "x".to_string(),
             b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
             false,
         );
         let fam = Term::PLam("i".to_string(), b(body));
-        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
+        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
         let term = Term::TTransport(b(fam), b(arg));
         let result = nbe_eval(&term, session);
         assert!(
@@ -70,11 +74,11 @@ fn deep_transport_fallback_unsticks_pi() {
         let body = Term::TPi(
             "x".to_string(),
             b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
             false,
         );
         let fam = Term::PLam("i".to_string(), b(body));
-        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
+        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
         let term = Term::TTransport(b(fam), b(arg));
         let result = nbe_eval(&term, session);
         assert!(
@@ -88,9 +92,16 @@ fn deep_transport_fallback_unsticks_pi() {
 #[test]
 fn sigma_transport_on_pair_reduces() {
     crate::cubical::session::with_session_mut(|session| {
-        let sigma = Term::TSigma("x".to_string(), b(Term::TUniv(0)), b(Term::TUniv(1)));
+        let sigma = Term::TSigma(
+            "x".to_string(),
+            b(Term::TUniv(LevelExpr::LConst(0))),
+            b(Term::TUniv(LevelExpr::LConst(1))),
+        );
         let fam = Term::PLam("i".to_string(), b(sigma));
-        let pair = Term::TPair(b(Term::TUniv(0)), b(Term::TUniv(1)));
+        let pair = Term::TPair(
+            b(Term::TUniv(LevelExpr::LConst(0))),
+            b(Term::TUniv(LevelExpr::LConst(1))),
+        );
         let term = Term::TTransport(b(fam), b(pair.clone()));
         let result = nbe_eval(&term, session);
         assert_eq!(result, pair);
@@ -102,11 +113,11 @@ fn path_transport_produces_plam() {
     crate::cubical::session::with_session_mut(|session| {
         let path = Term::TPath(
             b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
+            b(Term::TUniv(LevelExpr::LConst(0))),
         );
         let fam = Term::PLam("i".to_string(), b(path));
-        let arg = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+        let arg = Term::PLam("j".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
         let term = Term::TTransport(b(fam), b(arg));
         let result = nbe_eval(&term, session);
         assert!(
@@ -123,11 +134,11 @@ fn native_pi_transport_no_deep_fallback() {
         let body = Term::TPi(
             "x".to_string(),
             b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
             false,
         );
         let fam = Term::PLam("i".to_string(), b(body));
-        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(0)));
+        let arg = Term::TAbs("x".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
         let term = Term::TTransport(b(fam), b(arg));
         let result = nbe_eval(&term, session);
         assert!(
@@ -149,7 +160,7 @@ fn dependent_codomain_pi_transport_reduces() {
             b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
             b(Term::TPi(
                 "y".to_string(),
-                b(Term::TUniv(0)),
+                b(Term::TUniv(LevelExpr::LConst(0))),
                 b(Term::TVar(1)),
                 false,
             )),
@@ -180,15 +191,15 @@ fn hcomp_papp_at_zero_reduces_to_base() {
     crate::cubical::session::with_session_mut(|session| {
         // hcomp A [(i0, tube)] base @ 0 should reduce to base
         // (non-trivial face keeps hcomp stuck until papp)
-        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+        let tube = Term::PLam("j".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
         let hcomp = Term::THComp(
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
             vec![(Term::TInterval(I::Var(0)), tube)],
-            b(Term::TUniv(1)),
+            b(Term::TUniv(LevelExpr::LConst(1))),
         );
         let term = Term::PApp(b(hcomp), b(Term::TInterval(I::I0)));
         let result = nbe_eval(&term, session);
-        assert_eq!(result, Term::TUniv(1));
+        assert_eq!(result, Term::TUniv(LevelExpr::LConst(1)));
     });
 }
 
@@ -196,15 +207,15 @@ fn hcomp_papp_at_zero_reduces_to_base() {
 fn hcomp_papp_at_one_reduces_to_tube_at_one() {
     crate::cubical::session::with_session_mut(|session| {
         // hcomp A [(i0, tube)] base @ 1 should reduce to tube @ 1
-        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+        let tube = Term::PLam("j".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
         let hcomp = Term::THComp(
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
             vec![(Term::TInterval(I::Var(0)), tube)],
-            b(Term::TUniv(1)),
+            b(Term::TUniv(LevelExpr::LConst(1))),
         );
         let term = Term::PApp(b(hcomp), b(Term::TInterval(I::I1)));
         let result = nbe_eval(&term, session);
-        assert_eq!(result, Term::TUniv(0));
+        assert_eq!(result, Term::TUniv(LevelExpr::LConst(0)));
     });
 }
 
@@ -213,16 +224,16 @@ fn hcomp_const_tube_coherent_reduces_to_base() {
     crate::cubical::session::with_session_mut(|session| {
         // hcomp U [i1 => λj. U0] U0 should reduce to U0 (constant-tube shortcut)
         // Tube PLam("j", U0) is constant (U0 at both I0 and I1) and equals base U0.
-        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+        let tube = Term::PLam("j".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
         let hcomp = Term::THComp(
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
             vec![(Term::TInterval(I::I1), tube)],
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
         );
         let result = nbe_eval(&hcomp, session);
         assert_eq!(
             result,
-            Term::TUniv(0),
+            Term::TUniv(LevelExpr::LConst(0)),
             "constant-tube hcomp should reduce to base"
         );
     });
@@ -232,11 +243,11 @@ fn hcomp_const_tube_coherent_reduces_to_base() {
 fn fill_const_tube_coherent_reduces_to_const_path() {
     crate::cubical::session::with_session_mut(|session| {
         // fill U [i1 => λj. U0] U0 should reduce to λj. U0 (constant-tube shortcut)
-        let tube = Term::PLam("j".to_string(), b(Term::TUniv(0)));
+        let tube = Term::PLam("j".to_string(), b(Term::TUniv(LevelExpr::LConst(0))));
         let fill = Term::TFill(
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
             vec![(Term::TInterval(I::I1), tube)],
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
         );
         let result = nbe_eval(&fill, session);
         assert!(
@@ -262,11 +273,11 @@ fn glue_transport_on_glue_elem_decomposes() {
         let glue_ty = Term::TGlue(
             b(Term::TVar(0)), // A varies with i → makes family non-constant
             b(non_trivial_phi.clone()),
-            b(Term::TUniv(0)), // te
+            b(Term::TUniv(LevelExpr::LConst(0))), // te
         );
         let fam = Term::PLam("i".to_string(), b(glue_ty));
-        let cap = Term::TUniv(1);
-        let base = Term::TUniv(2);
+        let cap = Term::TUniv(LevelExpr::LConst(1));
+        let base = Term::TUniv(LevelExpr::LConst(2));
         let glue_elem = Term::TGlueElem(b(non_trivial_phi.clone()), b(cap), b(base));
         let transport = Term::TTransport(b(fam), b(glue_elem));
         let globals: Globals = Arc::new(Mutex::new(Vec::new()));
@@ -278,7 +289,7 @@ fn glue_transport_on_glue_elem_decomposes() {
             Value::VGlueElem(phi, t, a) => {
                 assert_eq!(phi, phi_dnf, "face should be the non-trivial phi");
                 match &*t {
-                    Value::VUniv(n) => assert_eq!(*n, 1, "cap should be U1"),
+                    Value::VUniv(n) => assert_eq!(*n, LevelExpr::LConst(1), "cap should be U1"),
                     other => panic!("expected VUniv(1) for cap, got: {:?}", other),
                 }
                 match &*a {
@@ -287,7 +298,9 @@ fn glue_transport_on_glue_elem_decomposes() {
                         assert_eq!(h_sys.len(), 1, "hcomp system should have 1 entry");
                         assert_eq!(h_sys[0].0, phi_dnf, "hcomp face should match");
                         match &**h_base {
-                            Value::VUniv(n) => assert_eq!(*n, 2, "hcomp base should be U2"),
+                            Value::VUniv(n) => {
+                                assert_eq!(*n, LevelExpr::LConst(2), "hcomp base should be U2")
+                            }
                             other => {
                                 panic!("expected VUniv(2) for hcomp base, got: {:?}", other)
                             }
@@ -309,9 +322,13 @@ fn glue_transport_on_non_glue_elem_stays_stuck() {
         let non_trivial_phi = Term::TCube(DNF {
             cubes: BTreeSet::from([BTreeSet::from([Literal::Pos(1)])]),
         });
-        let glue_ty = Term::TGlue(b(Term::TVar(0)), b(non_trivial_phi), b(Term::TUniv(0)));
+        let glue_ty = Term::TGlue(
+            b(Term::TVar(0)),
+            b(non_trivial_phi),
+            b(Term::TUniv(LevelExpr::LConst(0))),
+        );
         let fam = Term::PLam("i".to_string(), b(glue_ty));
-        let transport = Term::TTransport(b(fam), b(Term::TUniv(0)));
+        let transport = Term::TTransport(b(fam), b(Term::TUniv(LevelExpr::LConst(0))));
         let globals: Globals = Arc::new(Mutex::new(Vec::new()));
         let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);
         match result {
@@ -332,9 +349,17 @@ fn glue_transport_face_mismatch_stays_stuck() {
         let phi2 = Term::TCube(DNF {
             cubes: BTreeSet::from([BTreeSet::from([Literal::NegVar(1)])]),
         });
-        let glue_ty = Term::TGlue(b(Term::TVar(0)), b(phi1), b(Term::TUniv(0)));
+        let glue_ty = Term::TGlue(
+            b(Term::TVar(0)),
+            b(phi1),
+            b(Term::TUniv(LevelExpr::LConst(0))),
+        );
         let fam = Term::PLam("i".to_string(), b(glue_ty));
-        let glue_elem = Term::TGlueElem(b(phi2), b(Term::TUniv(1)), b(Term::TUniv(2)));
+        let glue_elem = Term::TGlueElem(
+            b(phi2),
+            b(Term::TUniv(LevelExpr::LConst(1))),
+            b(Term::TUniv(LevelExpr::LConst(2))),
+        );
         let transport = Term::TTransport(b(fam), b(glue_elem));
         let globals: Globals = Arc::new(Mutex::new(Vec::new()));
         let result = eval_nbe(&Scope::empty(), &globals, 0, &transport, session);

@@ -267,6 +267,7 @@ fn quote_inner(
         Value::VUniv(n) => Term::TUniv(n),
         Value::VProp => Term::TProp,
         Value::VSSet => Term::TSSet,
+        Value::VLevelTy => Term::TLevelTy,
         Value::VLift(a, lvl) => Term::TLift(
             Arc::new(quote(
                 size,
@@ -1015,9 +1016,10 @@ fn quote_case_body(
                 session,
             )),
         ),
-        Term::TUniv(n) => Term::TUniv(*n),
+        Term::TUniv(n) => Term::TUniv(n.clone()),
         Term::TProp => Term::TProp,
         Term::TSSet => Term::TSSet,
+        Term::TLevelTy => Term::TLevelTy,
         Term::TLift(a, lvl) => Term::TLift(
             Arc::new(quote_case_body(
                 size,
@@ -1028,7 +1030,7 @@ fn quote_case_body(
                 a,
                 session,
             )),
-            *lvl,
+            lvl.clone(),
         ),
         Term::TLower(a) => Term::TLower(Arc::new(quote_case_body(
             size,

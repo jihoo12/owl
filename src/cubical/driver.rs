@@ -9,7 +9,7 @@ use crate::cubical::env::{Env, check_with_full_env, infer_with_full_env};
 use crate::cubical::nbe::{nbe_eval, nbe_eval_with_globals, zonk};
 use crate::cubical::parser::{Decl, ProgramParser};
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{Name, Term};
+use crate::cubical::syntax::{LevelExpr, Name, Term};
 use crate::cubical::typechecker::errors::ContextualError;
 use crate::cubical::typechecker::{Ctx, TypeError};
 
@@ -604,7 +604,7 @@ fn process_data(
                 &env.datatypes,
                 &param_ctx,
                 arg_ty,
-                &Term::TUniv(0),
+                &Term::TUniv(LevelExpr::LConst(0)),
                 session,
             )
             .map_err(|e| RunError::Type(Box::new(e)))?;
@@ -651,7 +651,7 @@ fn process_data_mutual(
                     &env.datatypes,
                     &param_ctx,
                     arg_ty,
-                    &Term::TUniv(0),
+                    &Term::TUniv(LevelExpr::LConst(0)),
                     session,
                 )
                 .map_err(|e| RunError::Type(Box::new(e)))?;
@@ -710,6 +710,7 @@ fn collect_meta_ids(t: &Term, out: &mut Vec<i32>) {
         Term::TLift(a, _) | Term::TLower(a) => {
             collect_meta_ids(a, out);
         }
+        Term::TLevelTy => {}
         Term::TPi(_, a, b, _) => {
             collect_meta_ids(a, out);
             collect_meta_ids(b, out);

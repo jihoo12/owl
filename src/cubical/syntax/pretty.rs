@@ -2,13 +2,23 @@
 
 use std::fmt;
 
-use super::{Datatype, Name, Tactic, Term};
+use super::{Datatype, LevelExpr, Name, Tactic, Term};
 
 fn get_meta_name_for_display(id: i32) -> Option<Name> {
     if let Some(session) = crate::cubical::session::current_session() {
         session.get_meta_name(id)
     } else {
         crate::cubical::session::get_meta_name(id)
+    }
+}
+
+/// Pretty-print a level expression.
+pub fn show_level(l: &LevelExpr) -> String {
+    match l {
+        LevelExpr::LVar(i) => format!("#l{}", i),
+        LevelExpr::LConst(n) => format!("{}", n),
+        LevelExpr::LSuc(inner) => format!("lsuc {}", show_level(inner)),
+        LevelExpr::LMax(a, b) => format!("max {} {}", show_level(a), show_level(b)),
     }
 }
 
@@ -39,10 +49,17 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
             env2.extend_from_slice(env);
             format!("fun {} => {}", x, show_term(&env2, b))
         }
-        Term::TUniv(n) => format!("U{}", n),
+        Term::TUniv(n) => match n.as_const() {
+            Some(c) => format!("U{}", c),
+            None => format!("U ({})", show_level(n)),
+        },
         Term::TProp => "Prop".to_string(),
         Term::TSSet => "SSet".to_string(),
-        Term::TLift(a, lvl) => format!("lift {} {}", show_term(env, a), lvl),
+        Term::TLevelTy => "Level".to_string(),
+        Term::TLift(a, lvl) => match lvl.as_const() {
+            Some(c) => format!("lift {} {}", show_term(env, a), c),
+            None => format!("lift {} ({})", show_term(env, a), show_level(lvl)),
+        },
         Term::TLower(a) => format!("lower {}", show_term(env, a)),
         Term::TIntervalTy => "I".to_string(),
         Term::TPi(x, a, b, implicit) => {

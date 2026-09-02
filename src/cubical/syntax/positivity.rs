@@ -150,6 +150,7 @@ fn walk_param_polarities(
         Term::TUniv(_)
         | Term::TProp
         | Term::TSSet
+        | Term::TLevelTy
         | Term::TIntervalTy
         | Term::TInterval(_)
         | Term::TCube(_)
@@ -407,7 +408,11 @@ impl fmt::Display for PositivityError {
 fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), PositivityError> {
     match ty {
         Term::TVar(_) => Ok(()),
-        Term::TUniv(_) | Term::TIntervalTy | Term::TInterval(_) | Term::TCube(_) => Ok(()),
+        Term::TUniv(_)
+        | Term::TIntervalTy
+        | Term::TLevelTy
+        | Term::TInterval(_)
+        | Term::TCube(_) => Ok(()),
         Term::TProp | Term::TSSet => Ok(()),
         Term::TLift(a, _) | Term::TLower(a) => check_positivity_in(target, a, negative),
         Term::TData(name, params) => {
@@ -612,7 +617,7 @@ pub fn check_datatype_positivity(dt: &Datatype) -> Result<(), PositivityError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cubical::syntax::{ConSig, PConSig};
+    use crate::cubical::syntax::{ConSig, LevelExpr, PConSig};
     use std::sync::Arc;
 
     fn b(t: Term) -> Arc<Term> {
@@ -655,7 +660,10 @@ mod tests {
                 },
                 ConSig {
                     name: "cons".into(),
-                    arg_tys: vec![Term::TUniv(0), Term::TData("List".into(), vec![])],
+                    arg_tys: vec![
+                        Term::TUniv(LevelExpr::LConst(0)),
+                        Term::TData("List".into(), vec![]),
+                    ],
                 },
             ],
             pcons: vec![],
@@ -829,7 +837,7 @@ mod tests {
     fn var_dt(name: &str, arg_tys: Vec<Term>) -> Datatype {
         Datatype {
             name: name.into(),
-            params: vec![("A".into(), Term::TUniv(0))],
+            params: vec![("A".into(), Term::TUniv(LevelExpr::LConst(0)))],
             cons: vec![ConSig {
                 name: "mk".into(),
                 arg_tys,
@@ -861,7 +869,7 @@ mod tests {
             vec![Term::TPi(
                 "_".into(),
                 b(Term::TVar(0)),
-                b(Term::TUniv(0)),
+                b(Term::TUniv(LevelExpr::LConst(0))),
                 false,
             )],
         );
@@ -874,7 +882,12 @@ mod tests {
             "Bad",
             vec![
                 Term::TVar(0),
-                Term::TPi("_".into(), b(Term::TVar(0)), b(Term::TUniv(0)), false),
+                Term::TPi(
+                    "_".into(),
+                    b(Term::TVar(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
+                    false,
+                ),
             ],
         );
         assert_eq!(var_of(&dt), Variance::Invariant);
@@ -882,7 +895,10 @@ mod tests {
 
     #[test]
     fn param_unused_in_any_constructor() {
-        assert_eq!(var_of(&var_dt("C", vec![Term::TUniv(0)])), Variance::Unused);
+        assert_eq!(
+            var_of(&var_dt("C", vec![Term::TUniv(LevelExpr::LConst(0))])),
+            Variance::Unused
+        );
     }
 
     #[test]
@@ -907,7 +923,7 @@ mod tests {
             vec![Term::TPi(
                 "_".into(),
                 b(Term::TVar(0)),
-                b(Term::TUniv(0)),
+                b(Term::TUniv(LevelExpr::LConst(0))),
                 false,
             )],
         );

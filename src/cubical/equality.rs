@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::cubical::nbe::{meta_mentions, nbe_eval, nbe_eval_ctx, try_solve_meta};
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{Name, Term, beta, shift};
+use crate::cubical::syntax::{LevelExpr, Name, Term, beta, shift};
 use crate::cubical::typechecker::Ctx;
 
 // ---------------------------------------------------------------------------
@@ -24,6 +24,7 @@ pub fn term_size(t: &Term) -> usize {
         Term::TVar(_)
         | Term::TUniv(_)
         | Term::TIntervalTy
+        | Term::TLevelTy
         | Term::TInterval(_)
         | Term::TCube(_)
         | Term::TProp
@@ -423,7 +424,7 @@ fn eta_eq_uncached(
     if let (Term::TAbs(x, b1), Term::TAbs(_, b2)) = (t1, t2) {
         let dom = infer_lam_dom(ctx, t1, session)
             .or_else(|| infer_lam_dom(ctx, t2, session))
-            .unwrap_or(Term::TUniv(0));
+            .unwrap_or(Term::TUniv(LevelExpr::LConst(0)));
         let mut ctx2 = vec![(x.clone(), dom)];
         ctx2.extend_from_slice(ctx);
         return eta_eq_memo(
@@ -789,7 +790,7 @@ fn eta_eq_uncached(
                     .binders
                     .iter()
                     .rev()
-                    .map(|b| (b.clone(), Term::TUniv(0)))
+                    .map(|b| (b.clone(), Term::TUniv(LevelExpr::LConst(0))))
                     .collect();
                 case_ctx.extend_from_slice(ctx);
                 // A stuck elim suspends its case bodies, so a reducible

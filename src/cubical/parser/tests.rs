@@ -3,7 +3,7 @@ use super::lexer::{Lexer, TokenKind};
 use super::*;
 use crate::cubical::interval::I;
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{Tactic, Term, show_term};
+use crate::cubical::syntax::{LevelExpr, Tactic, Term, show_term};
 use std::sync::Arc;
 
 fn run_str_test(
@@ -36,7 +36,7 @@ fn parses_dependent_pi() {
             parse_term("∀ (x : U0), x", session).unwrap(),
             Term::TPi(
                 "x".to_string(),
-                Arc::new(Term::TUniv(0)),
+                Arc::new(Term::TUniv(LevelExpr::LConst(0))),
                 Arc::new(Term::TVar(0)),
                 false
             )
@@ -52,15 +52,15 @@ fn parses_forall_after_arrow() {
         match term {
             Term::TPi(dom_b, dom, cod, _) => {
                 assert_eq!(dom_b, "_");
-                assert_eq!(&*dom, &Term::TUniv(0));
+                assert_eq!(&*dom, &Term::TUniv(LevelExpr::LConst(0)));
                 match &*cod {
                     Term::TPi(x, bx, body, _) => {
                         assert_eq!(x, "x");
-                        assert_eq!(&**bx, &Term::TUniv(1));
+                        assert_eq!(&**bx, &Term::TUniv(LevelExpr::LConst(1)));
                         match &**body {
                             Term::TPi(_, bd, b, _) => {
-                                assert_eq!(&**bd, &Term::TUniv(1));
-                                assert_eq!(&**b, &Term::TUniv(0));
+                                assert_eq!(&**bd, &Term::TUniv(LevelExpr::LConst(1)));
+                                assert_eq!(&**b, &Term::TUniv(LevelExpr::LConst(0)));
                             }
                             _ => panic!("expected inner Pi, got {:?}", body),
                         }
@@ -215,7 +215,10 @@ fn parses_parameterized_module_declaration() {
         match &decls[0] {
             Decl::Module { name, params } => {
                 assert_eq!(name, "M");
-                assert_eq!(params, &vec![("A".to_string(), Term::TUniv(0))]);
+                assert_eq!(
+                    params,
+                    &vec![("A".to_string(), Term::TUniv(LevelExpr::LConst(0)))]
+                );
             }
             _ => panic!("expected parameterized module declaration"),
         }
@@ -229,7 +232,7 @@ fn parses_parameterized_module_declaration() {
                     ty,
                     &Term::TPi(
                         "A".into(),
-                        Arc::new(Term::TUniv(0)),
+                        Arc::new(Term::TUniv(LevelExpr::LConst(0))),
                         Arc::new(Term::TPi(
                             "_".into(),
                             Arc::new(Term::TVar(0)),
@@ -701,7 +704,7 @@ fn dependent_arrow_type_typechecks() {
         let ctx = Vec::new();
         let ty = parse_term("∀ (A : U0), A -> A", session).unwrap();
         let inferred = infer(&ctx, &ty, session).expect("type should be well-formed");
-        assert_eq!(inferred, Term::TUniv(0));
+        assert_eq!(inferred, Term::TUniv(LevelExpr::LConst(0)));
     });
 }
 
@@ -1007,7 +1010,7 @@ fn data_universe_annotation_parses() {
         match &decls[0] {
             Decl::Data(dt) => {
                 assert_eq!(dt.name, "D");
-                assert_eq!(dt.universe_level, Some(1));
+                assert_eq!(dt.universe_level, Some(LevelExpr::LConst(1)));
             }
             _ => panic!("expected data declaration"),
         }

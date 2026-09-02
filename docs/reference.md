@@ -194,6 +194,10 @@ type. Types are themselves terms.
 
 ### Universes
 
+Owl supports both **concrete** and **polymorphic** universes.
+
+#### Concrete Universe Syntax
+
 ```
 U0  U1  U2  ...
 Type          -- alias for U0
@@ -207,6 +211,58 @@ of the previous level:
 ```
 U0 : U1 : U2 : ...
 ```
+
+#### Universe Polymorphism (Level Expressions)
+
+Universe levels can be left as variables, enabling definitions that work
+uniformly across any level. The `Level` type represents universe levels, and
+level expressions (`LevelExpr`) can appear wherever concrete integers could.
+
+**Level type and constructors:**
+
+```
+Level           -- the type of universe levels
+lsuc l          -- successor level: lsuc l = l + 1
+max l1 l2       -- maximum of two levels
+```
+
+**Polymorphic universe syntax:**
+
+```
+U l             -- universe at level expression l
+U (lsuc l)      -- universe at successor of l
+U (max l1 l2)   -- universe at the maximum of l1 and l2
+```
+
+**Examples:**
+
+```
+-- Polymorphic identity function: works at any universe level
+def id : forall (l : Level), U l -> U l :=
+  fun l A => fun (x : A) => x
+
+-- Lift a function between universe levels
+def lift_id : forall (l1 l2 : Level), U l1 -> U (max l1 l2) :=
+  fun l1 l2 A => fun (x : A) => x
+
+-- Concrete: the familiar U0, U1, ... are just level expressions
+-- U0 = U (LConst 0), U1 = U (LConst 1), etc.
+```
+
+**Implicit binders for levels:**
+
+```
+{id l : Level}. U l -> U l       -- level parameter inferred
+```
+
+Level variables share the de Bruijn index namespace with term variables. When
+level-polymorphic definitions are instantiated, level variables are substituted
+in the term structure.
+
+**Backward compatibility:** `U0`, `U1`, `Type`, and `Prop` still work and are
+synonyms for concrete level expressions (`U (LConst 0)`, etc.).
+
+#### Cumulativity
 
 **Cumulativity**: if `n <= m`, then `U_n` is a subtype of `U_m`.
 
@@ -251,20 +307,31 @@ Pi, Sigma, and Path at level 1.
 ### Universe Lifting and Lowering
 
 ```
-lift A        -- lift type A from U_n to U_{max(n, m)}
-lower a       -- lower a value of a lifted type back down
+lift a              -- lift value a to a higher universe (level inferred)
+lift a (max l1 l2)  -- lift with explicit target level
+lower a             -- lower a value of a lifted type back down
 ```
 
-Universe lifting (`lift`) embeds a type into a higher universe. This is
+Universe lifting (`lift`) embeds a value into a higher universe. This is
 needed when cumulativity is not sufficient — for example, when a function
-requires all arguments at the same universe level:
+requires all arguments at the same universe level.
+
+**Without level expressions (concrete):**
 
 ```
 -- Nat : U0, but we need it at U1 for a specific context
 def lifted_nat : lift Nat := lift zero
 ```
 
-`lift A : U_{max(n,m)}` when `A : U_n`. `lower` reverses the embedding:
+**With level expressions (polymorphic):**
+
+```
+-- Lift to a specific polymorphic level
+def lift_to_max : forall (l1 l2 : Level), U (lsuc l1) -> U (max (lsuc l1) (lsuc l2)) :=
+  fun l1 l2 A => fun (x : A) => lift x (max l1 l2)
+```
+
+`lift a : U_{max(n,m)}` when `a : U_n`. `lower` reverses the embedding:
 `lower (lift x) = x`.
 
 ### Pi Types (Dependent Functions)

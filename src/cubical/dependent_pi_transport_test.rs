@@ -10,7 +10,7 @@
 #[cfg(test)]
 mod tests {
     use crate::cubical::nbe::{Globals, Scope, Value, eval_nbe, nbe_eval};
-    use crate::cubical::syntax::Term;
+    use crate::cubical::syntax::{LevelExpr, Term};
     use std::sync::Arc;
     use std::sync::Mutex;
 
@@ -33,8 +33,8 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     false,
                 )),
             );
@@ -63,8 +63,8 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     false,
                 )),
             );
@@ -93,8 +93,8 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     false,
                 )),
             );
@@ -127,7 +127,7 @@ mod tests {
                     b(Term::TApp(b(Term::TVar(1)), b(Term::TVar(0)))),
                     b(Term::TPi(
                         "y".to_string(),
-                        b(Term::TUniv(0)),
+                        b(Term::TUniv(LevelExpr::LConst(0))),
                         b(Term::TVar(1)),
                         false,
                     )),
@@ -165,13 +165,13 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     b(Term::TPi(
                         "y".to_string(),
-                        b(Term::TUniv(0)),
+                        b(Term::TUniv(LevelExpr::LConst(0))),
                         b(Term::TPi(
                             "z".to_string(),
-                            b(Term::TUniv(0)),
+                            b(Term::TUniv(LevelExpr::LConst(0))),
                             b(Term::TVar(2)), // references x, two binders deep
                             false,
                         )),
@@ -214,11 +214,11 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     b(Term::TPi(
                         "y".to_string(),
-                        b(Term::TUniv(0)),
-                        b(Term::TUniv(0)),
+                        b(Term::TUniv(LevelExpr::LConst(0))),
+                        b(Term::TUniv(LevelExpr::LConst(0))),
                         false,
                     )),
                     false,
@@ -253,8 +253,8 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     false,
                 )),
             );
@@ -298,17 +298,32 @@ mod tests {
     #[test]
     fn uses_var_level_under_pi_domain() {
         // TPi("x", TVar(0), TUniv(0)) — domain references level 0
-        let pi = Term::TPi("x".to_string(), b(Term::TVar(0)), b(Term::TUniv(0)), false);
+        let pi = Term::TPi(
+            "x".to_string(),
+            b(Term::TVar(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
+            false,
+        );
         assert!(crate::cubical::nbe::uses_var_at_level(&pi, 0));
     }
 
     #[test]
     fn uses_var_level_under_pi_codomain() {
         // TPi("x", TUniv(0), TVar(0)) — TVar(0) is captured by the binder
-        let pi = Term::TPi("x".to_string(), b(Term::TUniv(0)), b(Term::TVar(0)), false);
+        let pi = Term::TPi(
+            "x".to_string(),
+            b(Term::TUniv(LevelExpr::LConst(0))),
+            b(Term::TVar(0)),
+            false,
+        );
         assert!(!crate::cubical::nbe::uses_var_at_level(&pi, 0));
         // TPi("x", TUniv(0), TVar(1)) — TVar(1) under one binder = outer level 0
-        let pi2 = Term::TPi("x".to_string(), b(Term::TUniv(0)), b(Term::TVar(1)), false);
+        let pi2 = Term::TPi(
+            "x".to_string(),
+            b(Term::TUniv(LevelExpr::LConst(0))),
+            b(Term::TVar(1)),
+            false,
+        );
         assert!(crate::cubical::nbe::uses_var_at_level(&pi2, 0));
     }
 
@@ -318,10 +333,10 @@ mod tests {
         // TVar(2) under two binders → checks level 0+2=2 → match!
         let pi = Term::TPi(
             "x".to_string(),
-            b(Term::TUniv(0)),
+            b(Term::TUniv(LevelExpr::LConst(0))),
             b(Term::TPi(
                 "y".to_string(),
-                b(Term::TUniv(0)),
+                b(Term::TUniv(LevelExpr::LConst(0))),
                 b(Term::TVar(2)),
                 false,
             )),
@@ -343,8 +358,14 @@ mod tests {
 
     #[test]
     fn uses_var_level_univ_always_false() {
-        assert!(!crate::cubical::nbe::uses_var_at_level(&Term::TUniv(0), 0));
-        assert!(!crate::cubical::nbe::uses_var_at_level(&Term::TUniv(5), 0));
+        assert!(!crate::cubical::nbe::uses_var_at_level(
+            &Term::TUniv(LevelExpr::LConst(0)),
+            0
+        ));
+        assert!(!crate::cubical::nbe::uses_var_at_level(
+            &Term::TUniv(LevelExpr::LConst(5)),
+            0
+        ));
     }
 
     // ---------------------------------------------------------------
@@ -358,14 +379,14 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     b(Term::TPi(
                         "y".to_string(),
-                        b(Term::TUniv(0)),
+                        b(Term::TUniv(LevelExpr::LConst(0))),
                         b(Term::TPi(
                             "z".to_string(),
-                            b(Term::TUniv(1)),
-                            b(Term::TUniv(0)),
+                            b(Term::TUniv(LevelExpr::LConst(1))),
+                            b(Term::TUniv(LevelExpr::LConst(0))),
                             false,
                         )),
                         false,
@@ -377,7 +398,10 @@ mod tests {
                 "x".to_string(),
                 b(Term::TAbs(
                     "y".to_string(),
-                    b(Term::TAbs("z".to_string(), b(Term::TUniv(0)))),
+                    b(Term::TAbs(
+                        "z".to_string(),
+                        b(Term::TUniv(LevelExpr::LConst(0))),
+                    )),
                 )),
             );
             let term = Term::TTransport(b(fam), b(input));
@@ -394,10 +418,10 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     b(Term::TSigma(
                         "y".to_string(),
-                        b(Term::TUniv(0)),
+                        b(Term::TUniv(LevelExpr::LConst(0))),
                         b(Term::TVar(1)),
                     )),
                     false,
@@ -425,7 +449,7 @@ mod tests {
                 "i".to_string(),
                 b(Term::TPi(
                     "x".to_string(),
-                    b(Term::TUniv(0)),
+                    b(Term::TUniv(LevelExpr::LConst(0))),
                     b(Term::TPath(
                         b(Term::TVar(1)),
                         b(Term::TVar(1)),

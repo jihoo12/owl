@@ -15,6 +15,128 @@ use std::sync::Arc;
 pub type Name = String;
 pub type Level = i32;
 
+// ---------------------------------------------------------------------------
+// Level Expressions — the sub-language of universe levels
+// ---------------------------------------------------------------------------
+
+/// A level expression in the universe polymorphism system.
+/// Levels form a small sub-language: variables, constants, successor, and max.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LevelExpr {
+    /// A de Bruijn level variable (bound by a `{l : Level}` binder).
+    LVar(i32),
+    /// A concrete level constant: `0`, `1`, `2`, ...
+    LConst(i32),
+    /// Successor: `lsuc l`.
+    LSuc(Box<LevelExpr>),
+    /// Maximum: `max l1 l2`.
+    LMax(Box<LevelExpr>, Box<LevelExpr>),
+}
+
+impl LevelExpr {
+    /// Evaluate a level expression to a concrete level, given a context of
+    /// bound level variables (outermost first). Returns `None` if the
+    /// expression contains unbound variables.
+    pub fn eval(&self, ctx: &[i32]) -> Option<i32> {
+        match self {
+            LevelExpr::LVar(i) => ctx.get(*i as usize).copied(),
+            LevelExpr::LConst(n) => Some(*n),
+            LevelExpr::LSuc(l) => l.eval(ctx).map(|n| n + 1),
+            LevelExpr::LMax(a, b) => {
+                let av = a.eval(ctx)?;
+                let b_ = b.eval(ctx)?;
+                Some(av.max(b_))
+            }
+        }
+    }
+
+    /// Evaluate to a concrete level, defaulting to 0 for unbound variables.
+    pub fn eval_or_default(&self, ctx: &[i32]) -> i32 {
+        self.eval(ctx).unwrap_or(0)
+    }
+
+    /// Compute the maximum of two level expressions.
+    pub fn max(l1: LevelExpr, l2: LevelExpr) -> LevelExpr {
+        match (&l1, &l2) {
+            (LevelExpr::LConst(a), LevelExpr::LConst(b)) => LevelExpr::LConst((*a).max(*b)),
+            _ => LevelExpr::LMax(Box::new(l1), Box::new(l2)),
+        }
+    }
+
+    /// Compute the successor of a level expression.
+    pub fn suc(l: LevelExpr) -> LevelExpr {
+        match l {
+            LevelExpr::LConst(n) => LevelExpr::LConst(n + 1),
+            _ => LevelExpr::LSuc(Box::new(l)),
+        }
+    }
+
+    /// Compare two level expressions for `≤` in a given context.
+    /// Returns `None` if the comparison is undecidable (contains unbound vars).
+    pub fn leq(&self, other: &Self, ctx: &[i32]) -> Option<bool> {
+        let a = self.eval(ctx)?;
+        let b = other.eval(ctx)?;
+        Some(a <= b)
+    }
+
+    /// Check if this level expression is a concrete constant.
+    pub fn is_concrete(&self) -> bool {
+        matches!(self, LevelExpr::LConst(_))
+    }
+
+    /// Return the concrete level if this is a constant, else `None`.
+    pub fn as_const(&self) -> Option<i32> {
+        match self {
+            LevelExpr::LConst(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Shift level variable de Bruijn indices >= `c` by `d`.
+    pub fn shift(d: i32, c: i32, l: &LevelExpr) -> LevelExpr {
+        match l {
+            LevelExpr::LVar(i) => LevelExpr::LVar(if *i >= c { i + d } else { *i }),
+            LevelExpr::LConst(_) => l.clone(),
+            LevelExpr::LSuc(inner) => LevelExpr::LSuc(Box::new(LevelExpr::shift(d, c, inner))),
+            LevelExpr::LMax(a, b) => LevelExpr::LMax(
+                Box::new(LevelExpr::shift(d, c, a)),
+                Box::new(LevelExpr::shift(d, c, b)),
+            ),
+        }
+    }
+
+    /// Substitute level variable `j` with `s` in a level expression.
+    pub fn subst(j: i32, s: &LevelExpr, l: &LevelExpr) -> LevelExpr {
+        match l {
+            LevelExpr::LVar(i) => {
+                if *i == j {
+                    s.clone()
+                } else if *i > j {
+                    LevelExpr::LVar(i - 1)
+                } else {
+                    l.clone()
+                }
+            }
+            LevelExpr::LConst(_) => l.clone(),
+            LevelExpr::LSuc(inner) => LevelExpr::LSuc(Box::new(LevelExpr::subst(j, s, inner))),
+            LevelExpr::LMax(a, b) => LevelExpr::LMax(
+                Box::new(LevelExpr::subst(j, s, a)),
+                Box::new(LevelExpr::subst(j, s, b)),
+            ),
+        }
+    }
+
+    /// Maximum level variable index used in a level expression (-1 if none).
+    pub fn max_var(l: &LevelExpr) -> i32 {
+        match l {
+            LevelExpr::LVar(i) => *i,
+            LevelExpr::LConst(_) => -1,
+            LevelExpr::LSuc(inner) => LevelExpr::max_var(inner),
+            LevelExpr::LMax(a, b) => LevelExpr::max_var(a).max(LevelExpr::max_var(b)),
+        }
+    }
+}
+
 /// A system of face-tube pairs: `[(phi₁, t₁), (phi₂, t₂), ...]`
 /// Used in hcomp/comp/fill/hfill to specify boundary conditions on multiple faces.
 pub type System = Vec<(Term, Term)>;
@@ -28,12 +150,13 @@ pub enum Term {
     TVar(i32),
     TApp(Arc<Term>, Arc<Term>),
     TAbs(Name, Arc<Term>),
-    TUniv(Level),
+    TUniv(LevelExpr),
     TProp,
     TSSet,
-    TLift(Arc<Term>, Level),
+    TLift(Arc<Term>, LevelExpr),
     TLower(Arc<Term>),
     TIntervalTy,
+    TLevelTy,
     TPi(Name, Arc<Term>, Arc<Term>, bool),
     TInterval(I),
     TCube(DNF),
@@ -381,7 +504,7 @@ pub struct Datatype {
     /// When `Some(n)`, the datatype lives in `U_n` regardless of its
     /// constructor arguments. When `None`, the level is inferred as
     /// `max` over constructor argument universe levels.
-    pub universe_level: Option<Level>,
+    pub universe_level: Option<LevelExpr>,
     /// Field names for record types. When `Some(names)`, this is a record type
     /// with a single constructor, and `names[i]` is the name of the i-th field
     /// (constructor argument). Used by projection (`r.field`) to find the
@@ -420,12 +543,13 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
             b(shift(d, c + 1, body)),
             *implicit,
         ),
-        Term::TUniv(n) => Term::TUniv(*n),
+        Term::TUniv(n) => Term::TUniv(LevelExpr::shift(d, c, &n)),
         Term::TProp => Term::TProp,
         Term::TSSet => Term::TSSet,
-        Term::TLift(a, lvl) => Term::TLift(b(shift(d, c, a)), *lvl),
+        Term::TLift(a, lvl) => Term::TLift(b(shift(d, c, a)), LevelExpr::shift(d, c, &lvl)),
         Term::TLower(a) => Term::TLower(b(shift(d, c, a))),
         Term::TIntervalTy => Term::TIntervalTy,
+        Term::TLevelTy => Term::TLevelTy,
         Term::TInterval(i) => Term::TInterval(i.clone()),
         Term::TCube(cu) => Term::TCube(cu.clone()),
         Term::TPath(a, u, v) => {
@@ -615,12 +739,13 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                 *implicit,
             )
         }
-        Term::TUniv(n) => Term::TUniv(*n),
+        Term::TUniv(n) => Term::TUniv(n.clone()),
         Term::TProp => Term::TProp,
         Term::TSSet => Term::TSSet,
-        Term::TLift(a, lvl) => Term::TLift(b(subst(j, s, a)), *lvl),
+        Term::TLift(a, lvl) => Term::TLift(b(subst(j, s, a)), lvl.clone()),
         Term::TLower(a) => Term::TLower(b(subst(j, s, a))),
         Term::TIntervalTy => Term::TIntervalTy,
+        Term::TLevelTy => Term::TLevelTy,
         Term::TInterval(i) => Term::TInterval(i.clone()),
         Term::TCube(cu) => Term::TCube(cu.clone()),
         Term::TPath(a, u, v) => {
@@ -809,9 +934,10 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TVar(i) => *i,
         Term::TApp(f, a) => max_var(f).max(max_var(a)),
         Term::TAbs(_, b) => (max_var(b) - 1).max(-1),
-        Term::TUniv(_) => -1,
+        Term::TUniv(n) => LevelExpr::max_var(n),
         Term::TProp => -1,
         Term::TSSet => -1,
+        Term::TLevelTy => -1,
         Term::TLift(a, _) => max_var(a),
         Term::TLower(a) => max_var(a),
         Term::TIntervalTy => -1,
@@ -992,9 +1118,9 @@ mod tests {
     #[test]
     fn beta_reduces() {
         let body = Term::TVar(0);
-        let arg = Term::TUniv(0);
+        let arg = Term::TUniv(LevelExpr::LConst(0));
         let r = beta(&body, &arg);
-        assert_eq!(r, Term::TUniv(0));
+        assert_eq!(r, Term::TUniv(LevelExpr::LConst(0)));
     }
 
     #[test]

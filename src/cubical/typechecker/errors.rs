@@ -184,6 +184,7 @@ fn head_var_idx(t: &Term) -> Option<i32> {
             Term::TUniv(_)
             | Term::TProp
             | Term::TSSet
+            | Term::TLevelTy
             | Term::TIntervalTy
             | Term::TInterval(_)
             | Term::TCube(_)

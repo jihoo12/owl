@@ -11,7 +11,7 @@ use super::value::{Closure, DNFSystem, Globals, IClosure, Neutral, Scope, Value,
 use crate::cubical::interval::{DNF, I, dnf_bot, dnf_top};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{
-    Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, subst,
+    LevelExpr, Term, beta, equiv_dom, is_bot_dnf, is_top_dnf, max_var, shift, subst,
 };
 use std::sync::Arc;
 
@@ -475,6 +475,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         | Term::TProp
         | Term::TSSet
         | Term::TIntervalTy
+        | Term::TLevelTy
         | Term::TInterval(_)
         | Term::TCube(_) => false,
         Term::TLift(a, _) => uses_var_at_level(a, level),
@@ -624,7 +625,7 @@ fn transport_sigma_pair(
         eval_body_at_formal_interval(env, globals, global_offset, clos, session);
     let a_val = match &sigma_at_var {
         Value::VSigma(_, a_val, _) => a_val.as_ref().clone(),
-        _ => Value::VUniv(0),
+        _ => Value::VUniv(LevelExpr::LConst(0)),
     };
     let a_body = shift(
         1,
@@ -646,7 +647,7 @@ fn transport_sigma_pair(
 
     let b_val = match &sigma_at_var {
         Value::VSigma(_, _, cod_clos) => apply_non_dep(cod_clos, session),
-        _ => Value::VUniv(0),
+        _ => Value::VUniv(LevelExpr::LConst(0)),
     };
     let b_body = shift(
         1,
@@ -1533,7 +1534,7 @@ pub fn transport_term_fallback(p_: Term, x_: Term, session: &mut Session) -> Ter
                     } else {
                         let b_non_dep = match &b0 {
                             Term::TPi(_, _, b0_body, _) => {
-                                subst(0, &Term::TUniv(0), b0_body) == **b0_body
+                                subst(0, &Term::TUniv(LevelExpr::LConst(0)), b0_body) == **b0_body
                             }
                             _ => false,
                         };

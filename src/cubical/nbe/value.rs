@@ -12,7 +12,7 @@ use super::quote::quote;
 use crate::cubical::debug;
 use crate::cubical::interval::{DNF, I};
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{ElimCase, Level, Name, Term, show_term};
+use crate::cubical::syntax::{ElimCase, LevelExpr, Name, Term, show_term};
 
 pub type Env = Vec<Value>;
 
@@ -125,12 +125,13 @@ pub enum Value {
     VId(Arc<Value>, Arc<Value>, Arc<Value>),
     VRefl(Arc<Value>),
     VJelim(Arc<Value>, Arc<Value>, Arc<Value>),
-    VUniv(Level),
+    VUniv(LevelExpr),
     VProp,
     VSSet,
-    VLift(Arc<Value>, Level),
+    VLift(Arc<Value>, LevelExpr),
     VLower(Arc<Value>),
     VIntervalTy,
+    VLevelTy,
     VInterval(I),
     VIntervalVar(usize),
     VCube(DNF),
@@ -656,7 +657,7 @@ mod tests {
     #[test]
     fn neutral_napp_inherits_frontier() {
         let n = Neutral::nvar(0);
-        let app = Neutral::napp(n, Value::VUniv(0));
+        let app = Neutral::napp(n, Value::VUniv(LevelExpr::LConst(0)));
         assert_eq!(app.frontier(), &Frontier::False);
     }
 
@@ -705,7 +706,13 @@ mod tests {
     #[test]
     fn neutral_nelim_inherits_frontier() {
         let scrut = Neutral::nvar(0);
-        let elim = Neutral::nelim(Value::VUniv(0), vec![], scrut, Scope::empty(), 0);
+        let elim = Neutral::nelim(
+            Value::VUniv(LevelExpr::LConst(0)),
+            vec![],
+            scrut,
+            Scope::empty(),
+            0,
+        );
         assert_eq!(elim.frontier(), &Frontier::False);
     }
 
@@ -716,7 +723,13 @@ mod tests {
         let r = Value::VIntervalVar(1);
         let r_frontier = Neutral::interval_frontier(&r);
         let scrut = Neutral::npapp(p, r, r_frontier);
-        let elim = Neutral::nelim(Value::VUniv(0), vec![], scrut, Scope::empty(), 0);
+        let elim = Neutral::nelim(
+            Value::VUniv(LevelExpr::LConst(0)),
+            vec![],
+            scrut,
+            Scope::empty(),
+            0,
+        );
         // Elim inherits scrutinee's frontier
         let expected = Frontier::Or(
             Arc::new(Frontier::IntervalEq(1, I::I0)),

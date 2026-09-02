@@ -301,7 +301,7 @@ fn check_body_guard(
         | Term::TData(_, _)
         | Term::Meta(_) => Ok(()),
 
-        Term::TBy(_) | Term::TLift(_, _) | Term::TLower(_) => Ok(()),
+        Term::TBy(_) | Term::TLift(_, _) | Term::TLower(_) | Term::TLevelTy => Ok(()),
 
         // Record projection — recurse into the record term.
         Term::TProj(_, r) => check_body_guard(d, r, binder_count, def_idx),

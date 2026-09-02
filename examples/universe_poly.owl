@@ -1,0 +1,22 @@
+-- Universe polymorphism demo (D1)
+-- Tests: Level type, lsuc, max, U (lsuc l), U (max l1 l2)
+
+-- Basic types at level 0
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Test concrete universe levels
+def id_nat : U 0 -> U 0 := fun x => x
+
+-- Universe-polymorphic function with explicit level parameter
+def id_poly : forall (l : Level), U l -> U l := fun l x => x
+
+-- Test with concrete level
+def test_id_nat : U 0 -> U 0 := fun x => id_poly 0 x
+
+-- Universe with max level
+def max_level_test : forall (l1 : Level), forall (l2 : Level), U (max l1 l2) -> U (max l1 l2) := fun l1 l2 x => x
+
+-- Lift: using level expressions
+def lift_id : U 0 -> U 1 := fun x => lift x 1
