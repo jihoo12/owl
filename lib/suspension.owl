@@ -1,0 +1,26 @@
+-- ────────────────────────────────────────────────────────────────────────
+-- lib/suspension.owl — Suspension HIT (G4)
+-- ────────────────────────────────────────────────────────────────────────
+--
+-- The suspension Susp A of a type A is the HIT with:
+--   north, south : Susp A
+--   merid : A -> Susp A [north, south]
+--
+-- Intuitively, Susp A is the "double cone" over A:
+-- for each a : A, there is a path from north to south.
+--
+-- Suspension is dual to the loop space: Ω(Susp A) ≃ A for well-behaved A,
+-- and Susp(S¹) ≃ S² (the 2-sphere).
+
+inductive Susp (A : Type) where
+  | north : Susp A
+  | south : Susp A
+  | merid : A -> Susp A [ north , south ]
+
+-- The suspension of the unit type is related to S¹.
+-- Susp(Bool) ≃ S¹ is a standard result in HoTT.
+
+-- Key property: for any type family P over Susp A, to define a section
+-- it suffices to give values at north and south, and for each a : A
+-- a path from the north-value to the south-value in the fiber over
+-- merid a.  This is just pattern matching on Susp A.

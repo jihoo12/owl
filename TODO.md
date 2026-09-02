@@ -8,6 +8,10 @@
 
 ## Completed
 
+- [x] **G4 — Topology / Homotopy (partial).** ✅ Added `lib/homotopy.owl` (path operations: refl, sym, trans, cong; homotopy between functions; IsEquiv record; loop spaces Omega/Omega2; isProp/isSet/isGroupoid; contractibility/connectiveness), `lib/suspension.owl` (Susp HIT), `lib/circle.owl` (S1 HIT with loop). File: `examples/homotopy_demo.owl`. 263/263 tests pass.
+
+- [x] **B2 — Absurd patterns (`()`).** ✅ Added `()` as syntactic sugar for zero-case match on empty types. `absurd: bool` field on `MatchArm` in `patterns.rs`, detected in `parse_match_arm`, desugared to empty cases in `parse_match_cases`. `lib/logic.owl` updated. File: `examples/absurd_pattern.owl`. 261/261 tests pass.
+
 - [x] **E2 — Postulates.** ✅ Added `postulate x : T` declarations. `Decl::Postulate` variant in parser/driver, `Env::postulate()` method, `process_postulate()` typechecks `T : U_n`, postulates stored as opaque `VNeutral(NVar(i))` neutrals. `build_definition_values` fixes NVar level after eval so quoting works correctly in any context. `examples/postulate.owl` exercises postulated types, constants, type formers, and use in definitions. 259/259 tests pass.
 
 - [x] **A5 — Higher-dimensional hcomp (Path type decomposition).** ✅ Added Path type decomposition to `hcomp`, `comp`, `fill`, and `hfill` in `nbe/hcomp.rs`. When the carrier type is `VPath(A, x, y)`, the operations decompose by composing at each point of the interval, reducing square composition (2D hcomp) to 1D composition in the carrier type. Example: `examples/higher_dim_hcomp.owl`. 258/258 tests pass.
@@ -149,11 +153,13 @@ f p with p i0 | p i1
 
 **Plan**: Add path-application as a pattern form in `match`. When the scrutinee is `p @ i0` or `p @ i1`, reduce at typechecking time.
 
-#### B2. Absurd patterns (`()`) 🟡
+#### B2. Absurd patterns (`()`) ✅
 
 Cubical Agda has `()` for empty pattern matching on types with no constructors. Owl handles `Empty` via `match e return A with` (zero cases) but lacks syntactic `()`.
 
 **Plan**: Add `()` as syntactic sugar for `match x return A with` (zero cases). Verify the kernel already handles this (it does).
+
+**Done** (2026-09-02): Added `absurd: bool` field to `MatchArm` in `patterns.rs`. Parser detects `()` in `parse_match_arm`, sets `absurd: true`; `parse_match_cases` returns empty cases when arm is absurd. `lib/logic.owl` updated to use new syntax. File: `examples/absurd_pattern.owl`. 261/261 tests pass.
 
 #### B3. With-patterns 🟡
 
@@ -304,8 +310,8 @@ Cubical Agda has `agda/cubical` with Nat, Int, List, Vector, algebra, topology, 
 
 - [ ] Topological spaces (as types + open predicates)
 - [ ] Continuous maps
-- [ ] Homotopy groups
-- [ ] Path spaces, loop spaces
+- [x] Homotopy groups — `lib/homotopy.owl` defines loop spaces, Omega, Omega2
+- [x] Path spaces, loop spaces — `lib/homotopy.owl` (refl, sym, trans, cong, Homotopy, IsEquiv), `lib/circle.owl` (S1 HIT), `lib/suspension.owl` (Susp HIT)
 
 #### G5. Category theory 🟢
 
@@ -346,7 +352,7 @@ Spectrum types for stable homotopy theory. Research-level.
 2. ~~**A3 (frontier Phase 4)**~~ — ✅ done.
 3. ~~**A4 (cubical identity types)**~~ — ✅ done.
 4. ~~**F2 (`forall` after `->`)**~~ — ✅ done.
-5. **B2 (absurd patterns)** — trivial parser sugar, immediate ergonomic win.
+5. ~~**B2 (absurd patterns)**~~ — ✅ done.
 6. **F1 (interactive REPL)** — biggest UX win once holes/tactics exist.
 7. ~~**E2 (postulates)**~~ — ✅ done.
 8. **E1 (reflection API)** — large but enables all subsequent automation.

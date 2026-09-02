@@ -5,6 +5,6 @@
 inductive Empty where
 
 def absurd : forall (A : Type), Empty -> A :=
-  fun A e => match e return A with
+  fun A e => match e return A with | ()
 
 def Not : forall (A : Type), Type := fun A => A -> Empty

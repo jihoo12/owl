@@ -1,0 +1,46 @@
+-- Homotopy type theory demo: exercises the lib/homotopy.owl library.
+--
+-- Shows path operations, loop spaces, equivalences, and the circle.
+
+-- Path operations on Nat
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def add : Nat -> Nat -> Nat := fun m n =>
+  match m return Nat with
+  | zero => n
+  | suc m' => suc (add m' n)
+
+-- Congruence: suc is a congruence of equality.
+def cong_suc : forall (a : Nat), forall (b : Nat),
+  Path Nat a b -> Path Nat (suc a) (suc b) :=
+  fun a b p => <i> suc (p @ i)
+
+-- Symmetry of paths.
+def sym_path : forall (a : Nat), forall (b : Nat),
+  Path Nat a b -> Path Nat b a :=
+  fun a b p => <i> p @ ~i
+
+-- Transitivity via hcomp.
+def trans_path : forall (a : Nat), forall (b : Nat), forall (c : Nat),
+  Path Nat a b -> Path Nat b c -> Path Nat a c :=
+  fun a b c p q => <i> hcomp Nat [~i => <j> a, i => q] (p @ i)
+
+-- Loop space: the type of loops at a point.
+def my_loop_space : Type := Path Nat zero zero
+def my_refl : my_loop_space := <i> zero
+
+-- Homotopy between two functions.
+def homotopy_example : forall (f : Nat -> Nat), forall (g : Nat -> Nat),
+  (forall (x : Nat), Path Nat (f x) (g x)) -> Type :=
+  fun f g h => forall (x : Nat), Path Nat (f x) (g x)
+
+-- The circle
+inductive S1 where
+  | base : S1
+  | loop : S1 [ base , base ]
+
+def S1_loop : Path S1 base base := loop
+
+def main : Nat := zero

@@ -1,0 +1,160 @@
+-- ────────────────────────────────────────────────────────────────────────
+-- lib/homotopy.owl — Homotopy type theory basics (G4)
+-- ────────────────────────────────────────────────────────────────────────
+--
+-- Core definitions from homotopy type theory, built on top of cubical
+-- path types.  All proofs are pure cubical terms (no tactics).
+--
+-- Contents:
+--   1. Path operations (generic, work at any type)
+--   2. Homotopy between functions
+--   3. Bi-invertible maps and equivalences
+--   4. Loop spaces
+--   5. Truncated types (isProp, isSet, isGroupoid)
+--   6. Contractibility and connectedness
+--
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 1. Path operations
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Reflexivity: every element is equal to itself.
+def refl : forall (A : Type), forall (x : A), Path A x x :=
+  fun A x => <i> x
+
+-- Symmetry: if a = b then b = a.
+def sym : forall (A : Type), forall (a : A), forall (b : A),
+  Path A a b -> Path A b a :=
+  fun A a b p => <i> p @ ~i
+
+-- Transitivity: if a = b and b = c then a = c.
+def trans : forall (A : Type), forall (a : A), forall (b : A), forall (c : A),
+  Path A a b -> Path A b c -> Path A a c :=
+  fun A a b c p q => <i> hcomp A [~i => <j> a, i => q] (p @ i)
+
+-- Congruence: if a = b then f a = f b.
+def cong : forall (A : Type), forall (B : Type), forall (f : A -> B),
+  forall (a : A), forall (b : A), Path A a b -> Path B (f a) (f b) :=
+  fun A B f a b p => <i> f (p @ i)
+
+-- Path applied at the left endpoint equals the left endpoint.
+def pabs_i0 : forall (A : Type), forall (a : A), forall (b : A),
+  forall (p : Path A a b), Path A (p @ i0) a :=
+  fun A a b p => <i> a
+
+-- Path applied at the right endpoint equals the right endpoint.
+def pabs_i1 : forall (A : Type), forall (a : A), forall (b : A),
+  forall (p : Path A a b), Path A (p @ i1) b :=
+  fun A a b p => <i> b
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 2. Homotopy between functions
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- A homotopy between f and g is a pointwise path.
+def Homotopy : forall (A : Type), forall (B : Type),
+  forall (f : A -> B), forall (g : A -> B), Type :=
+  fun A B f g => forall (x : A), Path B (f x) (g x)
+
+-- Reflexivity of homotopy: every function is homotopic to itself.
+def homotopy_refl : forall (A : Type), forall (B : Type),
+  forall (f : A -> B), Homotopy A B f f :=
+  fun A B f x => refl B (f x)
+
+-- Symmetry of homotopy.
+def homotopy_sym : forall (A : Type), forall (B : Type),
+  forall (f : A -> B), forall (g : A -> B),
+  Homotopy A B f g -> Homotopy A B g f :=
+  fun A B f g h x => sym B (f x) (g x) (h x)
+
+-- Transitivity of homotopy.
+def homotopy_trans : forall (A : Type), forall (B : Type),
+  forall (f : A -> B), forall (g : A -> B), forall (h : A -> B),
+  Homotopy A B f g -> Homotopy A B g h -> Homotopy A B f h :=
+  fun A B f g h fg gh x => trans B (f x) (g x) (h x) (fg x) (gh x)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. Bi-invertible maps and equivalences
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- A bi-invertible map has both a left and right inverse.
+-- Fields use inlined types because record fields can't reference prior defs.
+record BiInvertibleMap (A : Type) (B : Type) (f : A -> B) (g : B -> A) where
+  field gf : forall (x : A), Path A (g (f x)) x
+  field fg : forall (y : B), Path B (f (g y)) y
+
+-- An equivalence is a bi-invertible map.
+-- Fields use inlined types because record fields can't reference prior defs.
+record IsEquiv (A : Type) (B : Type) (f : A -> B) (g : B -> A) where
+  field gf : forall (x : A), Path A (g (f x)) x
+  field fg : forall (y : B), Path B (f (g y)) y
+
+-- Identity equivalence.
+def equiv_id : forall (A : Type), IsEquiv A A (fun x => x) (fun x => x) :=
+  fun A => mkIsEquiv (fun x => refl A x) (fun x => refl A x)
+
+-- Equivalence is symmetric: if A ≃ B then B ≃ A.
+def equiv_sym : forall (A : Type), forall (B : Type),
+  forall (f : A -> B), forall (g : B -> A),
+  IsEquiv A B f g -> IsEquiv B A g f :=
+  fun A B f g e => mkIsEquiv (e.fg) (e.gf)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 4. Loop spaces
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- The loop space Ω(A, a) is the type of loops at a.
+def Omega : forall (A : Type), A -> Type :=
+  fun A a => Path A a a
+
+-- Composition in the loop space.
+def loop_trans : forall (A : Type), forall (a : A),
+  Omega A a -> Omega A a -> Omega A a :=
+  fun A a p q => trans A a a a p q
+
+-- Identity loop.
+def loop_id : forall (A : Type), forall (a : A), Omega A a :=
+  fun A a => refl A a
+
+-- Inverse loop.
+def loop_inv : forall (A : Type), forall (a : A),
+  Omega A a -> Omega A a :=
+  fun A a p => sym A a a p
+
+-- The second loop space Ω²(A, a) = Ω(Ω(A, a), refl A a).
+def Omega2 : forall (A : Type), A -> Type :=
+  fun A a => Omega (Omega A a) (refl A a)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5. Truncated types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- A type is a proposition (isProp) if any two elements are equal.
+def isProp : forall (A : Type), Type :=
+  fun A => forall (x : A), forall (y : A), Path A x y
+
+-- A type is a set (isSet) if any two paths between the same points are equal.
+def isSet : forall (A : Type), Type :=
+  fun A => forall (x : A), forall (y : A),
+    forall (p : Path A x y), forall (q : Path A x y), Path (Path A x y) p q
+
+-- A type is a groupoid if paths between paths are equal.
+def isGroupoid : forall (A : Type), Type :=
+  fun A => forall (x : A), forall (y : A),
+    forall (p : Path A x y), forall (q : Path A x y),
+    forall (r : Path (Path A x y) p q), forall (s : Path (Path A x y) p q),
+    Path (Path (Path A x y) p q) r s
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6. Contractibility and connectedness
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- A type is contractible if it has a center of contraction: an element
+-- such that every other element is equal to it.
+def isContr : forall (A : Type), Type :=
+  fun A => Σ (center : A), forall (x : A), Path A center x
+
+-- A type is 0-connected if its propositional truncation is contractible.
+-- Equivalently: there exists a point such that all points are path-connected.
+def isConnected : forall (A : Type), Type :=
+  fun A => forall (x : A), forall (y : A), Path A x y

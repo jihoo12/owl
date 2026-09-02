@@ -2552,6 +2552,52 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn absurd_pattern_example_checks() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("absurd_pattern.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("absurd_pattern thread spawn");
+        handle
+            .join()
+            .expect("absurd_pattern check thread panicked")
+            .expect("examples/absurd_pattern.owl should typecheck");
+    }
+
+    #[test]
+    fn homotopy_demo_example_checks() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("homotopy_demo.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("homotopy_demo thread spawn");
+        handle
+            .join()
+            .expect("homotopy_demo check thread panicked")
+            .expect("examples/homotopy_demo.owl should typecheck");
+    }
+
+    #[test]
+    fn homotopy_lib_checks() {
+        for name in &["homotopy.owl", "suspension.owl", "circle.owl"] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib").join(name);
+            let n = name.to_string();
+            let handle = std::thread::Builder::new()
+                .stack_size(64 * 1024 * 1024)
+                .spawn(move || check(&path))
+                .expect("homotopy lib thread spawn");
+            handle
+                .join()
+                .unwrap()
+                .unwrap_or_else(|e| panic!("lib/{} should typecheck: {:?}", n, e));
+        }
+    }
+
+    #[test]
     fn all_example_files_check() {
         // Sweep every examples/*.owl file not already covered by a dedicated
         // test above (cubical/HIT/path/param/quotient/tactics/record demos and
@@ -2570,6 +2616,9 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
             "stress_mul_algebra.owl",
             "field_demo.owl",
             "indexed_transp_test.owl",
+            "absurd_pattern.owl",
+            "postulate.owl",
+            "homotopy_demo.owl",
             // Skipped: isNType 1/2 generate deeply nested terms that overflow
             // even 64 MiB stacks. See TODO.md §I3. Fix the parser sugar, not
             // the stack size.

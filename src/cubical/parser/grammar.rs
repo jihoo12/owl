@@ -1569,6 +1569,10 @@ impl Parser {
         loop {
             // Pass A: leading column -> pattern tree(s), as/record handling.
             let arm = self.parse_match_arm(my_col)?;
+            // Absurd pattern `()` desugars to a zero-case match.
+            if arm.absurd {
+                return Ok(Vec::new());
+            }
             // Pass B: body + ElimCase assembly.
             if arm.record_bindings.is_some() {
                 let elim = self.parse_record_case_body(arm)?;
@@ -1616,6 +1620,20 @@ impl Parser {
     /// of [`Pat`]s (one per or-alternative), handle `as`-patterns and record
     /// patterns `{ field = binder }`, and consume the `=>`.
     fn parse_match_arm(&mut self, my_col: usize) -> Result<MatchArm, ParseError> {
+        // Absurd pattern: `()` — no body, desugars to zero-case match.
+        if self.at(&TokenKind::LParen)
+            && self.pos + 1 < self.tokens.len()
+            && self.tokens[self.pos + 1].kind == TokenKind::RParen
+        {
+            self.consume(&TokenKind::LParen);
+            self.consume(&TokenKind::RParen);
+            return Ok(MatchArm {
+                pats: vec![],
+                as_name: None,
+                record_bindings: None,
+                absurd: true,
+            });
+        }
         let mut pats: Vec<Pat> = Vec::new();
         let mut as_name: Option<Name> = None;
         let mut record_bindings: Option<Vec<(Name, Name)>> = None;
@@ -1676,6 +1694,7 @@ impl Parser {
             pats,
             as_name,
             record_bindings,
+            absurd: false,
         })
     }
 
@@ -1771,6 +1790,7 @@ impl Parser {
             pats,
             as_name,
             record_bindings: _,
+            absurd: _,
         } = arm;
         let last_pat = pats.last().unwrap();
         // Determine the type of constructor:

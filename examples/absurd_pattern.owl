@@ -1,0 +1,27 @@
+-- Absurd patterns: `()` for empty-type elimination.
+--
+-- `()` in match arm position desugars to a zero-case match,
+-- which is the canonical way to eliminate an empty type.
+
+inductive Empty where
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Classic ex falso quodlibet using the absurd pattern.
+def absurd : forall (A : Type), Empty -> A :=
+  fun A e => match e return A with | ()
+
+-- Negation via Empty.
+def Not : forall (A : Type), Type := fun A => A -> Empty
+
+-- Double negation introduction: A -> Not (Not A)
+def dn_intro : forall (A : Type), A -> Not (Not A) :=
+  fun A a f => match (f a) return Empty with | ()
+
+-- Using absurd to define a partial function from Empty.
+def ex_falso : Empty -> Nat :=
+  fun e => match e return Nat with | ()
+
+def main : Nat := zero

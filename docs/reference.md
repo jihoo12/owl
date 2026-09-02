@@ -1233,6 +1233,33 @@ match n return Nat with
   | suc _ => zero
 ```
 
+#### Absurd Pattern
+
+The absurd pattern `()` matches a type with no constructors (an empty type).
+It desugars to a zero-case match — the canonical way to eliminate an empty type:
+
+```
+match e return A with | ()
+```
+
+The absurd pattern has no body and no binders. It is used when the scrutinee's
+type is known to be empty (e.g. `Empty`, `Bot`, or any unpopulated inductive):
+
+```
+inductive Empty where
+
+def absurd : forall (A : Type), Empty -> A :=
+  fun A e => match e return A with | ()
+
+def Not : forall (A : Type), Type := fun A => A -> Empty
+
+def dn_intro : forall (A : Type), A -> Not (Not A) :=
+  fun A a f => match (f a) return Empty with | ()
+```
+
+The typechecker verifies that the scrutinee's type has no constructors, so
+the absurd pattern is always safe. See `examples/absurd_pattern.owl`.
+
 #### As-Patterns
 
 An as-pattern binds the full constructor value to a name using `as`:

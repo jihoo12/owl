@@ -121,4 +121,6 @@ pub struct MatchArm {
     pub pats: Vec<Pat>,
     pub as_name: Option<Name>,
     pub record_bindings: Option<Vec<(Name, Name)>>,
+    /// Absurd pattern `()` — no body, desugars to zero-case match.
+    pub absurd: bool,
 }

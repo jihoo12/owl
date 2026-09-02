@@ -1186,6 +1186,39 @@ fn parses_empty_match_elimination() {
     });
 }
 
+#[test]
+fn parses_absurd_pattern() {
+    with_session(|session| {
+        let src = "inductive Empty where\ndef absurd : forall (A : U0), Empty -> A := fun A e => match e return A with | ()";
+        let decls = parse_program(src, session).unwrap();
+        assert_eq!(decls.len(), 2);
+        match &decls[1] {
+            Decl::Def { name, val, .. } => {
+                assert_eq!(name, "absurd");
+                match val {
+                    Term::TAbs(_, inner) => match inner.as_ref() {
+                        Term::TAbs(_, body) => {
+                            if let Term::TElim(motive, cases, scrut) = body.as_ref() {
+                                assert!(
+                                    cases.is_empty(),
+                                    "absurd pattern should produce zero cases"
+                                );
+                                assert!(matches!(motive.as_ref(), Term::TAbs(_, _)));
+                                assert!(matches!(scrut.as_ref(), Term::TVar(0)));
+                            } else {
+                                panic!("expected TElim, got: {:?}", body);
+                            }
+                        }
+                        _ => panic!("expected inner TAbs"),
+                    },
+                    _ => panic!("expected outer TAbs"),
+                }
+            }
+            _ => panic!("expected def declaration"),
+        }
+    });
+}
+
 /// Parse a `def` with a single `fun`-lambda and return its body.
 fn parse_nested_match(def: &str, session: &mut Session) -> Term {
     let src = format!(
