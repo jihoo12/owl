@@ -916,6 +916,703 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
 }
 
 // ---------------------------------------------------------------------------
+// Parallel substitution for record parameters
+// ---------------------------------------------------------------------------
+
+/// Parallel substitution for record constructor parameters.
+///
+/// `param_values[i]` is the replacement for the parameter at de Bruijn index
+/// `(num_params - 1 - i)`. When inside `k` binders, the parameter's de Bruijn
+/// index is `k + (num_params - 1 - i)`, and the replacement term is shifted
+/// up by `k` to stay well-scoped.
+///
+/// This avoids the sequential-substitution interference bug where composing
+/// individual `subst` calls corrupts de Bruijn indices when parameter values
+/// contain variables that happen to coincide with other substitution targets.
+pub fn subst_params(num_params: usize, param_values: &[Option<Term>], term: &Term) -> Term {
+    subst_params_inner(num_params, param_values, 0, term)
+}
+
+fn subst_params_inner(
+    num_params: usize,
+    param_values: &[Option<Term>],
+    binder_depth: i32,
+    term: &Term,
+) -> Term {
+    match term {
+        Term::TVar(i) => {
+            let shifted_i = *i - binder_depth;
+            if shifted_i >= 0 && (shifted_i as usize) < num_params {
+                let param_idx = num_params - 1 - shifted_i as usize;
+                if let Some(ref pv) = param_values[param_idx] {
+                    shift(binder_depth, 0, pv)
+                } else {
+                    term.clone()
+                }
+            } else {
+                term.clone()
+            }
+        }
+        Term::TApp(f, a) => Term::TApp(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                f,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+        ),
+        Term::TAbs(x, body) => Term::TAbs(
+            x.clone(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth + 1,
+                body,
+            )),
+        ),
+        Term::TPi(x, a, body, implicit) => Term::TPi(
+            x.clone(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth + 1,
+                body,
+            )),
+            *implicit,
+        ),
+        Term::TUniv(n) => Term::TUniv(n.clone()),
+        Term::TProp => Term::TProp,
+        Term::TSSet => Term::TSSet,
+        Term::TLift(a, lvl) => Term::TLift(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            lvl.clone(),
+        ),
+        Term::TLower(a) => Term::TLower(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            a,
+        ))),
+        Term::TIntervalTy => Term::TIntervalTy,
+        Term::TLevelTy => Term::TLevelTy,
+        Term::TInterval(i) => Term::TInterval(i.clone()),
+        Term::TCube(cu) => Term::TCube(cu.clone()),
+        Term::TPath(a, u, v) => Term::TPath(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                u,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                v,
+            )),
+        ),
+        Term::TId(a, u, v) => Term::TId(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                u,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                v,
+            )),
+        ),
+        Term::TRefl(a) => Term::TRefl(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            a,
+        ))),
+        Term::TJ(motive, base, p) => Term::TJ(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                motive,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                base,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                p,
+            )),
+        ),
+        Term::PLam(x, body) => Term::PLam(
+            x.clone(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth + 1,
+                body,
+            )),
+        ),
+        Term::PApp(p, r) => Term::PApp(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                p,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                r,
+            )),
+        ),
+        Term::THComp(a, sys, u0) => Term::THComp(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            sys.iter()
+                .map(|(phi, t)| {
+                    (
+                        subst_params_inner(num_params, param_values, binder_depth, phi),
+                        subst_params_inner(num_params, param_values, binder_depth, t),
+                    )
+                })
+                .collect(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                u0,
+            )),
+        ),
+        Term::TComp(a, sys, u0) => Term::TComp(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            sys.iter()
+                .map(|(phi, t)| {
+                    (
+                        subst_params_inner(num_params, param_values, binder_depth, phi),
+                        subst_params_inner(num_params, param_values, binder_depth, t),
+                    )
+                })
+                .collect(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                u0,
+            )),
+        ),
+        Term::TFill(a, sys, u0) => Term::TFill(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            sys.iter()
+                .map(|(phi, t)| {
+                    (
+                        subst_params_inner(num_params, param_values, binder_depth, phi),
+                        subst_params_inner(num_params, param_values, binder_depth, t),
+                    )
+                })
+                .collect(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                u0,
+            )),
+        ),
+        Term::THFill(a, sys, u0) => Term::THFill(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            sys.iter()
+                .map(|(phi, t)| {
+                    (
+                        subst_params_inner(num_params, param_values, binder_depth, phi),
+                        subst_params_inner(num_params, param_values, binder_depth, t),
+                    )
+                })
+                .collect(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                u0,
+            )),
+        ),
+        Term::TEquiv(a, bx) => Term::TEquiv(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                bx,
+            )),
+        ),
+        Term::TMkEquiv(a, bx, f, g, eta, eps) => Term::TMkEquiv(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                bx,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                f,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                g,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                eta,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                eps,
+            )),
+        ),
+        Term::TEquivFwd(e, x) => Term::TEquivFwd(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                e,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                x,
+            )),
+        ),
+        Term::TUa(e) => Term::TUa(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            e,
+        ))),
+        Term::TTransport(p, x) => Term::TTransport(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                p,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                x,
+            )),
+        ),
+        Term::TTransp(a, r, x) => Term::TTransp(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                r,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                x,
+            )),
+        ),
+        Term::TGlue(a, phi, te) => Term::TGlue(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                phi,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                te,
+            )),
+        ),
+        Term::TGlueElem(phi, t, a) => Term::TGlueElem(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                phi,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                t,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+        ),
+        Term::TUnglue(phi, te, g) => Term::TUnglue(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                phi,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                te,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                g,
+            )),
+        ),
+        Term::TPartial(phi, a) => Term::TPartial(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                phi,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+        ),
+        Term::TSystemType(sys) => Term::TSystemType(
+            sys.iter()
+                .map(|(phi, a)| {
+                    (
+                        subst_params_inner(num_params, param_values, binder_depth, phi),
+                        subst_params_inner(num_params, param_values, binder_depth, a),
+                    )
+                })
+                .collect(),
+        ),
+        Term::TSigma(x, a, body) => Term::TSigma(
+            x.clone(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth + 1,
+                body,
+            )),
+        ),
+        Term::TPair(a, bx) => Term::TPair(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                bx,
+            )),
+        ),
+        Term::TFst(p) => Term::TFst(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            p,
+        ))),
+        Term::TSnd(p) => Term::TSnd(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            p,
+        ))),
+        Term::TData(name, params) => Term::TData(
+            name.clone(),
+            params
+                .iter()
+                .map(|p| subst_params_inner(num_params, param_values, binder_depth, p))
+                .collect(),
+        ),
+        Term::TCon(data, con, args) => Term::TCon(
+            data.clone(),
+            con.clone(),
+            args.iter()
+                .map(|a| subst_params_inner(num_params, param_values, binder_depth, a))
+                .collect(),
+        ),
+        Term::TPCon(data, con, args, r) => Term::TPCon(
+            data.clone(),
+            con.clone(),
+            args.iter()
+                .map(|a| subst_params_inner(num_params, param_values, binder_depth, a))
+                .collect(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                r,
+            )),
+        ),
+        Term::TSqCon(data, con, args, r, s) => Term::TSqCon(
+            data.clone(),
+            con.clone(),
+            args.iter()
+                .map(|a| subst_params_inner(num_params, param_values, binder_depth, a))
+                .collect(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                r,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                s,
+            )),
+        ),
+        Term::TCellCon(data, con, args, ivars) => Term::TCellCon(
+            data.clone(),
+            con.clone(),
+            args.iter()
+                .map(|a| subst_params_inner(num_params, param_values, binder_depth, a))
+                .collect(),
+            ivars
+                .iter()
+                .map(|v| subst_params_inner(num_params, param_values, binder_depth, v))
+                .collect(),
+        ),
+        Term::TElim(motive, cases, scrut) => Term::TElim(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                motive,
+            )),
+            cases
+                .iter()
+                .map(|case| {
+                    let n = case.binders.len() as i32;
+                    ElimCase {
+                        con: case.con.clone(),
+                        binders: case.binders.clone(),
+                        body: Box::new(subst_params_inner(
+                            num_params,
+                            param_values,
+                            binder_depth + n,
+                            &case.body,
+                        )),
+                        as_name: case.as_name.clone(),
+                        record_bindings: case.record_bindings.clone(),
+                        refinements: case.refinements.clone(),
+                    }
+                })
+                .collect(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                scrut,
+            )),
+        ),
+        Term::Meta(_) => term.clone(),
+        Term::TBy(tactics) => Term::TBy(
+            tactics
+                .iter()
+                .map(|tac| subst_params_tactic(num_params, param_values, binder_depth, tac))
+                .collect(),
+        ),
+        Term::TProj(field, r) => Term::TProj(
+            field.clone(),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                r,
+            )),
+        ),
+        Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                r,
+            )),
+            updates
+                .iter()
+                .map(|(f, e)| {
+                    (
+                        f.clone(),
+                        subst_params_inner(num_params, param_values, binder_depth, e),
+                    )
+                })
+                .collect(),
+        ),
+        Term::TDelay(a) => Term::TDelay(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            a,
+        ))),
+        Term::TNext(a) => Term::TNext(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            a,
+        ))),
+        Term::TForce(a) => Term::TForce(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            a,
+        ))),
+    }
+}
+
+fn subst_params_tactic(
+    num_params: usize,
+    param_values: &[Option<Term>],
+    binder_depth: i32,
+    tac: &Tactic,
+) -> Tactic {
+    match tac {
+        Tactic::Exact(t) => Tactic::Exact(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            t,
+        )),
+        Tactic::Apply(t) => Tactic::Apply(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            t,
+        )),
+        Tactic::Ring(t) => Tactic::Ring(
+            t.as_ref()
+                .map(|t| subst_params_inner(num_params, param_values, binder_depth, t)),
+        ),
+        Tactic::Field(t) => Tactic::Field(
+            t.as_ref()
+                .map(|t| subst_params_inner(num_params, param_values, binder_depth, t)),
+        ),
+        Tactic::Group(t) => Tactic::Group(
+            t.as_ref()
+                .map(|t| subst_params_inner(num_params, param_values, binder_depth, t)),
+        ),
+        Tactic::Eq => Tactic::Eq,
+        Tactic::Reflexivity
+        | Tactic::Symmetry
+        | Tactic::Split
+        | Tactic::Assumption
+        | Tactic::Transitivity
+        | Tactic::Compute
+        | Tactic::Trivial
+        | Tactic::Omega => tac.clone(),
+        Tactic::Intro(_) => tac.clone(),
+        Tactic::Constructor(_) => tac.clone(),
+        Tactic::Destruct(_) => tac.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Beta reduction
 // ---------------------------------------------------------------------------
 

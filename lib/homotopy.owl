@@ -73,6 +73,13 @@ def homotopy_trans : forall (A : Type), forall (B : Type),
   Homotopy A B f g -> Homotopy A B g h -> Homotopy A B f h :=
   fun A B f g h fg gh x => trans B (f x) (g x) (h x) (fg x) (gh x)
 
+-- Function extensionality: a pointwise path gives a path between functions.
+-- This is a theorem in cubical type theory, not an axiom.
+def funext : forall (A : Type), forall (B : Type),
+  forall (f : A -> B), forall (g : A -> B),
+  Homotopy A B f g -> Path (A -> B) f g :=
+  fun A B f g h => <i> fun (x : A) => h x @ i
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 3. Bi-invertible maps and equivalences
 -- ═══════════════════════════════════════════════════════════════════════════

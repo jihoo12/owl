@@ -8,7 +8,7 @@
 
 ## Completed
 
-- [x] **G4 — Topology / Homotopy (partial).** ✅ Added `lib/homotopy.owl` (path operations: refl, sym, trans, cong; homotopy between functions; IsEquiv record; loop spaces Omega/Omega2; isProp/isSet/isGroupoid; contractibility/connectiveness), `lib/suspension.owl` (Susp HIT), `lib/circle.owl` (S1 HIT with loop). File: `examples/homotopy_demo.owl`. 263/263 tests pass.
+- [x] **G4 — Topology / Homotopy (partial).** ✅ Added `lib/homotopy.owl` (path operations: refl, sym, trans, cong; homotopy between functions; IsEquiv record; loop spaces Omega/Omega2; isProp/isSet/isGroupoid; contractibility/connectiveness), `lib/suspension.owl` (Susp HIT), `lib/circle.owl` (S1 HIT with loop), `lib/topology.owl` (Topology/ContinuousMap records, discrete/indiscrete topologies, `discrete_topology` proof), `lib/logic.owl` (Empty, Unit, True, False, And, Or, Not, Iff, Implies). Fixed parallel substitution bug in `infer_and_check_params_seeded` — sequential `subst` calls corrupted de Bruijn indices when parameter values contained variables coinciding with other substitution targets (e.g. `fun X => mkR ...`). Added `subst_params` (parallel substitution) in `syntax/mod.rs`. File: `examples/homotopy_demo.owl`. 263/263 tests pass.
 
 - [x] **B2 — Absurd patterns (`()`).** ✅ Added `()` as syntactic sugar for zero-case match on empty types. `absurd: bool` field on `MatchArm` in `patterns.rs`, detected in `parse_match_arm`, desugared to empty cases in `parse_match_cases`. `lib/logic.owl` updated. File: `examples/absurd_pattern.owl`. 261/261 tests pass.
 

@@ -1,0 +1,29 @@
+import "logic.owl"
+
+record Topology (X : Type) (opens : (X -> Type) -> Type) where
+  field whole_open : opens (fun (_ : X) => Unit)
+  field empty_open : opens (fun (_ : X) => Empty)
+  field union_open : forall (I : Type),
+    forall (P : I -> (X -> Type)),
+    (forall (i : I), opens (P i)) ->
+    opens (fun (x : X) => Σ (i : I), P i x)
+  field inter_open : forall (P : (X -> Type)),
+    forall (Q : (X -> Type)),
+    opens P -> opens Q ->
+    opens (fun (x : X) => Σ (_ : P x), Q x)
+
+record ContinuousMap
+  (X : Type) (OX : (X -> Type) -> Type)
+  (Y : Type) (OY : (Y -> Type) -> Type)
+  (f : X -> Y) where
+  field continuous : forall (V : (Y -> Type)),
+    OY V -> OX (fun (x : X) => V (f x))
+
+def discrete_opens : forall (X : Type), (X -> Type) -> Type :=
+  fun X P => Unit
+
+def indiscrete_opens : forall (X : Type), (X -> Type) -> Type :=
+  fun X P => Or (forall (x : X), Empty) (forall (x : X), Unit)
+
+def discrete_topology : forall (X : Type), Topology X (discrete_opens X) :=
+  fun X => mkTopology tt tt (fun I P h => tt) (fun P Q h1 h2 => tt)

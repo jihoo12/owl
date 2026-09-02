@@ -1,10 +1,66 @@
 -- Core logic types for Owl.
 --
--- Provides the empty type (ex falso quodlibet) and basic logical connectives.
+-- Provides the empty type, truth, negation, and basic logical connectives.
+-- All propositions live in U0 (not Prop, since impredicativity is not
+-- fully implemented in the kernel's Pi formation rule).
 
+-- The empty type (ex falso quodlibet).
 inductive Empty where
 
 def absurd : forall (A : Type), Empty -> A :=
   fun A e => match e return A with | ()
 
+-- Negation: Not A = A -> Empty.
 def Not : forall (A : Type), Type := fun A => A -> Empty
+
+-- The unit type (truth).
+inductive Unit where
+  | tt : Unit
+
+-- True is the trivially inhabited type.
+def True : Type := Unit
+
+-- False is the empty type.
+def False : Type := Empty
+
+-- Conjunction as a record (fst/snd builtins don't reduce through aliases).
+record And (A : Type) (B : Type) where
+  field fst : A
+  field snd : B
+
+-- Introduction: pair two proofs.
+def and_intro : forall (A : Type), forall (B : Type),
+  A -> B -> And A B :=
+  fun A B a b => mkAnd a b
+
+-- Disjunction: Or A B is a sum type.
+inductive Or (A : Type) (B : Type) where
+  | inl : A -> Or A B
+  | inr : B -> Or A B
+
+-- Introduction: left injection.
+def or_inl : forall (A : Type), forall (B : Type),
+  A -> Or A B :=
+  fun A B a => inl a
+
+-- Introduction: right injection.
+def or_inr : forall (A : Type), forall (B : Type),
+  B -> Or A B :=
+  fun A B b => inr b
+
+-- Elimination (case analysis).
+def or_elim : forall (A : Type), forall (B : Type), forall (C : Type),
+  (A -> C) -> (B -> C) -> Or A B -> C :=
+  fun A B C f g o => match o return C with
+  | inl a => f a
+  | inr b => g b
+
+-- Biconditional: Iff A B = (A -> B) * (B -> A) as a record.
+record Iff (A : Type) (B : Type) where
+  field fwd : A -> B
+  field bwd : B -> A
+
+-- Introduction: prove both directions.
+def iff_intro : forall (A : Type), forall (B : Type),
+  (A -> B) -> (B -> A) -> Iff A B :=
+  fun A B f g => mkIff f g
