@@ -2480,6 +2480,24 @@ def main : forall (A : U0), forall (B : U0), Equiv A B -> A -> B := transportExa
     }
 
     #[test]
+    fn higher_dim_hcomp_example_checks() {
+        // Guard: A5 higher-dimensional hcomp through Path types (square
+        // composition). Verifies hcomp/comp/fill/hfill decompose correctly
+        // when the carrier type is a Path type.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("higher_dim_hcomp.owl");
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("higher_dim_hcomp thread spawn");
+        handle
+            .join()
+            .expect("higher_dim_hcomp check thread panicked")
+            .expect("examples/higher_dim_hcomp.owl should typecheck");
+    }
+
+    #[test]
     fn all_example_files_check() {
         // Sweep every examples/*.owl file not already covered by a dedicated
         // test above (cubical/HIT/path/param/quotient/tactics/record demos and

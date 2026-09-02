@@ -2664,6 +2664,10 @@ the constructor's arguments are substituted for the binders.
 | `hfill A [phi => tube, ...] base` | empty system | `fun j -> base` |
 | `hfill A [phi => tube, ...] base` | top face (phi=1) in system | `tube` |
 | `hfill A [phi => tube, ...] base` | all tubes constant & coherent with base | `fun j -> base` |
+| `hcomp (Path A x y) [phi => tube, ...] base` | A is Path type | `<i> hcomp A [phi => tube @ i] (base @ i)` |
+| `comp (Path A x y) [phi => tube, ...] base` | A is Path type | `<i> hcomp A [phi => tube @ i] (base @ i)` |
+| `fill (Path A x y) [phi => tube, ...] base` | A is Path type | `<j> hfill A [phi => tube @ j] (base @ j)` |
+| `hfill (Path A x y) [phi => tube, ...] base` | A is Path type | `<i> hcomp A [phi => tube @ i] (base @ i)` |
 
 **Constant-tube shortcut**: A system is *constant and coherent* when every
 tube satisfies `tube @ i0 ≡ tube @ i1` and `tube @ i0 ≡ base` (i.e., the
@@ -2719,6 +2723,39 @@ Each component is filled independently and the results are paired.
 
 This decomposes the Kan operation through each constructor argument
 independently, transporting each argument through its type.
+
+#### Path Type Decomposition (hcomp/comp/fill/hfill)
+
+When the carrier type is a **Path type**, the Kan operations decompose by
+composing at each point of the interval. This enables **square composition**
+(2D hcomp): composing paths whose type is itself a Path type.
+
+| Form | Reduction |
+| ----- | --------- |
+| `hcomp (Path A x y) [phi => tube, ...] base` | `<i> hcomp A [phi => tube @ i] (base @ i)` |
+| `comp (Path A x y) [phi => tube, ...] base` | `<i> hcomp A [phi => tube @ i] (base @ i)` |
+| `fill (Path A x y) [phi => tube, ...] base` | `<j> hfill A [phi => tube @ j] (base @ j)` |
+| `hfill (Path A x y) [phi => tube, ...] base` | `<i> hcomp A [phi => tube @ i] (base @ i)` |
+
+Each system tube is a **square** (a path over a path). Applying the tube at
+interval point `i` yields a path in `A`, and the base applied at `i` yields a
+value in `A`. The inner `hcomp`/`hfill` then composes these paths pointwise,
+producing a path in `A` at each `i`.
+
+**Example**:
+
+```
+def id_path : Path Nat zero zero := <i> zero
+
+-- Composing squares: the system tubes are squares, the base is a path.
+-- hcomp decomposes: <i> hcomp Nat [i1 => <j> zero] (id_path @ i)
+def square_hcomp : Path Nat zero zero :=
+  <i> hcomp Nat [i1 => <j> zero] (id_path @ i)
+```
+
+The decomposition recurses: if the carrier type `A` is itself a Path type,
+the inner hcomp decomposes again, pushing composition to deeper dimensions
+until a non-Path type is reached.
 
 ### Nat Display
 
@@ -3250,6 +3287,29 @@ Evaluating the composed path at an endpoint reduces the hcomp:
 `trans a b c p q @ i1` reduces to `q`. The full verified Nat suite
 (cong-suc, add-suc-r, cong-add-r, add-comm, cong-add-l, add-assoc) builds on
 these three lemmas.
+
+### Example 20: Higher-Dimensional hcomp (Square Composition)
+
+When the carrier type is a Path type, `hcomp` decomposes by composing at each
+point of the interval. This enables composing squares (paths over paths).
+
+```
+def id_path : Path Nat zero zero := <i> zero
+
+-- hcomp through Path type: the system tubes are squares,
+-- the base is a path. Decomposes to <i> hcomp Nat [tube @ i] (id_path @ i).
+def square_hcomp : Path Nat zero zero :=
+  <i> hcomp Nat [i1 => <j> zero] (id_path @ i)
+
+-- fill through Path type: produces a path of paths (a square)
+def square_fill : Path (Path Nat zero zero) id_path id_path :=
+  fill (Path Nat zero zero) [] id_path
+
+-- Nested: composing squares of squares
+def nested_square : Path Nat zero zero :=
+  <i> hcomp Nat [i1 => <j> zero]
+    (hcomp Nat [i1 => <j> zero] (id_path @ i))
+```
 
 ### Example 20: Multiplicative Algebra on Nat
 

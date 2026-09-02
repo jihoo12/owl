@@ -1,0 +1,33 @@
+-- higher_dim_hcomp.owl — Higher-dimensional hcomp (A5)
+-- Exercises: hcomp/comp/fill/hfill through Path types (square composition)
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def id_path : Path Nat zero zero := <i> zero
+
+-- hcomp through Path type: compose squares pointwise
+-- hcomp (Path Nat zero zero) [phi => t, ...] p
+--   = <i> hcomp Nat [phi => t @ i] (p @ i)
+def hcomp_path_empty : Path Nat zero zero :=
+  <i> hcomp Nat [] (id_path @ i)
+
+def hcomp_path_const : Path Nat zero zero :=
+  <i> hcomp Nat [i1 => <j> zero] (id_path @ i)
+
+def hcomp_path_two_tubes : Path Nat zero zero :=
+  <i> hcomp Nat [i0 => <j> zero, i1 => <j> zero] (id_path @ i)
+
+-- fill through Path type
+def fill_path_empty : Path (Path Nat zero zero) id_path id_path :=
+  fill (Path Nat zero zero) [] id_path
+
+-- hfill through Path type
+def hfill_path_empty : Path (Path Nat zero zero) id_path id_path :=
+  hfill (Path Nat zero zero) [] id_path
+
+-- Nested hcomp through Path type
+def nested_hcomp_path : Path Nat zero zero :=
+  <i> hcomp Nat [i1 => <j> zero]
+    (hcomp Nat [i1 => <j> zero] (id_path @ i))

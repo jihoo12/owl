@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **A5 — Higher-dimensional hcomp (Path type decomposition).** ✅ Added Path type decomposition to `hcomp`, `comp`, `fill`, and `hfill` in `nbe/hcomp.rs`. When the carrier type is `VPath(A, x, y)`, the operations decompose by composing at each point of the interval, reducing square composition (2D hcomp) to 1D composition in the carrier type. Example: `examples/higher_dim_hcomp.owl`. 258/258 tests pass.
+
 - [x] **D1 — Universe polymorphism.** ✅ Added `LevelExpr` enum (`LVar(i32)`, `LConst(i32)`, `LSuc(Box<LevelExpr>)`, `LMax(Box<LevelExpr>, Box<LevelExpr>)`) to `syntax/mod.rs`. Changed `TUniv(Level)` and `TLift(Arc<Term>, Level)` to hold `LevelExpr` instead of bare `i32`. Level expressions support `shift`/`subst`/`max_var` — level variables share the term variable de Bruijn namespace. Added `TLevelTy`/`VLevelTy` for the `Level` type. Parser: `U (lsuc l)`, `U (max l1 l2)`, `U l`, `U0`/`U1` backward compat. `Level` keyword recognized. `lift`/`lower` are prefix keywords. NbE: `VUniv`/`VLift` hold `LevelExpr`. Typechecker: `type_level_dt` returns `LevelExpr`, `U_n : U_{n+1}` via `LevelExpr::suc`, Pi/Sigma/Glue/Equiv/Partial/SystemType use `LevelExpr::max`. Cumulativity: `leq` with structural equality fallback for stuck level variables. Files: `syntax/mod.rs`, `syntax/pretty.rs`, `parser/grammar.rs`, `nbe/value.rs`, `nbe/eval.rs`, `nbe/quote.rs`, `nbe/transport.rs`, `nbe/meta.rs`, `typechecker/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs`, `driver.rs`, `equality.rs`, `syntax/positivity.rs`. Example: `examples/universe_poly.owl`. 257/257 tests pass.
 
 - [x] **A4 — Cubical identity types (`Id`).** ✅ Added `TId(A, a, b)`, `TRefl(x)`, `TJ(motive, base, p)` to `Term` enum. Parser: `Id A x y`, `Refl x`, `J motive base p`. NbE: `VId`, `VRefl`, `VJelim` values; `do_j` computes `J B d (Refl x) = d` (key definitional reduction). Quote: bidirectional reconstruction. Typechecker: `Id A a b : U_n`, `Refl x : Id A x x`, `J motive base p : B y p`. Example `examples/id_types.owl` tests type formation, reflexivity, and J computing on refl. 257/257 tests pass, `cargo fmt` clean.
@@ -117,9 +119,18 @@ Cubical Agda has a separate `Id` type where `J` computes **definitionally** on `
 
 **Files**: `syntax/mod.rs`, `nbe/value.rs`, `nbe/eval.rs`, `nbe/quote.rs`, `parser/grammar.rs`, `typechecker/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs`, `syntax/pretty.rs`, `syntax/positivity.rs`, `equality.rs`, `nbe/meta.rs`, `nbe/transport.rs`. **Example**: `examples/id_types.owl`.
 
-#### A5. Higher-dimensional `hcomp` 🟢
+#### A5. Higher-dimensional `hcomp` ✅
 
-Research-level. Cubical Agda handles `hcomp` in higher cubes (beyond 1D). Owl explicitly defers this as research-level. Not needed for practical algebraic geometry.
+**Done**: Added Path type decomposition to `hcomp`, `comp`, `fill`, and `hfill` in `nbe/hcomp.rs`. When the carrier type is `VPath(A, x, y)`, the operations decompose by composing at each point of the interval:
+
+- `hcomp (Path A x y) [phi => t, ...] p ≡ <i> hcomp A [phi => t @ i] (p @ i)`
+- `comp (Path A x y) sys p` — same decomposition, applied to the evaluated type family
+- `fill (Path A x y) sys p ≡ <j> hfill A [sys @ j] (p @ j)`
+- `hfill (Path A x y) [phi => t, ...] p ≡ <i> hcomp A [phi => t @ i] (p @ i)`
+
+This enables square composition (2D hcomp): composing paths whose type is itself a Path type. The decomposition recursively pushes hcomp through the Path structure until a non-Path type is reached.
+
+**Files**: `nbe/hcomp.rs`. **Example**: `examples/higher_dim_hcomp.owl` (tests empty system, constant tube, two-tube, fill, hfill, nested hcomp through Path types). 258/258 tests pass.
 
 ---
 

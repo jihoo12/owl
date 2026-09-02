@@ -437,6 +437,72 @@ pub fn do_hcomp(
                 }
             }
 
+            // ── Path type decomposition: compose squares pointwise ──
+            //
+            // hcomp (Path A x y) [phi => t, ...] p
+            //   ≡  <i> hcomp A [phi => fun j => t @ i @ j] (p @ i)
+            //
+            // When the type is a Path, the system tubes are squares
+            // (paths in Path A x y). We decompose by composing at each
+            // point i of the interval, reducing to a 1D hcomp in A.
+            (Value::VPath(a_elem, _, _), Value::VPLam(_, base_iclos)) => {
+                let inner_a = a_elem.as_ref().clone();
+                let inner_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let tube_at_i = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                iclos.apply_interval_value(formal_i, session)
+                            }
+                            _ => tube.clone(),
+                        };
+                        // tube_at_i is a path in A (the carrier of Path A x y).
+                        // Wrap as VPLam for the inner hcomp.
+                        let tube_plam = Value::VPLam(
+                            "_path_j".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, tube_at_i, session),
+                            },
+                        );
+                        (phi.clone(), tube_plam)
+                    })
+                    .collect();
+                let inner_base = match base {
+                    Value::VPLam(_, iclos) => {
+                        let formal_i = Value::VIntervalVar(0);
+                        iclos.apply_interval_value(formal_i, session)
+                    }
+                    _ => base.clone(),
+                };
+                let inner_result = do_hcomp(
+                    globals,
+                    global_offset,
+                    inner_a.clone(),
+                    inner_sys,
+                    inner_base,
+                    session,
+                );
+                let result = Value::VPLam(
+                    "i".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, inner_result, session),
+                    },
+                );
+                record_step(
+                    "hcomp-path".into(),
+                    "hcomp (Path _ _ _) sys p".into(),
+                    value_str(globals, global_offset, &result, session),
+                );
+                result
+            }
+
             // ── Default: stuck hcomp ──
             _ => Value::VHComp(Arc::new(a_ty), sys, Arc::new(base)),
         }
@@ -800,6 +866,70 @@ pub fn do_comp(
                 record_step(
                     "comp-data".into(),
                     format!("comp (λi. {}) ({} ...)", d_name, base_con),
+                    value_str(globals, global_offset, &result, session),
+                );
+                result
+            }
+
+            // ── Path type decomposition: compose squares pointwise ──
+            //
+            // comp (λi. Path (A i) (x i) (y i)) [phi => t, ...] p
+            //   ≡  <i> comp (λj. A (i ∧ j)) [phi => fun j => t @ i @ j] (p @ i)
+            //
+            // When the type family at the formal interval variable is a Path,
+            // the system tubes are squares. We decompose by composing at each
+            // point of the interval, reducing to a 1D comp in A.
+            (Value::VPath(a_elem, _, _), _) => {
+                let inner_a = a_elem.as_ref().clone();
+                let inner_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let tube_at_i = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i2 = Value::VIntervalVar(0);
+                                iclos.apply_interval_value(formal_i2, session)
+                            }
+                            _ => tube.clone(),
+                        };
+                        let tube_plam = Value::VPLam(
+                            "_comp_j".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, tube_at_i, session),
+                            },
+                        );
+                        (phi.clone(), tube_plam)
+                    })
+                    .collect();
+                let inner_base = match base {
+                    Value::VPLam(_, iclos) => {
+                        let formal_i2 = Value::VIntervalVar(0);
+                        iclos.apply_interval_value(formal_i2, session)
+                    }
+                    _ => base.clone(),
+                };
+                let inner_result = do_hcomp(
+                    globals,
+                    global_offset,
+                    inner_a,
+                    inner_sys,
+                    inner_base,
+                    session,
+                );
+                let result = Value::VPLam(
+                    "i".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, inner_result, session),
+                    },
+                );
+                record_step(
+                    "comp-path".into(),
+                    "comp (λi. Path _ _ _) sys p".into(),
                     value_str(globals, global_offset, &result, session),
                 );
                 result
@@ -1265,6 +1395,71 @@ pub fn do_fill(
                 result
             }
 
+            // ── Path type decomposition: fill squares pointwise ──
+            //
+            // fill (λi. Path (A i) (x i) (y i)) sys p
+            //   ≡  <j> <i> fill (λk. A (i ∧ k)) [sys @ j @ i] (p @ i @ j)
+            //
+            // When the type family at the formal interval variable is a Path,
+            // the system tubes are squares. We decompose by composing at each
+            // point of the interval, reducing to a 1D fill in A.
+            (Value::VPath(a_elem, _, _), _) => {
+                let inner_a = a_elem.as_ref().clone();
+                let inner_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let tube_at_i = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i2 = Value::VIntervalVar(0);
+                                iclos.apply_interval_value(formal_i2, session)
+                            }
+                            _ => tube.clone(),
+                        };
+                        let tube_plam = Value::VPLam(
+                            "_fill_j".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, tube_at_i, session),
+                            },
+                        );
+                        (phi.clone(), tube_plam)
+                    })
+                    .collect();
+                let inner_base = match base {
+                    Value::VPLam(_, iclos) => {
+                        let formal_i2 = Value::VIntervalVar(0);
+                        iclos.apply_interval_value(formal_i2, session)
+                    }
+                    _ => base.clone(),
+                };
+                let inner_result = do_hfill(
+                    globals,
+                    global_offset,
+                    inner_a,
+                    inner_sys,
+                    inner_base,
+                    session,
+                );
+                let inner_term = quote(1, globals, global_offset, inner_result, session);
+                let result = Value::VPLam(
+                    "j".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: Term::PApp(Arc::new(inner_term), Arc::new(Term::TVar(0))),
+                    },
+                );
+                record_step(
+                    "fill-path".into(),
+                    "fill (λi. Path _ _ _) sys p".into(),
+                    value_str(globals, global_offset, &result, session),
+                );
+                result
+            }
+
             // ── Default: stuck fill ──
             _ => {
                 let result = Value::VFill(Arc::new(a_fam), sys, Arc::new(base));
@@ -1719,6 +1914,69 @@ pub fn do_hfill(
                 record_step(
                     "hfill-data".into(),
                     format!("hfill (λi. {}) ({} ...)", d_name, base_con),
+                    value_str(globals, global_offset, &result, session),
+                );
+                result
+            }
+
+            // ── Path type decomposition: hfill squares pointwise ──
+            //
+            // hfill (Path A x y) [phi => t, ...] p
+            //   ≡  <j> <i> hfill A [phi => fun k => t @ j @ i @ k] (p @ i @ j)
+            //
+            // When the type is a Path, the system tubes are squares. We
+            // decompose by composing at each point of the interval.
+            (Value::VPath(a_elem, _, _), Value::VPLam(_, base_iclos)) => {
+                let inner_a = a_elem.as_ref().clone();
+                let inner_sys: DNFSystem = sys
+                    .iter()
+                    .map(|(phi, tube)| {
+                        let tube_at_i = match tube {
+                            Value::VPLam(_, iclos) => {
+                                let formal_i = Value::VIntervalVar(0);
+                                iclos.apply_interval_value(formal_i, session)
+                            }
+                            _ => tube.clone(),
+                        };
+                        let tube_plam = Value::VPLam(
+                            "_hfill_j".to_string(),
+                            IClosure {
+                                env: Scope::empty(),
+                                globals: globals.clone(),
+                                global_offset,
+                                body: quote(1, globals, global_offset, tube_at_i, session),
+                            },
+                        );
+                        (phi.clone(), tube_plam)
+                    })
+                    .collect();
+                let inner_base = match base {
+                    Value::VPLam(_, iclos) => {
+                        let formal_i = Value::VIntervalVar(0);
+                        iclos.apply_interval_value(formal_i, session)
+                    }
+                    _ => base.clone(),
+                };
+                let inner_result = do_hcomp(
+                    globals,
+                    global_offset,
+                    inner_a.clone(),
+                    inner_sys,
+                    inner_base,
+                    session,
+                );
+                let result = Value::VPLam(
+                    "i".to_string(),
+                    IClosure {
+                        env: Scope::empty(),
+                        globals: globals.clone(),
+                        global_offset,
+                        body: quote(1, globals, global_offset, inner_result, session),
+                    },
+                );
+                record_step(
+                    "hfill-path".into(),
+                    "hfill (Path _ _ _) sys p".into(),
                     value_str(globals, global_offset, &result, session),
                 );
                 result
