@@ -429,6 +429,7 @@ fn all_example_files_check() {
         "homotopy_demo.owl",
         "id_types.owl",
         "indexed_transp_test.owl",
+        "instance_search.owl",
         "int_demo.owl",
         // Skipped: isNType 1/2 generate deeply nested terms that overflow
         // even 64 MiB stacks. See TODO.md §I3. Fix the parser sugar, not
