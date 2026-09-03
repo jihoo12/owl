@@ -1293,6 +1293,61 @@ match n return Nat with
   | suc zero as k   => k
 ```
 
+#### Path Application Patterns
+
+Path application patterns match on the endpoints of a path value using `p@i0`
+or `p@i1` in a match arm. This is analogous to Cubical Agda's `with p i0 | p i1`
+abstraction:
+
+```
+match p return ReturnType with
+  | p@i0 as a' => body_a    -- a' is bound to p @ i0
+  | p@i1 as b' => body_b    -- b' is bound to p @ i1
+```
+
+The `as` name binds the result of the path application. Each arm's body must
+itself be a match on the bound variable (to destructure the value at that
+endpoint). The desugaring converts the outer match into a `TElim` whose
+scrutinee is the path application (`p @ i0` or `p @ i1`) and whose cases come
+from the inner match.
+
+**Example:**
+
+```owl
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def test_path_endpoints : forall (p : Path Nat zero (suc zero)), Nat :=
+  fun p =>
+    match p return Nat with
+    | p@i0 as a' =>
+      match a' return (fun _ => Nat) with
+      | zero => suc (suc (suc (suc (suc (suc (suc zero))))))
+      | suc m => m
+    | p@i1 as b' =>
+      match b' return (fun _ => Nat) with
+      | zero => zero
+      | suc m => m
+```
+
+This desugars (at parse time) to:
+
+```owl
+fun p =>
+  elim[fun a' => Nat] { zero  -> 7 | suc m -> m } p @ 0
+```
+
+The kernel never sees path application patterns — they are fully desugared
+before typechecking.
+
+**Restrictions:**
+- Each arm's body must be a `match` on the bound variable (the `as` name)
+- The inner match's return type must use the bound variable consistently
+- Only `i0` and `i1` are valid interval endpoints in patterns
+
+See `examples/path_app_pattern.owl`.
+
 #### Record Patterns
 
 Record patterns destructure records by field name using `{ field = binder }`
