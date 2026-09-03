@@ -1815,6 +1815,26 @@ fn quote_case_body(
             a,
             session,
         ))),
+        Term::TUnify(a, bx) => Term::TUnify(
+            Arc::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                a,
+                session,
+            )),
+            Arc::new(quote_case_body(
+                size,
+                globals,
+                global_offset,
+                env,
+                go,
+                bx,
+                session,
+            )),
+        ),
         Term::TProj(field, r) => Term::TProj(
             field.clone(),
             Arc::new(quote_case_body(

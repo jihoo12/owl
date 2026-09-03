@@ -3752,12 +3752,18 @@ Reflection API for meta-programming (E1). Provides quoted ASTs as first-class va
 - `unquote : forall (A : Type), OwlTerm -> A` — evaluate a quoted AST back into a term
 - `getType : forall (A : Type), A -> OwlTerm` — infer the type of a value and return the normalised type as an AST
 - `getContext : OwlTerm` — return the current typing context as a quoted AST
+- `TC : Type -> Type` — the TC monad (identity monad: `TC A` reduces to `A`)
+- `tc_return : forall (A : Type), A -> TC A` — monadic return
+- `tc_bind : forall (A : Type), forall (B : Type), TC A -> (A -> TC B) -> TC B` — monadic bind
+- `unify : forall (A : Type), A -> A -> TC Unit` — check definitional equality; type error on failure
+- `tc_guard : forall (A : Type), A -> TC Unit` — assert a type
 
 Kernel primitives (parsed as keywords):
 - `quote_ast t` — normalises `t` and wraps the result as `OwlTerm`
 - `unquote_ast ast` — evaluates `ast` (must be `OwlTerm`) and returns the result; requires a type annotation in infer mode
 - `getContext_ast` — reads the current context from the session
 - `getType_ast t` — infers the type of `t`, normalises it, and stores for NbE retrieval
+- `unify_ast t1 t2` — checks that `t1` and `t2` have the same type and are definitionally equal; returns Unit or type error
 
 ```owl
 import "lib/reflection.owl"

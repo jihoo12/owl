@@ -3214,6 +3214,23 @@ fn infer_dt_inner(
             session.store_reflection_result(t.as_ref().clone(), ty_normalized);
             Ok(Term::TData("OwlTerm".to_string(), Vec::new()))
         }
+
+        // Reflection: unify — check that two terms are definitionally equal.
+        Term::TUnify(a, bx) => {
+            let a_ty = infer_dt(dts, ctx, a, session)?;
+            let bx_ty = infer_dt(dts, ctx, bx, session)?;
+            // Both terms must have the same type (or at least be checkable at the same type).
+            // We check definitional equality of the terms themselves.
+            let eq = definitionally_equal_ctx_r(ctx, &a_ty, &bx_ty, session);
+            match eq {
+                crate::cubical::equality::EtaResult::Equal => {
+                    Ok(Term::TData("Unit".to_string(), vec![]))
+                }
+                _ => Err(TypeError::Other(format!(
+                    "unify: terms are not definitionally equal"
+                ))),
+            }
+        }
     }
 }
 

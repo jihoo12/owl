@@ -862,6 +862,12 @@ fn eval_nbe_inner(
                 }
             }
         }
+        Term::TUnify(a, bx) => {
+            let _a_val = eval_nbe(env, globals, global_offset, a, session);
+            let _bx_val = eval_nbe(env, globals, global_offset, bx, session);
+            // The typechecker pre-validates unification, so just return tt.
+            Value::VCon("Unit".to_string(), "tt".to_string(), vec![])
+        }
     }
 }
 

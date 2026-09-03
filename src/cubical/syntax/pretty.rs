@@ -303,6 +303,7 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
         Term::TUnquote(a) => format!("unquote_ast {}", show_term(env, a)),
         Term::TGetContext => "getContext_ast".to_string(),
         Term::TGetType(a) => format!("getType_ast {}", show_term(env, a)),
+        Term::TUnify(a, bx) => format!("unify_ast {} {}", show_term(env, a), show_term(env, bx)),
     }
 }
 

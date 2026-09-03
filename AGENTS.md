@@ -146,6 +146,9 @@ available directly. See `rust-analyzer-db.md` for the full command list. The
   an AST back. `unquote_ast` requires a type annotation in infer mode.
 - **`getContext_ast`/`getType_ast`** are the kernel-level reflection primitives.
   The user-facing `getContext` and `getType` in `lib/reflection.owl` wrap them.
+- **`unify_ast`** is the kernel-level unification primitive. The user-facing
+  `unify` in `lib/reflection.owl` wraps it. It checks definitional equality
+  of two terms' types at typecheck time.
 - `by_wf` is a trusted escape hatch that disables the structural-recursion
   guard; only use where the user approves.
 - **Tactic output is re-checked by the kernel** — the proof trees from

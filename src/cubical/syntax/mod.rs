@@ -226,6 +226,9 @@ pub enum Term {
     TGetContext,
     /// Return the type of a term as a quoted AST.
     TGetType(Arc<Term>),
+    /// Check that two terms are definitionally equal (reflection E1).
+    /// Returns Unit on success; type error on failure.
+    TUnify(Arc<Term>, Arc<Term>),
 }
 
 /// One arm of an eliminator. Binds `binders.len()` fresh variables over
@@ -702,6 +705,7 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TUnquote(a) => Term::TUnquote(b(shift(d, c, a))),
         Term::TGetContext => Term::TGetContext,
         Term::TGetType(a) => Term::TGetType(b(shift(d, c, a))),
+        Term::TUnify(a, bx) => Term::TUnify(b(shift(d, c, a)), b(shift(d, c, bx))),
     }
 }
 
@@ -910,6 +914,7 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
         Term::TUnquote(a) => Term::TUnquote(b(subst(j, s, a))),
         Term::TGetContext => Term::TGetContext,
         Term::TGetType(a) => Term::TGetType(b(subst(j, s, a))),
+        Term::TUnify(a, bx) => Term::TUnify(b(subst(j, s, a)), b(subst(j, s, bx))),
     }
 }
 
@@ -1602,6 +1607,20 @@ fn subst_params_inner(
             binder_depth,
             a,
         ))),
+        Term::TUnify(a, bx) => Term::TUnify(
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                a,
+            )),
+            b(subst_params_inner(
+                num_params,
+                param_values,
+                binder_depth,
+                bx,
+            )),
+        ),
     }
 }
 
@@ -1783,6 +1802,7 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TUnquote(a) => max_var(a),
         Term::TGetContext => -1,
         Term::TGetType(a) => max_var(a),
+        Term::TUnify(a, bx) => max_var(a).max(max_var(bx)),
     }
 }
 

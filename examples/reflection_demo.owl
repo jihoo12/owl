@@ -1,6 +1,6 @@
 -- examples/reflection_demo.owl — Reflection API demo (E1)
 --
--- Exercises quote, unquote, getContext, and getType.
+-- Exercises quote, unquote, getContext, getType, and unify.
 
 import "../lib/reflection.owl"
 import "../lib/logic.owl"

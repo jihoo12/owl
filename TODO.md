@@ -8,7 +8,7 @@
 
 ## Completed
 
-- [x] **E1 — Reflection API (Phase 1+2: quote/unquote, getContext, getType).** ✅ Phase 1: Added `TQuote`/`TUnquote` to `Term`, `TermVal(Term)` to `Value`, `NUnquote` to `NeutralInner`. Parsed as `quote_ast`/`unquote_ast` prefix keywords. Phase 2: Added `TGetContext`/`TGetType` to `Term`, parsed as `getContext_ast`/`getType_ast`. `getContext_ast` reads the quoted context from `session.reflection_ctx` (set by the driver in `process_def`). `getType_ast t` infers the type of `t`, normalises it via `nbe_eval`, and stores the result in `session.reflection_results` for NbE lookup. `lib/reflection.owl` postulates `OwlTerm`, `quote`, `unquote`, `getType`, `getContext`. `examples/reflection_demo.owl` exercises the API. Updated equality, nbe/meta, nbe/transport, positivity, typechecker errors/termination for new variants. All 263 tests pass.
+- [x] **E1 — Reflection API (Phase 1+2+3: quote/unquote, getContext, getType, TC monad, unify).** ✅ Phase 1: `TQuote`/`TUnquote`, `quote_ast`/`unquote_ast` keywords. Phase 2: `TGetContext`/`TGetType`, `getContext_ast`/`getType_ast` keywords, session-stored context and pre-computed type results. Phase 3: `TUnify` keyword `unify_ast` — checks definitional equality of two terms' types via `definitionally_equal_ctx_r`, returns Unit or type error. `lib/reflection.owl` postulates `OwlTerm`, `quote`, `unquote`, `getType`, `getContext`, `TC`, `tc_return`, `tc_bind`, `unify`, `tc_guard`. `TC` is an identity monad (computationally `TC A = A`). `examples/reflection_demo.owl` exercises the API. All 263 tests pass.
 
 - [x] **G4 — Topology / Homotopy.** ✅ `lib/topology.owl` expanded: added `coproduct_topology` (proof that coproduct of open sets is open), `continuous_comp` (composition of continuous maps), `discrete_continuous` (universal property: any function from discrete space is continuous). Product topology type definition (`product_opens`) and `indiscrete_opens` type added. `examples/topology_demo.owl` exercises the constructions. Previously added: `lib/homotopy.owl` (path operations, homotopy, equivalences, loop spaces, truncated types, contractibility), `lib/suspension.owl` (Susp HIT), `lib/circle.owl` (S1 HIT), `lib/logic.owl`. Fixed parallel substitution bug. 263/263 tests pass.
 
@@ -220,17 +220,15 @@ Cubical Agda can restrict `--cumulativity`, `--level-universe`, etc. Owl's Prop 
 
 ### E. Metaprogramming / Extensibility 🟡
 
-#### E1. Reflection API 🟡 (Phase 1+2 done)
+#### E1. Reflection API ✅
 
 Cubical Agda exposes `Agda.Builtin.Reflection` for meta-programming: `TC` monad, quotation, unquotation, typeclass resolution, custom solvers.
 
-**Phase 1 ✅** (2026-09-03): Quote/unquote kernel primitives. Added `TQuote`/`TUnquote` to `Term`, `TermVal(Term)` to `Value`, `NUnquote` to `NeutralInner`. Parsed as `quote_ast`/`unquote_ast` keywords. Type rules: `quote_ast t : OwlTerm` (checks t, returns postulated type); `unquote_ast` requires type annotation (check mode). Evaluation: `quote_ast` normalises via `quote()` and wraps as `TermVal`; `unquote_ast` evaluates the enclosed Term. `lib/reflection.owl` postulates `OwlTerm`, `quote`, `unquote`. `examples/reflection_demo.owl` exercises the API. All 263 tests pass.
+**Phase 1 ✅** (2026-09-03): Quote/unquote kernel primitives.
 
-**Phase 2 ✅** (2026-09-03): getContext/getType. Added `TGetContext`/`TGetType` to `Term`, parsed as `getContext_ast`/`getType_ast` keywords. `getContext_ast` reads the quoted context from `session.reflection_ctx` (set by driver in `process_def`). `getType_ast t` infers the type of `t`, normalises via `nbe_eval`, stores result in `session.reflection_results`. `lib/reflection.owl` adds `getType` and `getContext` postulates wrapping the kernel primitives. `examples/reflection_demo.owl` exercises getContext and getType.
+**Phase 2 ✅** (2026-09-03): getContext/getType kernel primitives.
 
-**Remaining**:
-- `unify : Term -> Term -> TC Unit` (Phase 3)
-- TC monad binding (Phase 3)
+**Phase 3 ✅** (2026-09-03): TC monad and unify. Added `TUnify` keyword `unify_ast` — checks definitional equality of two terms' types via `definitionally_equal_ctx_r`, returns Unit on success or type error on failure. `lib/reflection.owl` postulates `TC` (identity monad), `tc_return`, `tc_bind`, `unify`, `tc_guard`. All 263 tests pass.
 
 #### E2. Postulates ✅
 

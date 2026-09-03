@@ -505,6 +505,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::TQuote(a) | Term::TUnquote(a) => uses_var_at_level(a, level),
         Term::TGetContext => false,
         Term::TGetType(a) => uses_var_at_level(a, level),
+        Term::TUnify(a, bx) => uses_var_at_level(a, level) || uses_var_at_level(bx, level),
     }
 }
 

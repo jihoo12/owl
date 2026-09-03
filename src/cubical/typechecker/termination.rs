@@ -326,6 +326,10 @@ fn check_body_guard(
         // Reflection — recurse into inner term.
         Term::TGetContext => Ok(()),
         Term::TGetType(a) => check_body_guard(d, a, binder_count, def_idx),
+        Term::TUnify(a, bx) => {
+            check_body_guard(d, a, binder_count, def_idx)?;
+            check_body_guard(d, bx, binder_count, def_idx)
+        }
     }
 }
 

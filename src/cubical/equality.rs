@@ -134,6 +134,7 @@ pub fn term_size(t: &Term) -> usize {
         | Term::TQuote(a)
         | Term::TUnquote(a)
         | Term::TGetType(a) => 1 + term_size(a),
+        Term::TUnify(a, bx) => 1 + term_size(a) + term_size(bx),
         Term::TGetContext => 1,
         Term::TCellCon(_, _, args, ivars) => {
             1 + args.iter().map(term_size).sum::<usize>()

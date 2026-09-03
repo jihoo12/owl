@@ -1044,6 +1044,11 @@ impl Parser {
         if self.consume_ident("getType_ast") {
             return Ok(Term::TGetType(Arc::new(self.parse_prefix_or_atom()?)));
         }
+        if self.consume_ident("unify_ast") {
+            let t1 = self.parse_prefix_or_atom()?;
+            let t2 = self.parse_prefix_or_atom()?;
+            return Ok(Term::TUnify(Arc::new(t1), Arc::new(t2)));
+        }
         // Module-qualified reference: `M.name`, `M.Nat`, `M.Nat.zero`.  Only
         // fires when the leading segment is a module prefix; otherwise the
         // name falls through to the plain atom / record-projection path.

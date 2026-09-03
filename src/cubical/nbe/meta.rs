@@ -82,6 +82,7 @@ pub fn meta_mentions(id: i32, t: &Term) -> bool {
         | Term::TQuote(p)
         | Term::TUnquote(p)
         | Term::TGetType(p) => meta_mentions(id, p),
+        Term::TUnify(a, bx) => meta_mentions(id, a) || meta_mentions(id, bx),
         Term::TGetContext => false,
         Term::TRecordUpdate(r, updates) => {
             meta_mentions(id, r) || updates.iter().any(|(_, e)| meta_mentions(id, e))
@@ -265,6 +266,10 @@ pub fn zonk(t: &Term, session: &Session) -> Term {
             Term::TUnquote(p) => Term::TUnquote(Arc::new(zonk_inner(p, session))),
             Term::TGetContext => term.clone(),
             Term::TGetType(a) => Term::TGetType(Arc::new(zonk_inner(a, session))),
+            Term::TUnify(a, bx) => Term::TUnify(
+                Arc::new(zonk_inner(a, session)),
+                Arc::new(zonk_inner(bx, session)),
+            ),
             Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
                 Arc::new(zonk_inner(r, session)),
                 updates
@@ -400,6 +405,7 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         | Term::TUnquote(p) => vec![p.as_ref()],
         Term::TGetContext => vec![],
         Term::TGetType(a) => vec![a.as_ref()],
+        Term::TUnify(a, bx) => vec![a.as_ref(), bx.as_ref()],
         Term::TRecordUpdate(r, updates) => {
             let mut children: Vec<&Term> = vec![r.as_ref()];
             for (_, e) in updates.iter() {
