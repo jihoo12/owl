@@ -1734,6 +1734,7 @@ fn quote_case_body(
                     as_name: case.as_name.clone(),
                     record_bindings: case.record_bindings.clone(),
                     refinements: case.refinements.clone(),
+                    path_app_interval: case.path_app_interval.clone(),
                 });
             }
             Term::TElim(
@@ -1903,6 +1904,7 @@ pub(super) fn quote_cases(
                 as_name: case.as_name,
                 record_bindings: case.record_bindings,
                 refinements: case.refinements.clone(),
+                path_app_interval: case.path_app_interval,
             }
         })
         .collect()

@@ -7,7 +7,8 @@
 //! compiles to exactly the same `ElimCase`s the flat parser produced, so the
 //! kernel never observes a difference.
 
-use crate::cubical::syntax::Name;
+use crate::cubical::interval::I;
+use crate::cubical::syntax::{Name, Term};
 
 /// A single pattern in a match arm's leading column.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +17,9 @@ pub enum Pat {
     Var(Name),
     /// A constructor application: `con pat1 ... patn`.
     Con { con: Name, args: Vec<Pat> },
+    /// A path application pattern: `p @ i0` or `p @ i1`.
+    /// Desugared at parse time into a let-binding + nested match.
+    PathApp { var: Name, interval: I },
 }
 
 impl Pat {
@@ -23,11 +27,16 @@ impl Pat {
         matches!(self, Pat::Var(_))
     }
 
+    /// Whether this is a path application pattern.
+    pub fn is_path_app(&self) -> bool {
+        matches!(self, Pat::PathApp { .. })
+    }
+
     /// The constructor head of a constructor pattern.
     pub fn con(&self) -> Option<&str> {
         match self {
             Pat::Con { con, .. } => Some(con),
-            Pat::Var(_) => None,
+            Pat::Var(_) | Pat::PathApp { .. } => None,
         }
     }
 
@@ -35,7 +44,7 @@ impl Pat {
     pub fn args(&self) -> &[Pat] {
         match self {
             Pat::Con { args, .. } => args,
-            Pat::Var(_) => &[],
+            Pat::Var(_) | Pat::PathApp { .. } => &[],
         }
     }
 
@@ -44,7 +53,7 @@ impl Pat {
     /// are nested.
     pub fn has_nested_con(&self) -> bool {
         match self {
-            Pat::Var(_) => false,
+            Pat::Var(_) | Pat::PathApp { .. } => false,
             Pat::Con { args, .. } => args.iter().any(|a| !a.is_var() || a.has_nested_con()),
         }
     }
@@ -53,6 +62,7 @@ impl Pat {
     pub fn binders<'a>(&'a self, out: &mut Vec<Name>) {
         match self {
             Pat::Var(n) => out.push(n.clone()),
+            Pat::PathApp { var, .. } => out.push(var.clone()),
             Pat::Con { args, .. } => {
                 for a in args {
                     a.binders(out);
@@ -73,16 +83,21 @@ impl Pat {
     /// `TElim`s (outermost case's binders deepest), so a body parsed against
     /// this environment needs no re-indexing.
     pub fn pattern_env<'a>(&'a self, out: &mut Vec<Name>) {
-        if let Pat::Con { args, .. } = self {
-            for a in args {
-                match a {
-                    Pat::Var(n) => out.push(n.clone()),
-                    Pat::Con { .. } => out.push(String::new()),
+        match self {
+            Pat::Var(n) => out.push(n.clone()),
+            Pat::PathApp { var, .. } => out.push(var.clone()),
+            Pat::Con { args, .. } => {
+                for a in args {
+                    match a {
+                        Pat::Var(n) => out.push(n.clone()),
+                        Pat::PathApp { var, .. } => out.push(var.clone()),
+                        Pat::Con { .. } => out.push(String::new()),
+                    }
                 }
-            }
-            for a in args {
-                if let Pat::Con { .. } = a {
-                    a.pattern_env(out);
+                for a in args {
+                    if let Pat::Con { .. } = a {
+                        a.pattern_env(out);
+                    }
                 }
             }
         }
@@ -94,19 +109,29 @@ impl Pat {
     /// phantom argument slots), so the `as`-name sits in the environment
     /// between the case's argument slots and everything nested beneath them.
     pub fn pattern_env_with_as<'a>(&'a self, out: &mut Vec<Name>, as_name: Option<&'a Name>) {
-        if let Pat::Con { args, .. } = self {
-            for a in args {
-                match a {
-                    Pat::Var(n) => out.push(n.clone()),
-                    Pat::Con { .. } => out.push(String::new()),
+        match self {
+            Pat::Var(n) => out.push(n.clone()),
+            Pat::PathApp { var, .. } => {
+                out.push(var.clone());
+                if let Some(as_n) = as_name {
+                    out.push(as_n.clone());
                 }
             }
-            if let Some(as_n) = as_name {
-                out.push(as_n.clone());
-            }
-            for a in args {
-                if let Pat::Con { .. } = a {
-                    a.pattern_env(out);
+            Pat::Con { args, .. } => {
+                for a in args {
+                    match a {
+                        Pat::Var(n) => out.push(n.clone()),
+                        Pat::PathApp { var, .. } => out.push(var.clone()),
+                        Pat::Con { .. } => out.push(String::new()),
+                    }
+                }
+                if let Some(as_n) = as_name {
+                    out.push(as_n.clone());
+                }
+                for a in args {
+                    if let Pat::Con { .. } = a {
+                        a.pattern_env(out);
+                    }
                 }
             }
         }
@@ -123,4 +148,12 @@ pub struct MatchArm {
     pub record_bindings: Option<Vec<(Name, Name)>>,
     /// Absurd pattern `()` — no body, desugars to zero-case match.
     pub absurd: bool,
+    /// Whether this arm contains a path application pattern (`p @ i0`/`p @ i1`).
+    /// When set, the arm is desugared at parse time into a nested TElim.
+    pub has_path_app: bool,
+    /// The `with` expression from `match x with e as y ...`.
+    /// When set, the match is desugared into nested matches with a let binding.
+    pub with_expr: Option<Term>,
+    /// The `as` name from the `with` clause (`as y` in `with e as y`).
+    pub with_name: Option<Name>,
 }

@@ -198,6 +198,7 @@ pub(super) fn subst_interval_var(t: &Term, target: i32, val: &I) -> Term {
                         as_name: c.as_name.clone(),
                         record_bindings: c.record_bindings.clone(),
                         refinements: c.refinements.clone(),
+                        path_app_interval: None,
                     })
                     .collect(),
                 Arc::new(go(scrut, target, val)),

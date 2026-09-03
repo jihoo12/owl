@@ -8,6 +8,10 @@
 
 ## Completed
 
+- [x] **B3 — With-patterns.** ✅ Added `match x with e as y return T with | ...` syntax (Cubical Agda `with` abstraction). Desugared at parse time to `(fun y => match x return T with | ...shifted_cases...) e` where case bodies have de Bruijn indices shifted by -1 at cutoff 1 to remove the `y` reference from the inner match context. `with_expr`/`with_name` fields on `MatchArm`, `stop_at_as` parser flag, lookahead heuristic to distinguish the `with`-pattern keyword from the `with` separator. Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/with_pattern.owl`. 263/263 tests pass.
+
+- [x] **B1 — Path application patterns.** ✅ Added `p@i0`/`p@i1` as match pattern forms (Cubical Agda `with` abstraction). `Pat::PathApp { var, interval }` in `patterns.rs`, parser recognition in `parse_match_arm`, `ElimCase.path_app_interval` field in `syntax/mod.rs`. Desugared at parse time in `parse_match` into a `TElim` whose scrutinee is the path application and whose cases come from the body match on the bound variable. Bodies shifted by -1 to account for the removed `as` binder. Files: `parser/patterns.rs`, `parser/grammar.rs`, `syntax/mod.rs`. Example: `examples/path_app_pattern.owl`. 263/263 tests pass, `cargo fmt` clean.
+
 - [x] **E1 — Reflection API (Phase 1+2+3: quote/unquote, getContext, getType, TC monad, unify).** ✅ Phase 1: `TQuote`/`TUnquote`, `quote_ast`/`unquote_ast` keywords. Phase 2: `TGetContext`/`TGetType`, `getContext_ast`/`getType_ast` keywords, session-stored context and pre-computed type results. Phase 3: `TUnify` keyword `unify_ast` — checks definitional equality of two terms' types via `definitionally_equal_ctx_r`, returns Unit or type error. `lib/reflection.owl` postulates `OwlTerm`, `quote`, `unquote`, `getType`, `getContext`, `TC`, `tc_return`, `tc_bind`, `unify`, `tc_guard`. `TC` is an identity monad (computationally `TC A = A`). `examples/reflection_demo.owl` exercises the API. All 263 tests pass.
 
 - [x] **G4 — Topology / Homotopy.** ✅ `lib/topology.owl` expanded: added `coproduct_topology` (proof that coproduct of open sets is open), `continuous_comp` (composition of continuous maps), `discrete_continuous` (universal property: any function from discrete space is continuous). Product topology type definition (`product_opens`) and `indiscrete_opens` type added. `examples/topology_demo.owl` exercises the constructions. Previously added: `lib/homotopy.owl` (path operations, homotopy, equivalences, loop spaces, truncated types, contractibility), `lib/suspension.owl` (Susp HIT), `lib/circle.owl` (S1 HIT), `lib/logic.owl`. Fixed parallel substitution bug. 263/263 tests pass.
@@ -144,7 +148,7 @@ This enables square composition (2D hcomp): composing paths whose type is itself
 
 ### B. Pattern Matching — Cubical Agda Parity 🟡
 
-#### B1. Path application patterns 🟡
+#### B1. Path application patterns ✅
 
 Cubical Agda matches on `p i0` and `p i1` in patterns:
 ```agda
@@ -153,7 +157,7 @@ f p with p i0 | p i1
 ... | a' | b' = ...
 ```
 
-**Plan**: Add path-application as a pattern form in `match`. When the scrutinee is `p @ i0` or `p @ i1`, reduce at typechecking time.
+**Done** (2026-09-03): Added path-application as a pattern form in `match`. Syntax: `p@i0 as a'` / `p@i1 as b'` in match arms. Desugared at parse time into a `TElim` whose scrutinee is the path application (`p@i0` or `p@i1`) and whose cases come from the body (which must be a match on the bound variable). The `Pat::PathApp { var, interval }` variant in `patterns.rs`, parser recognition in `parse_match_arm`, `ElimCase.path_app_interval` field, and desugaring logic in `parse_match` that shifts inner case bodies by -1 to account for the removed `as` binder. File: `examples/path_app_pattern.owl`. 263/263 tests pass.
 
 #### B2. Absurd patterns (`()`) ✅
 
@@ -163,7 +167,7 @@ Cubical Agda has `()` for empty pattern matching on types with no constructors. 
 
 **Done** (2026-09-02): Added `absurd: bool` field to `MatchArm` in `patterns.rs`. Parser detects `()` in `parse_match_arm`, sets `absurd: true`; `parse_match_cases` returns empty cases when arm is absurd. `lib/logic.owl` updated to use new syntax. File: `examples/absurd_pattern.owl`. 261/261 tests pass.
 
-#### B3. With-patterns 🟡
+#### B3. With-patterns ✅
 
 Cubical Agda's `with` abstraction:
 ```agda
@@ -172,7 +176,7 @@ f x with g x
 ... | suc n = ...
 ```
 
-**Plan**: Add `with` as syntactic sugar that introduces a local definition and case-splits on it. Parser-level desugaring into nested `match`.
+**Done** (2026-09-03): Added `match x with e as y return T with | ...` syntax. Desugared at parse time to `(fun y => match x return T with | ...shifted_cases...) e` where case bodies have de Bruijn indices shifted by -1 at cutoff 1 to account for the removed `y` from the inner match context. The `with_expr` and `with_name` fields on `MatchArm`, `stop_at_as` parser flag, and lookahead heuristic to distinguish `with`-pattern keyword from `with` separator. Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/with_pattern.owl`. 263/263 tests pass.
 
 #### B4. Forced (dot) patterns 🟢
 

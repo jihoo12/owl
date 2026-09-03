@@ -1348,6 +1348,51 @@ before typechecking.
 
 See `examples/path_app_pattern.owl`.
 
+#### With-Patterns
+
+With-patterns introduce a local binding that is available in the case bodies.
+This is analogous to Cubical Agda's `with` abstraction:
+
+```
+match scrutinee with expr as y return T with
+  | con1 => body1    -- y is in scope
+  | con2 x => body2  -- y is in scope
+```
+
+The `with expr as y` clause evaluates `expr`, binds the result to `y`, and
+makes `y` available in all case bodies. The `as y` is optional (if omitted,
+the binding is unnamed and unavailable in case bodies).
+
+**Example:**
+
+```owl
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def test_with : Nat -> Nat :=
+  fun n =>
+    match n with (suc zero) as k return Nat with
+    | zero => k       -- k is in scope: returns suc zero
+    | suc m => m      -- k is in scope: returns m
+```
+
+**Semantics:** Desugared at parse time to:
+```owl
+(fun k => match n return Nat with | zero => k | suc m => m) (suc zero)
+```
+
+The case bodies have their de Bruijn indices shifted so that references to
+the original scrutinee (`n`) are correct in the inner match, while references
+to the with-bound variable (`k`) become references to the outer lambda
+parameter. The kernel never sees with-patterns.
+
+**Restrictions:**
+- The `as` name must not conflict with the scrutinee binder
+- The with-expression is evaluated once and bound for all case bodies
+
+See `examples/with_pattern.owl`.
+
 #### Record Patterns
 
 Record patterns destructure records by field name using `{ field = binder }`

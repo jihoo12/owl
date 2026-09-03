@@ -1,0 +1,25 @@
+-- B3: With-patterns
+-- Tests `match x with e as y return T with | ...` syntax.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Test 1: Basic with-pattern — k is returned directly.
+def test_with_basic : Nat -> Nat :=
+  fun n =>
+    match n with (suc zero) as k return Nat with
+    | zero => k
+    | suc m => m
+
+-- Test 2: With-bound variable used inside case body (addition).
+def test_with_use : Nat -> Nat :=
+  fun n =>
+    match n with (suc (suc zero)) as k return Nat with
+    | zero => k
+    | suc m => m
+
+def one : Nat := suc zero
+def two : Nat := suc (suc zero)
+
+def main : Nat := test_with_basic zero

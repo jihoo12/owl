@@ -1,0 +1,22 @@
+-- B1: Path application patterns
+-- Tests matching on path endpoints via `p@i0` / `p@i1` patterns.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def two : Nat := suc (suc zero)
+
+-- Test 1: Match on a path's left endpoint.
+-- Given p : Path Nat zero (suc zero), p@i0 evaluates to zero.
+def test_left_endpoint : forall (p : Path Nat zero (suc zero)), Nat :=
+  fun p =>
+    match p return Nat with
+    | p@i0 as a' =>
+      match a' return (fun _ => Nat) with
+      | zero => suc (suc (suc (suc (suc (suc (suc zero))))))
+      | suc m => m
+    | p@i1 as b' =>
+      match b' return (fun _ => Nat) with
+      | zero => zero
+      | suc m => m

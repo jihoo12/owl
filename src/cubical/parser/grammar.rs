@@ -45,6 +45,9 @@ pub(super) struct Parser {
     /// When true, `starts_atom` treats the keyword `field` as a stop token
     /// (used inside record field type parsing).
     stop_at_field: bool,
+    /// When true, `starts_atom` treats the keyword `as` as a stop token
+    /// (used when parsing the with-expression in `match x with e as y ...`).
+    stop_at_as: bool,
     /// Raw pointer to the session, used only for `fresh_meta_id` / `set_meta_name`
     /// in `parse_atom`. Safety invariant: the caller must ensure the pointer is
     /// valid and that `&mut Session` is not used elsewhere while `parse_atom`
@@ -70,6 +73,7 @@ impl Parser {
             stop_at_by_wf: false,
             stop_at_comma: false,
             stop_at_field: false,
+            stop_at_as: false,
             session_ptr: session as *mut crate::cubical::session::Session,
         }
     }
@@ -1536,24 +1540,150 @@ impl Parser {
     }
 
     fn parse_match(&mut self) -> Result<Term, ParseError> {
-        let (scrutinee, binder) = if let TokenKind::Ident(name) = self.peek().kind.clone() {
+        let (scrutinee0, binder) = if let TokenKind::Ident(name) = self.peek().kind.clone() {
             self.pos += 1;
             let scrut = self.resolve_ident(name.clone())?;
             (scrut, name)
         } else {
             (self.parse_term()?, "_match".to_string())
         };
+        let mut scrutinee = scrutinee0;
+
+        // Detect `match x with e as y return T with | ...`
+        // The `with` here is distinct from the `with` separator after `return`.
+        let mut with_expr: Option<Term> = None;
+        let mut with_name: Option<Name> = None;
+        if self.peek_ident() == "with" {
+            // Lookahead: is this `with <expr> as` or the separator `with |`?
+            // The separator `with` is followed by `return` (already consumed) or `|`.
+            // Here we're before `return`, so `with` must be the with-pattern keyword.
+            // But we need to distinguish from the case separator `with`.
+            // The separator `with` appears after `return T`. Here we're before `return`,
+            // so if we see `with`, it's the with-pattern keyword — UNLESS the scrutinee
+            // was parsed as a bare ident and the user wrote `match x return T with | ...`
+            // (i.e., the ident `x` was the scrutinee and `return` follows).
+            //
+            // Heuristic: peek at the token after `with`. If it's `return` or `as`,
+            // this is ambiguous — but `return` after `with` only makes sense as the
+            // separator. So: if the token after `with` is `return`, treat this `with`
+            // as the separator and fall through. Otherwise, parse with-pattern.
+            if self.pos + 1 < self.tokens.len() {
+                let next = &self.tokens[self.pos + 1];
+                let is_separator_with = matches!(&next.kind, TokenKind::Ident(n) if n == "return");
+                if !is_separator_with {
+                    // Parse with-pattern: `with <expr> [as <name>]`
+                    self.pos += 1; // consume `with`
+                    self.stop_at_as = true;
+                    let wexpr = self.parse_term()?;
+                    self.stop_at_as = false;
+                    let wname = if self.consume_ident_maybe("as") {
+                        Some(self.expect_ident("expected variable name after 'as'")?)
+                    } else {
+                        None
+                    };
+                    with_expr = Some(wexpr);
+                    with_name = wname;
+                }
+            }
+        }
 
         self.term_env.insert(0, binder.clone());
         self.expect_ident("return")?;
         self.stop_at_with = true;
-        let return_type = self.parse_term()?;
+        let mut return_type = self.parse_term()?;
         self.stop_at_with = false;
         self.term_env.remove(0);
 
         self.expect_ident("with")?;
-        let motive = Term::TAbs(binder, Arc::new(return_type));
+        // If there's a with-binding, add it to the term environment so that
+        // case bodies can reference the bound variable (at de Bruijn index 0).
+        // This shifts all existing de Bruijn indices by +1, so we must also
+        // shift the scrutinee and return_type to compensate.
+        if let Some(ref wn) = with_name {
+            self.term_env.insert(0, wn.clone());
+            scrutinee = shift(1, 0, &scrutinee);
+            return_type = shift(1, 0, &return_type);
+        }
+        let motive = Term::TAbs(binder.clone(), Arc::new(return_type.clone()));
         let cases = self.parse_match_cases(&motive, &scrutinee)?;
+        if with_name.is_some() {
+            self.term_env.remove(0);
+        }
+
+        // --- Desugar with-patterns first (wraps the whole match) ---
+        if let (Some(wexpr), Some(wn)) = (with_expr, with_name) {
+            // `match x with e as y return T with | ...`
+            // → (fun y => match x return T with | p => shifted_body) e
+            //
+            // Case bodies were parsed with y at de Bruijn 0 and x at 1.
+            // In the inner match, x is at de Bruijn 0. So shift each body
+            // by -1 at cutoff 1: variables at index 0 (y refs) stay at 0
+            // (becoming references to the outer lambda's y), variables at
+            // index >= 1 (x refs) shift down by 1.
+            let wrapped_cases: Vec<ElimCase> = cases
+                .iter()
+                .map(|c| {
+                    let shifted_body = shift(-1, 1, c.body.as_ref());
+                    ElimCase {
+                        con: c.con.clone(),
+                        binders: c.binders.clone(),
+                        body: Box::new(shifted_body),
+                        as_name: c.as_name.clone(),
+                        record_bindings: c.record_bindings.clone(),
+                        refinements: c.refinements.clone(),
+                        path_app_interval: None,
+                    }
+                })
+                .collect();
+            let inner_match =
+                Term::TElim(Arc::new(motive), wrapped_cases, Arc::new(scrutinee.clone()));
+            // (fun y => inner_match) e
+            return Ok(Term::TApp(
+                Arc::new(Term::TAbs(wn, Arc::new(inner_match))),
+                Arc::new(wexpr),
+            ));
+        }
+
+        // --- Desugar path application patterns (no with-pattern) ---
+        if let Some(path_app_case) = cases.iter().find(|c| c.path_app_interval.is_some()) {
+            if let Some(interval) = path_app_case.path_app_interval.clone() {
+                if let Term::TElim(_inner_motive, inner_cases, _) = path_app_case.body.as_ref() {
+                    if !inner_cases.is_empty() {
+                        let shifted_cases: Vec<ElimCase> = inner_cases
+                            .iter()
+                            .map(|c| {
+                                let num_binders = c.binders.len() as i32;
+                                let shifted_body = shift(-1, num_binders, c.body.as_ref());
+                                ElimCase {
+                                    con: c.con.clone(),
+                                    binders: c.binders.clone(),
+                                    body: Box::new(shifted_body),
+                                    as_name: None,
+                                    record_bindings: None,
+                                    refinements: None,
+                                    path_app_interval: None,
+                                }
+                            })
+                            .collect();
+
+                        let path_app_term = Term::PApp(
+                            Arc::new(scrutinee.clone()),
+                            Arc::new(Term::TInterval(interval)),
+                        );
+                        let motive_binder = path_app_case
+                            .as_name
+                            .clone()
+                            .unwrap_or_else(|| "_path_app".to_string());
+                        return Ok(Term::TElim(
+                            Arc::new(Term::TAbs(motive_binder, Arc::new(return_type))),
+                            shifted_cases,
+                            Arc::new(path_app_term),
+                        ));
+                    }
+                }
+            }
+        }
+
         Ok(Term::TElim(Arc::new(motive), cases, Arc::new(scrutinee)))
     }
 
@@ -1651,6 +1781,9 @@ impl Parser {
                 as_name: None,
                 record_bindings: None,
                 absurd: true,
+                has_path_app: false,
+                with_expr: None,
+                with_name: None,
             });
         }
         let mut pats: Vec<Pat> = Vec::new();
@@ -1689,7 +1822,31 @@ impl Parser {
                 let con = self.expect_ident(
                     "expected constructor name or record pattern in eliminator case",
                 )?;
-                pats.push(self.parse_pattern_after_con(con)?);
+                // Path application pattern: `var @ i0` or `var @ i1`.
+                if self.at(&TokenKind::At)
+                    && self.pos + 1 < self.tokens.len()
+                    && matches!(
+                        self.tokens[self.pos + 1].kind,
+                        TokenKind::Ident(ref s) if s == "i0" || s == "i1"
+                    )
+                {
+                    self.consume(&TokenKind::At);
+                    let iv = self
+                        .expect_ident("expected interval (i0 or i1) after '@' in path pattern")?;
+                    let interval = if iv == "i0" {
+                        I::I0
+                    } else if iv == "i1" {
+                        I::I1
+                    } else {
+                        return Err(self.error_here(format!(
+                            "expected i0 or i1 in path pattern, got '{}'",
+                            iv
+                        )));
+                    };
+                    pats.push(Pat::PathApp { var: con, interval });
+                } else {
+                    pats.push(self.parse_pattern_after_con(con)?);
+                }
             }
 
             // Check for as-pattern: ... as name (after binders, before => or |)
@@ -1709,11 +1866,15 @@ impl Parser {
         if !(self.consume(&TokenKind::FatArrow) || self.consume(&TokenKind::Arrow)) {
             return Err(self.error_here("expected '=>' after eliminator case binders"));
         }
+        let has_path_app = pats.iter().any(|p| p.is_path_app());
         Ok(MatchArm {
             pats,
             as_name,
             record_bindings,
             absurd: false,
+            has_path_app,
+            with_expr: None,
+            with_name: None,
         })
     }
 
@@ -1798,6 +1959,7 @@ impl Parser {
             as_name,
             record_bindings: Some(bindings),
             refinements: None,
+            path_app_interval: None,
         })
     }
 
@@ -1810,6 +1972,9 @@ impl Parser {
             as_name,
             record_bindings: _,
             absurd: _,
+            has_path_app: _,
+            with_expr: _,
+            with_name: _,
         } = arm;
         let last_pat = pats.last().unwrap();
         // Determine the type of constructor:
@@ -1869,6 +2034,10 @@ impl Parser {
         for pat in pats {
             let mut binders = Vec::new();
             pat.binders(&mut binders);
+            let path_app_interval = match &pat {
+                Pat::PathApp { interval, .. } => Some(interval.clone()),
+                _ => None,
+            };
             cases.push(ElimCase {
                 con: pat.con().unwrap_or("").to_string(),
                 binders,
@@ -1876,6 +2045,7 @@ impl Parser {
                 as_name: as_name.clone(),
                 record_bindings: None,
                 refinements: None,
+                path_app_interval,
             });
         }
         Ok(cases)
@@ -1919,6 +2089,7 @@ impl Parser {
                     as_name: arm.as_name.clone(),
                     record_bindings: None,
                     refinements: None,
+                    path_app_interval: None,
                 });
             }
         }
@@ -1962,6 +2133,7 @@ impl Parser {
                 match a {
                     Pat::Var(n) => binders.push(n.clone()),
                     Pat::Con { con, .. } => binders.push(con.clone()),
+                    Pat::PathApp { var, .. } => binders.push(var.clone()),
                 }
             }
             // A path constructor head (single interval, e.g. `merid`) may
@@ -1984,7 +2156,7 @@ impl Parser {
                     args.iter()
                         .take(args.len().saturating_sub(1))
                         .map(|a| match a {
-                            Pat::Var(_) => None,
+                            Pat::Var(_) | Pat::PathApp { .. } => None,
                             Pat::Con { .. } => {
                                 let mut leaves = Vec::new();
                                 a.binders(&mut leaves);
@@ -2016,6 +2188,7 @@ impl Parser {
                 as_name,
                 record_bindings: None,
                 refinements,
+                path_app_interval: None,
             });
         }
         Ok(cases)
@@ -2130,6 +2303,7 @@ impl Parser {
                 match a {
                     Pat::Var(n) => sub_binders.push(n.clone()),
                     Pat::Con { con, .. } => sub_binders.push(con.clone()),
+                    Pat::PathApp { var, .. } => sub_binders.push(var.clone()),
                 }
             }
             let head_dt = self.nested_head_datatype(&head, false)?;
@@ -2166,6 +2340,7 @@ impl Parser {
                 as_name: None,
                 record_bindings: None,
                 refinements: None,
+                path_app_interval: None,
             });
         }
 
@@ -2717,6 +2892,12 @@ impl Parser {
         if self.stop_at_field
             && let TokenKind::Ident(name) = &self.peek().kind
             && name == "field"
+        {
+            return false;
+        }
+        if self.stop_at_as
+            && let TokenKind::Ident(name) = &self.peek().kind
+            && name == "as"
         {
             return false;
         }

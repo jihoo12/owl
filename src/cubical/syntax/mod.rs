@@ -288,6 +288,11 @@ pub struct ElimCase {
     /// checking path, so a user-written `PLam` over an eliminator is never
     /// mistaken for a compiler-generated refinement.
     pub refinements: Option<Vec<Option<Vec<Name>>>>,
+    /// Path application pattern: `p@i0` or `p@i1`.
+    /// When set, this case came from a path application pattern and the body
+    /// is a TElim on the bound variable. The parser desugars this into a
+    /// TElim where the scrutinee is the path application result.
+    pub path_app_interval: Option<I>,
 }
 
 // ---------------------------------------------------------------------------
@@ -682,6 +687,7 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
                     as_name: case.as_name.clone(),
                     record_bindings: case.record_bindings.clone(),
                     refinements: case.refinements.clone(),
+                    path_app_interval: None,
                 })
                 .collect(),
             b(shift(d, c, scrut)),
@@ -890,6 +896,7 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
                         as_name: case.as_name.clone(),
                         record_bindings: case.record_bindings.clone(),
                         refinements: case.refinements.clone(),
+                        path_app_interval: None,
                     }
                 })
                 .collect(),
@@ -1527,6 +1534,7 @@ fn subst_params_inner(
                         as_name: case.as_name.clone(),
                         record_bindings: case.record_bindings.clone(),
                         refinements: case.refinements.clone(),
+                        path_app_interval: None,
                     }
                 })
                 .collect(),

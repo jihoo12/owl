@@ -562,6 +562,7 @@ fn apply_literal_inner(lit: &Literal, t: &Term, session: &mut Session) -> Term {
                             as_name: c.as_name.clone(),
                             record_bindings: c.record_bindings.clone(),
                             refinements: c.refinements.clone(),
+                            path_app_interval: c.path_app_interval.clone(),
                         })
                         .collect(),
                     Arc::new(go(scrut, n, val, session)),
@@ -638,6 +639,7 @@ fn shift_cases(cases: &[ElimCase], d: i32) -> Vec<ElimCase> {
             as_name: case.as_name.clone(),
             record_bindings: case.record_bindings.clone(),
             refinements: case.refinements.clone(),
+            path_app_interval: case.path_app_interval.clone(),
         })
         .collect()
 }
@@ -2375,6 +2377,7 @@ fn infer_dt_inner(
                                 as_name: case.as_name.clone(),
                                 record_bindings: None,
                                 refinements: None,
+                                path_app_interval: None,
                             });
                         } else {
                             buf.push(case.clone());

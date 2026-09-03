@@ -365,6 +365,7 @@ impl<'a> TacticEngine<'a> {
                                 as_name: None,
                                 record_bindings: None,
                                 refinements: None,
+                                path_app_interval: None,
                             }
                         })
                         .collect();
