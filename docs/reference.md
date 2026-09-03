@@ -156,6 +156,7 @@ The following words are reserved and cannot be used as variable names:
 | `by_wf`       | Well-founded recursion annotation          |
 | `isNType`     | n-truncation level sugar (parser)          |
 | `as`          | As-pattern in match cases (contextual)     |
+| `.`           | Dot (forced) pattern prefix (contextual)   |
 
 ### Symbols and Operators
 
@@ -1392,6 +1393,42 @@ parameter. The kernel never sees with-patterns.
 - The with-expression is evaluated once and bound for all case bodies
 
 See `examples/with_pattern.owl`.
+
+#### Dot (Forced) Patterns
+
+Dot patterns assert that the matched value is definitionally equal to a
+specific constructor. They are irrefutable and used primarily for error
+messages and explicit forcing annotations:
+
+```
+match n return Nat with
+  | .zero => suc zero
+  | suc m => m
+```
+
+The `.name` syntax references a zero-arity constructor. The pattern always
+matches (it is irrefutable) and does not bind any variables. It is treated
+as covering the referenced constructor for exhaustiveness checking.
+
+**Example:**
+
+```owl
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def is_zero : Nat -> Nat := fun n =>
+  match n return Nat with
+  | .zero => suc zero
+  | suc n => zero
+```
+
+**Restrictions:**
+- Only `.name` syntax is supported (not `.(term)` with complex expressions)
+- The name must resolve to a known constructor
+- Dot patterns do not bind variables (use regular patterns for binding)
+
+See `examples/dot_pattern.owl`.
 
 #### Record Patterns
 

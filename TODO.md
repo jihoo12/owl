@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **B4 — Forced (dot) patterns.** ✅ Added `.name` syntax for dot (forced) patterns referencing zero-arity constructors. `Pat::Dot(Term)` variant in `patterns.rs`, `.name` parsing in `parse_match_arm`, `Pat::con()` returns the constructor name for dot patterns so they participate in exhaustiveness checking. Dot patterns are irrefutable and used for error messages and explicit forcing annotations. `.(term)` syntax rejected with clear error (needs sub-pattern decomposition design). Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/dot_pattern.owl`. 263/263 tests pass.
+
 - [x] **B3 — With-patterns.** ✅ Added `match x with e as y return T with | ...` syntax (Cubical Agda `with` abstraction). Desugared at parse time to `(fun y => match x return T with | ...shifted_cases...) e` where case bodies have de Bruijn indices shifted by -1 at cutoff 1 to remove the `y` reference from the inner match context. `with_expr`/`with_name` fields on `MatchArm`, `stop_at_as` parser flag, lookahead heuristic to distinguish the `with`-pattern keyword from the `with` separator. Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/with_pattern.owl`. 263/263 tests pass.
 
 - [x] **B1 — Path application patterns.** ✅ Added `p@i0`/`p@i1` as match pattern forms (Cubical Agda `with` abstraction). `Pat::PathApp { var, interval }` in `patterns.rs`, parser recognition in `parse_match_arm`, `ElimCase.path_app_interval` field in `syntax/mod.rs`. Desugared at parse time in `parse_match` into a `TElim` whose scrutinee is the path application and whose cases come from the body match on the bound variable. Bodies shifted by -1 to account for the removed `as` binder. Files: `parser/patterns.rs`, `parser/grammar.rs`, `syntax/mod.rs`. Example: `examples/path_app_pattern.owl`. 263/263 tests pass, `cargo fmt` clean.
@@ -178,9 +180,9 @@ f x with g x
 
 **Done** (2026-09-03): Added `match x with e as y return T with | ...` syntax. Desugared at parse time to `(fun y => match x return T with | ...shifted_cases...) e` where case bodies have de Bruijn indices shifted by -1 at cutoff 1 to account for the removed `y` from the inner match context. The `with_expr` and `with_name` fields on `MatchArm`, `stop_at_as` parser flag, and lookahead heuristic to distinguish `with`-pattern keyword from `with` separator. Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/with_pattern.owl`. 263/263 tests pass.
 
-#### B4. Forced (dot) patterns 🟢
+#### B4. Forced (dot) patterns ✅
 
-Cubical Agda's `.` patterns for forced arguments. Lower priority — mostly for error messages.
+**Done** (2026-09-03): Added `.name` syntax for dot (forced) patterns referencing zero-arity constructors. `Pat::Dot(Term)` variant in `patterns.rs`, `.name` parsing in `parse_match_arm`, `Pat::con()` returns the constructor name for dot patterns so they participate in exhaustiveness checking. Dot patterns are irrefutable and used for error messages and explicit forcing annotations. `.(term)` syntax rejected with clear error (needs sub-pattern decomposition design). Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/dot_pattern.owl`. 263/263 tests pass.
 
 ---
 

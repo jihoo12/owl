@@ -20,6 +20,9 @@ pub enum Pat {
     /// A path application pattern: `p @ i0` or `p @ i1`.
     /// Desugared at parse time into a let-binding + nested match.
     PathApp { var: Name, interval: I },
+    /// A dot (forced) pattern: `.con_name`.
+    /// Asserts definitional equality with the given constructor. Irrefutable.
+    Dot(Term),
 }
 
 impl Pat {
@@ -32,11 +35,27 @@ impl Pat {
         matches!(self, Pat::PathApp { .. })
     }
 
+    /// Whether this is a dot pattern.
+    pub fn is_dot(&self) -> bool {
+        matches!(self, Pat::Dot(_))
+    }
+
+    /// The constructor name of a dot pattern's term, if it references a known constructor.
+    pub fn dot_con(&self) -> Option<&str> {
+        if let Pat::Dot(Term::TCon(_, name, _)) = self {
+            Some(name)
+        } else {
+            None
+        }
+    }
+
     /// The constructor head of a constructor pattern.
+    /// For dot patterns, returns the referenced constructor name.
     pub fn con(&self) -> Option<&str> {
         match self {
             Pat::Con { con, .. } => Some(con),
-            Pat::Var(_) | Pat::PathApp { .. } => None,
+            Pat::Dot(Term::TCon(_, name, _)) => Some(name),
+            Pat::Var(_) | Pat::PathApp { .. } | Pat::Dot(_) => None,
         }
     }
 
@@ -44,7 +63,7 @@ impl Pat {
     pub fn args(&self) -> &[Pat] {
         match self {
             Pat::Con { args, .. } => args,
-            Pat::Var(_) | Pat::PathApp { .. } => &[],
+            Pat::Var(_) | Pat::PathApp { .. } | Pat::Dot(_) => &[],
         }
     }
 
@@ -53,7 +72,7 @@ impl Pat {
     /// are nested.
     pub fn has_nested_con(&self) -> bool {
         match self {
-            Pat::Var(_) | Pat::PathApp { .. } => false,
+            Pat::Var(_) | Pat::PathApp { .. } | Pat::Dot(_) => false,
             Pat::Con { args, .. } => args.iter().any(|a| !a.is_var() || a.has_nested_con()),
         }
     }
@@ -63,6 +82,7 @@ impl Pat {
         match self {
             Pat::Var(n) => out.push(n.clone()),
             Pat::PathApp { var, .. } => out.push(var.clone()),
+            Pat::Dot(_) => {} // dot patterns don't bind variables
             Pat::Con { args, .. } => {
                 for a in args {
                     a.binders(out);
@@ -86,12 +106,14 @@ impl Pat {
         match self {
             Pat::Var(n) => out.push(n.clone()),
             Pat::PathApp { var, .. } => out.push(var.clone()),
+            Pat::Dot(_) => {} // dot patterns don't bind variables
             Pat::Con { args, .. } => {
                 for a in args {
                     match a {
                         Pat::Var(n) => out.push(n.clone()),
                         Pat::PathApp { var, .. } => out.push(var.clone()),
                         Pat::Con { .. } => out.push(String::new()),
+                        Pat::Dot(_) => {} // dot patterns don't bind variables
                     }
                 }
                 for a in args {
@@ -117,12 +139,14 @@ impl Pat {
                     out.push(as_n.clone());
                 }
             }
+            Pat::Dot(_) => {} // dot patterns don't bind variables
             Pat::Con { args, .. } => {
                 for a in args {
                     match a {
                         Pat::Var(n) => out.push(n.clone()),
                         Pat::PathApp { var, .. } => out.push(var.clone()),
                         Pat::Con { .. } => out.push(String::new()),
+                        Pat::Dot(_) => {} // dot patterns don't bind variables
                     }
                 }
                 if let Some(as_n) = as_name {

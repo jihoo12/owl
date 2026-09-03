@@ -1,0 +1,24 @@
+-- Dot (forced) patterns demo.
+-- Dot patterns (.name) assert that the matched value is definitionally
+-- equal to the given zero-arity constructor. They are irrefutable and
+-- used primarily for error messages and explicit forcing annotations.
+-- Only zero-arity constructors are supported (e.g. .zero).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Standalone dot pattern: .zero matches only zero (forced).
+def is_zero : Nat -> Nat := fun n =>
+  match n return Nat with
+  | .zero => suc zero
+  | suc n => zero
+
+-- Multiple cases with dot pattern for the zero case.
+def double_suc : Nat -> Nat := fun n =>
+  match n return Nat with
+  | .zero => suc zero
+  | suc m => suc (suc m)
+
+-- Main entry point
+def main : Nat := is_zero (suc zero)

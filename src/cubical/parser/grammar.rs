@@ -1819,34 +1819,56 @@ impl Parser {
                     args: Vec::new(),
                 });
             } else {
-                let con = self.expect_ident(
-                    "expected constructor name or record pattern in eliminator case",
-                )?;
-                // Path application pattern: `var @ i0` or `var @ i1`.
-                if self.at(&TokenKind::At)
-                    && self.pos + 1 < self.tokens.len()
-                    && matches!(
-                        self.tokens[self.pos + 1].kind,
-                        TokenKind::Ident(ref s) if s == "i0" || s == "i1"
-                    )
-                {
-                    self.consume(&TokenKind::At);
-                    let iv = self
-                        .expect_ident("expected interval (i0 or i1) after '@' in path pattern")?;
-                    let interval = if iv == "i0" {
-                        I::I0
-                    } else if iv == "i1" {
-                        I::I1
+                // Dot (forced) pattern: `.name`
+                if self.at(&TokenKind::Dot) {
+                    self.pos += 1;
+                    if let TokenKind::Ident(name) = self.peek().kind.clone() {
+                        self.pos += 1;
+                        let resolved = self.resolve_ident(name.clone())?;
+                        if matches!(resolved, Term::TCon(_, _, _)) {
+                            pats.push(Pat::Dot(resolved));
+                        } else {
+                            return Err(self.error_here(format!(
+                                "dot pattern '.{}' must reference a constructor, not a variable",
+                                name
+                            )));
+                        }
                     } else {
-                        return Err(self.error_here(format!(
-                            "expected i0 or i1 in path pattern, got '{}'",
-                            iv
-                        )));
-                    };
-                    pats.push(Pat::PathApp { var: con, interval });
+                        return Err(
+                            self.error_here("expected constructor name after '.' in dot pattern")
+                        );
+                    }
                 } else {
-                    pats.push(self.parse_pattern_after_con(con)?);
-                }
+                    let con = self.expect_ident(
+                        "expected constructor name or record pattern in eliminator case",
+                    )?;
+                    // Path application pattern: `var @ i0` or `var @ i1`.
+                    if self.at(&TokenKind::At)
+                        && self.pos + 1 < self.tokens.len()
+                        && matches!(
+                            self.tokens[self.pos + 1].kind,
+                            TokenKind::Ident(ref s) if s == "i0" || s == "i1"
+                        )
+                    {
+                        self.consume(&TokenKind::At);
+                        let iv = self.expect_ident(
+                            "expected interval (i0 or i1) after '@' in path pattern",
+                        )?;
+                        let interval = if iv == "i0" {
+                            I::I0
+                        } else if iv == "i1" {
+                            I::I1
+                        } else {
+                            return Err(self.error_here(format!(
+                                "expected i0 or i1 in path pattern, got '{}'",
+                                iv
+                            )));
+                        };
+                        pats.push(Pat::PathApp { var: con, interval });
+                    } else {
+                        pats.push(self.parse_pattern_after_con(con)?);
+                    }
+                } // end dot pattern else
             }
 
             // Check for as-pattern: ... as name (after binders, before => or |)
@@ -2134,6 +2156,7 @@ impl Parser {
                     Pat::Var(n) => binders.push(n.clone()),
                     Pat::Con { con, .. } => binders.push(con.clone()),
                     Pat::PathApp { var, .. } => binders.push(var.clone()),
+                    Pat::Dot(_) => {} // dot patterns don't bind variables
                 }
             }
             // A path constructor head (single interval, e.g. `merid`) may
@@ -2156,7 +2179,7 @@ impl Parser {
                     args.iter()
                         .take(args.len().saturating_sub(1))
                         .map(|a| match a {
-                            Pat::Var(_) | Pat::PathApp { .. } => None,
+                            Pat::Var(_) | Pat::PathApp { .. } | Pat::Dot(_) => None,
                             Pat::Con { .. } => {
                                 let mut leaves = Vec::new();
                                 a.binders(&mut leaves);
@@ -2304,6 +2327,7 @@ impl Parser {
                     Pat::Var(n) => sub_binders.push(n.clone()),
                     Pat::Con { con, .. } => sub_binders.push(con.clone()),
                     Pat::PathApp { var, .. } => sub_binders.push(var.clone()),
+                    Pat::Dot(_) => {} // dot patterns don't bind variables
                 }
             }
             let head_dt = self.nested_head_datatype(&head, false)?;
