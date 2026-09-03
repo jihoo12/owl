@@ -1,12 +1,9 @@
 use super::*;
 use crate::cubical::interval::{DNF, I, Literal};
 use crate::cubical::syntax::LevelExpr;
+use crate::cubical::test_helpers::b;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
-
-fn b(t: Term) -> Arc<Term> {
-    Arc::new(t)
-}
 
 #[test]
 fn identity_function_normalizes_to_itself() {

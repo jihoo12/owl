@@ -4,20 +4,8 @@ use super::*;
 use crate::cubical::interval::I;
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{LevelExpr, Tactic, Term, show_term};
+use crate::cubical::test_helpers::{run_str_test, with_session};
 use std::sync::Arc;
-
-fn run_str_test(
-    src: &str,
-) -> Result<crate::cubical::driver::RunOutput, crate::cubical::driver::RunError> {
-    crate::cubical::session::with_session_mut(|session| {
-        crate::cubical::driver::run_str(src, session)
-    })
-}
-
-/// Helper: run a closure with a fresh Session.
-fn with_session<R>(f: impl FnOnce(&mut Session) -> R) -> R {
-    crate::cubical::session::with_session_mut(f)
-}
 
 #[test]
 fn parses_lambda_identity() {

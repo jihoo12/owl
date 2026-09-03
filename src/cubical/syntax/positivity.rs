@@ -625,11 +625,8 @@ pub fn check_datatype_positivity(dt: &Datatype) -> Result<(), PositivityError> {
 mod tests {
     use super::*;
     use crate::cubical::syntax::{ConSig, LevelExpr, PConSig};
+    use crate::cubical::test_helpers::b;
     use std::sync::Arc;
-
-    fn b(t: Term) -> Arc<Term> {
-        Arc::new(t)
-    }
 
     #[test]
     fn positive_nat_is_ok() {

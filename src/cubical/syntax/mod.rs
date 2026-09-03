@@ -1857,10 +1857,7 @@ mod tests {
     use super::positivity::check_datatype_positivity;
     use super::pretty::show_term;
     use super::*;
-
-    fn b(t: Term) -> Arc<Term> {
-        Arc::new(t)
-    }
+    use crate::cubical::test_helpers::b;
 
     #[test]
     fn shift_increments_free() {

@@ -19,4 +19,7 @@ pub mod typechecker;
 #[cfg(test)]
 pub mod dependent_pi_transport_test;
 
+#[cfg(test)]
+pub mod test_helpers;
+
 pub use driver::{RunError, check, check_str, run, run_str};

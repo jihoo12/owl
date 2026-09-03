@@ -11,16 +11,9 @@
 mod tests {
     use crate::cubical::nbe::{Globals, Scope, Value, eval_nbe, nbe_eval};
     use crate::cubical::syntax::{LevelExpr, Term};
+    use crate::cubical::test_helpers::{b, empty_globals};
     use std::sync::Arc;
     use std::sync::Mutex;
-
-    fn b(t: Term) -> Arc<Term> {
-        Arc::new(t)
-    }
-
-    fn empty_globals() -> Globals {
-        Arc::new(Mutex::new(Vec::new()))
-    }
 
     // ---------------------------------------------------------------
     // 1. Constant Pi — neither domain nor codomain depends on i
