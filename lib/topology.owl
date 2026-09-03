@@ -1,5 +1,15 @@
 import "logic.owl"
 
+-- ────────────────────────────────────────────────────────────────────────
+-- lib/topology.owl — Topological spaces and continuous maps (G4)
+-- ────────────────────────────────────────────────────────────────────────
+--
+-- A topological space is a type X equipped with a collection of open
+-- predicates satisfying the topology axioms (whole, empty, arbitrary
+-- union, binary intersection).  We use the predicate formulation:
+-- opens : (X -> Type) -> Type  classifies open subsets of X.
+--
+
 record Topology (X : Type) (opens : (X -> Type) -> Type) where
   field whole_open : opens (fun (_ : X) => Unit)
   field empty_open : opens (fun (_ : X) => Empty)
@@ -19,11 +29,38 @@ record ContinuousMap
   field continuous : forall (V : (Y -> Type)),
     OY V -> OX (fun (x : X) => V (f x))
 
+-- ────────────────────────────────────────────────────────────────────────
+-- 1. Discrete topology (every predicate is open)
+-- ────────────────────────────────────────────────────────────────────────
+
 def discrete_opens : forall (X : Type), (X -> Type) -> Type :=
   fun X P => Unit
 
-def indiscrete_opens : forall (X : Type), (X -> Type) -> Type :=
-  fun X P => Or (forall (x : X), Empty) (forall (x : X), Unit)
-
 def discrete_topology : forall (X : Type), Topology X (discrete_opens X) :=
   fun X => mkTopology tt tt (fun I P h => tt) (fun P Q h1 h2 => tt)
+
+-- ────────────────────────────────────────────────────────────────────────
+-- 2. Continuous map composition
+-- ────────────────────────────────────────────────────────────────────────
+
+def continuous_comp :
+  forall (A : Type), forall (OA : (A -> Type) -> Type),
+  forall (B : Type), forall (OB : (B -> Type) -> Type),
+  forall (C : Type), forall (OC : (C -> Type) -> Type),
+  forall (f : A -> B), forall (g : B -> C),
+  forall (cf : ContinuousMap A OA B OB f),
+  forall (cg : ContinuousMap B OB C OC g),
+  ContinuousMap A OA C OC (fun a => g (f a)) :=
+  fun A OA B OB C OC f g cf cg =>
+  mkContinuousMap (fun V p => cf.continuous (fun b => V (g b)) (cg.continuous V p))
+
+-- ────────────────────────────────────────────────────────────────────────
+-- 3. Universal property: any function from a discrete space is continuous
+-- ────────────────────────────────────────────────────────────────────────
+
+def discrete_continuous :
+  forall (A : Type), forall (B : Type), forall (OB : (B -> Type) -> Type),
+  forall (f : A -> B),
+  ContinuousMap A (discrete_opens A) B OB f :=
+  fun A B OB f =>
+  mkContinuousMap (fun V p => tt)

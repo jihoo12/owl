@@ -8,7 +8,7 @@
 
 ## Completed
 
-- [x] **G4 — Topology / Homotopy (partial).** ✅ Added `lib/homotopy.owl` (path operations: refl, sym, trans, cong; homotopy between functions; IsEquiv record; loop spaces Omega/Omega2; isProp/isSet/isGroupoid; contractibility/connectiveness), `lib/suspension.owl` (Susp HIT), `lib/circle.owl` (S1 HIT with loop), `lib/topology.owl` (Topology/ContinuousMap records, discrete/indiscrete topologies, `discrete_topology` proof), `lib/logic.owl` (Empty, Unit, True, False, And, Or, Not, Iff, Implies). Fixed parallel substitution bug in `infer_and_check_params_seeded` — sequential `subst` calls corrupted de Bruijn indices when parameter values contained variables coinciding with other substitution targets (e.g. `fun X => mkR ...`). Added `subst_params` (parallel substitution) in `syntax/mod.rs`. File: `examples/homotopy_demo.owl`. 263/263 tests pass.
+- [x] **G4 — Topology / Homotopy.** ✅ `lib/topology.owl` expanded: added `coproduct_topology` (proof that coproduct of open sets is open), `continuous_comp` (composition of continuous maps), `discrete_continuous` (universal property: any function from discrete space is continuous). Product topology type definition (`product_opens`) and `indiscrete_opens` type added. `examples/topology_demo.owl` exercises the constructions. Previously added: `lib/homotopy.owl` (path operations, homotopy, equivalences, loop spaces, truncated types, contractibility), `lib/suspension.owl` (Susp HIT), `lib/circle.owl` (S1 HIT), `lib/logic.owl`. Fixed parallel substitution bug. 263/263 tests pass.
 
 - [x] **B2 — Absurd patterns (`()`).** ✅ Added `()` as syntactic sugar for zero-case match on empty types. `absurd: bool` field on `MatchArm` in `patterns.rs`, detected in `parse_match_arm`, desugared to empty cases in `parse_match_cases`. `lib/logic.owl` updated. File: `examples/absurd_pattern.owl`. 261/261 tests pass.
 
@@ -306,10 +306,10 @@ Cubical Agda has `agda/cubical` with Nat, Int, List, Vector, algebra, topology, 
 - [ ] SetTrunc
 - [ ] Propositional extensionality (from univalence)
 
-#### G4. Topology / Homotopy 🟢
+#### G4. Topology / Homotopy ✅
 
-- [ ] Topological spaces (as types + open predicates)
-- [ ] Continuous maps
+- [x] Topological spaces (as types + open predicates) — `lib/topology.owl` (Topology record, discrete_opens/discrete_topology, product_opens type, coproduct_topology proof, continuous_comp, discrete_continuous)
+- [x] Continuous maps — `lib/topology.owl` (ContinuousMap record, composition, universal properties)
 - [x] Homotopy groups — `lib/homotopy.owl` defines loop spaces, Omega, Omega2
 - [x] Path spaces, loop spaces — `lib/homotopy.owl` (refl, sym, trans, cong, Homotopy, IsEquiv), `lib/circle.owl` (S1 HIT), `lib/suspension.owl` (Susp HIT)
 

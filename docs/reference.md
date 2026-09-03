@@ -3590,6 +3590,27 @@ main : Nat = 4
 Owl ships with a small standard library in `lib/`. These files are resolved
 by-name by the tactic engine and can be imported into your own files.
 
+### lib/logic.owl
+
+Core logic types and connectives:
+
+- `Empty` — the empty type (no constructors)
+- `Unit` — the unit type with constructor `tt`
+- `True` — alias for `Unit`
+- `False` — alias for `Empty`
+- `absurd : forall (A : Type), Empty -> A` — ex falso quodlibet
+- `Not : forall (A : Type), Type` — negation (`A -> Empty`)
+- `And A B` — conjunction record with fields `fst : A` and `snd : B`
+- `or_inl`, `or_inr`, `or_elim` — disjunction introduction/elimination for `Or A B`
+- `Iff A B` — biconditional record with fields `fwd : A -> B` and `bwd : B -> A`
+
+```owl
+import "lib/logic.owl"
+
+def not_not_intro : forall (A : Type), A -> Not (Not A) :=
+  fun A a f => f a
+```
+
 ### lib/ring_laws.owl
 
 Commutative ring laws for `by ring` over natural numbers. Provides:
@@ -3617,32 +3638,6 @@ Shared algebraic structures consumed by the tactic family:
 - `Module A add mul zero one C M m_add m_neg m_zero smul` — R-module record
 - `NatCommRing` — bundled `CommRing` instance for natural numbers
 
-### lib/logic.owl
-
-Core logic types:
-
-- `Empty` — the empty type (no constructors)
-- `absurd : forall (A : Type), Empty -> A` — ex falso quodlibet
-- `Not : forall (A : Type), Type := fun A => A -> Empty` — negation
-
-### lib/truncation.owl
-
-Truncation types for propositional truncation:
-
-- `Trunc A` — propositional truncation HIT (`inc` + `trunc` path constructor)
-- `trunc_intro : forall (A : Type), A -> Trunc A` — convenience wrapper Provides the `Trunc A` HIT
-(inc + trunc path constructor) and `trunc_intro : A -> Trunc A`.
-
-### lib/algebra.owl — Shared Algebraic Structures
-
-Consolidates the bundled algebraic structures consumed by the tactic family:
-
-- `CommRing A add mul zero one` — commutative ring record with all ring laws
-- `Group A mul inv one` — group record with inverse/associativity laws
-- `Field A add mul inv zero one` — field record (canonical home of field laws)
-- `Module A add mul zero one C M m_add m_neg m_zero smul` — R-module record
-- `NatCommRing` — bundled `CommRing` instance for natural numbers
-
 ```owl
 record CommRing (A : Type) (add : A -> A -> A) (mul : A -> A -> A)
                 (zero : A) (one : A) where
@@ -3651,6 +3646,101 @@ record CommRing (A : Type) (add : A -> A -> A) (mul : A -> A -> A)
   field add_comm : ...
   -- plus cong_*, add_assoc, add_0_l/r, mul_comm, mul_assoc,
   --     mul_1_l/r, mul_0_l/r, mul_add_l/r
+```
+
+### lib/truncation.owl
+
+Truncation types for propositional truncation:
+
+- `Trunc A` — propositional truncation HIT (`inc` + `trunc` path constructor)
+- `trunc_intro : forall (A : Type), A -> Trunc A` — convenience wrapper
+
+### lib/homotopy.owl
+
+Homotopy type theory basics built on cubical path types. All proofs are pure
+cubical terms (no tactics). Provides:
+
+**Path operations** (work at any type):
+- `refl : forall (A : Type), forall (x : A), Path A x x` — reflexivity
+- `sym : forall (A : Type), forall (a : A), forall (b : A), Path A a b -> Path A b a` — symmetry
+- `trans : forall (A : Type), forall (a b c : A), Path A a b -> Path A b c -> Path A a c` — transitivity (via hcomp)
+- `cong : forall (A B : Type), forall (f : A -> B), forall (a b : A), Path A a b -> Path B (f a) (f b)` — congruence
+
+**Homotopy between functions**:
+- `Homotopy A B f g` — pointwise path between `f` and `g`
+- `homotopy_refl`, `homotopy_sym`, `homotopy_trans` — reflexivity, symmetry, transitivity
+- `funext : forall (A B : Type), forall (f g : A -> B), Homotopy A B f g -> Path (A -> B) f g` — function extensionality (theorem, not axiom)
+
+**Equivalences**:
+- `IsEquiv A B f g` — bi-invertible map record with `gf` and `fg` fields
+- `equiv_id : forall (A : Type), IsEquiv A A (fun x => x) (fun x => x)` — identity equivalence
+- `equiv_sym` — symmetry of equivalences
+
+**Loop spaces**:
+- `Omega A a` — the loop space `Path A a a`
+- `loop_trans`, `loop_id`, `loop_inv` — composition, identity, inverse in the loop space
+- `Omega2 A a` — the second loop space `Omega (Omega A a) (refl A a)`
+
+**Truncated types**:
+- `isProp A` — any two elements are equal
+- `isSet A` — any two paths between the same points are equal
+- `isGroupoid A` — paths between paths are equal
+
+**Contractibility and connectedness**:
+- `isContr A` — a type with a center of contraction
+- `isConnected A` — any two elements are path-connected
+
+```owl
+import "lib/homotopy.owl"
+
+-- The identity function is an equivalence.
+def id_is_equiv : forall (A : Type), IsEquiv A A (fun x => x) (fun x => x) :=
+  fun A => equiv_id A
+```
+
+### lib/circle.owl
+
+The circle `S1`, the fundamental higher inductive type in HoTT:
+
+- `S1` — HIT with constructors `base : S1` and `loop : S1 [base, base]`
+- `S1_loop_space : Type` — the type `Path S1 base base`
+- `S1_loop : S1_loop_space` — the non-trivial loop
+
+### lib/suspension.owl
+
+The suspension `Susp A`, dual to the loop space:
+
+- `Susp A` — HIT with constructors `north`, `south : Susp A` and `merid : A -> Susp A [north, south]`
+
+Key property: `Susp(S1) ≃ S2` (the 2-sphere).
+
+### lib/topology.owl
+
+Topological spaces and continuous maps using the predicate formulation
+(`opens : (X -> Type) -> Type` classifies open subsets):
+
+- `Topology X opens` — record with fields `whole_open`, `empty_open`, `union_open`, `inter_open`
+- `ContinuousMap X OX Y OY f` — record with field `continuous : forall V, OY V -> OX (fun x => V (f x))`
+- `discrete_opens` — every predicate is open (the finest topology)
+- `discrete_topology : forall X, Topology X (discrete_opens X)` — proof that discrete is a topology
+- `coproduct_topology` — proof that the coproduct of topological spaces is a topological space
+- `continuous_comp` — composition of continuous maps is continuous
+- `discrete_continuous` — universal property: any function from a discrete space is continuous
+
+```owl
+import "lib/topology.owl"
+
+inductive Two where
+  | t : Two
+  | f : Two
+
+-- Discrete topology on Two.
+def two_discrete : Topology Two (discrete_opens Two) := discrete_topology Two
+
+-- Identity is continuous.
+def id_cont :
+  ContinuousMap Two (discrete_opens Two) Two (discrete_opens Two) (fun x => x) :=
+  discrete_continuous Two Two (discrete_opens Two) (fun x => x)
 ```
 
 ### Example: Using Libraries
@@ -3664,4 +3754,6 @@ def add_comm : forall (m : Nat), forall (n : Nat),
 ```
 
 See `examples/ring_demo.owl`, `examples/comm_ring_demo.owl`,
-`examples/field_demo.owl`, and `examples/group_demo.owl` for worked examples.
+`examples/field_demo.owl`, `examples/group_demo.owl`,
+`examples/homotopy_demo.owl`, and `examples/topology_demo.owl`
+for worked examples.

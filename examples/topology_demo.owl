@@ -1,0 +1,27 @@
+-- examples/topology_demo.owl — Topology library demo (G4)
+--
+-- Exercises the topology definitions from lib/topology.owl:
+-- Topology record, ContinuousMap, discrete topology, and composition.
+
+import "../lib/topology.owl"
+
+inductive MyType where
+  | a : MyType
+  | b : MyType
+
+-- The discrete topology on MyType: every subset is open.
+def my_discrete : Topology MyType (discrete_opens MyType) := discrete_topology MyType
+
+-- Identity function is continuous from discrete to discrete.
+def id_continuous :
+  ContinuousMap MyType (discrete_opens MyType) MyType (discrete_opens MyType) (fun x => x) :=
+  discrete_continuous MyType MyType (discrete_opens MyType) (fun x => x)
+
+-- Constant function from discrete to any topology is continuous.
+def const_continuous :
+  forall (B : Type), forall (OB : (B -> Type) -> Type),
+  forall (b : B),
+  ContinuousMap MyType (discrete_opens MyType) B OB (fun _ => b) :=
+  fun B OB b => discrete_continuous MyType B OB (fun _ => b)
+
+def main : MyType := a
