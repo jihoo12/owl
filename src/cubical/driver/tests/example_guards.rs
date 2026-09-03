@@ -49,7 +49,14 @@ fn nat_path_algebra_example_checks() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join("nat_path_algebra.owl");
-    check(&path).expect("examples/nat_path_algebra.owl should typecheck");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn nat_path_algebra check thread");
+    handle
+        .join()
+        .expect("nat_path_algebra check thread panicked")
+        .expect("examples/nat_path_algebra.owl should typecheck");
 }
 
 #[test]
@@ -61,7 +68,14 @@ fn forall_after_arrow_example_checks() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join("forall_after_arrow.owl");
-    check(&path).expect("examples/forall_after_arrow.owl should typecheck");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn forall_after_arrow check thread");
+    handle
+        .join()
+        .expect("forall_after_arrow check thread panicked")
+        .expect("examples/forall_after_arrow.owl should typecheck");
 }
 
 #[test]
@@ -80,7 +94,15 @@ fn record_examples_check() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
             .join(name);
-        check(&path).unwrap_or_else(|e| panic!("examples/{name} should typecheck: {e}"));
+        let n = name.to_string();
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || check(&path))
+            .expect("spawn record check thread");
+        handle
+            .join()
+            .expect("record check thread panicked")
+            .unwrap_or_else(|e| panic!("examples/{n} should typecheck: {e}"));
     }
 }
 
@@ -132,7 +154,14 @@ fn omega_demo_example_checks() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join("omega_demo.owl");
-    check(&path).expect("examples/omega_demo.owl should typecheck");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn omega_demo check thread");
+    handle
+        .join()
+        .expect("omega_demo check thread panicked")
+        .expect("examples/omega_demo.owl should typecheck");
 }
 
 #[test]
@@ -391,24 +420,32 @@ fn all_example_files_check() {
     // regress. Each file is checked on a 64 MiB stack thread so large
     // proof trees don't overflow the default 2 MiB test-thread stack.
     let covered = [
-        "nat_path_algebra.owl",
-        "record_minimal.owl",
-        "record_types.owl",
-        "stress_record_types.owl",
-        "stress_update_or_patterns.owl",
-        "omega_demo.owl",
-        "ring_demo.owl",
-        "comm_ring_demo.owl",
-        "stress_mul_algebra.owl",
-        "field_demo.owl",
-        "indexed_transp_test.owl",
         "absurd_pattern.owl",
-        "postulate.owl",
+        "comm_ring_demo.owl",
+        "field_demo.owl",
+        "forall_after_arrow.owl",
+        "group_demo.owl",
+        "higher_dim_hcomp.owl",
         "homotopy_demo.owl",
+        "id_types.owl",
+        "indexed_transp_test.owl",
+        "int_demo.owl",
         // Skipped: isNType 1/2 generate deeply nested terms that overflow
         // even 64 MiB stacks. See TODO.md §I3. Fix the parser sugar, not
         // the stack size.
         "isntype_demo.owl",
+        "nat_path_algebra.owl",
+        "natcommring_demo.owl",
+        "omega_demo.owl",
+        "postulate.owl",
+        "record_minimal.owl",
+        "record_types.owl",
+        "refined_hit_cases.owl",
+        "ring_demo.owl",
+        "stress_mul_algebra.owl",
+        "stress_nested_patterns.owl",
+        "stress_record_types.owl",
+        "stress_update_or_patterns.owl",
     ];
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     let mut files: Vec<_> = std::fs::read_dir(&examples)
