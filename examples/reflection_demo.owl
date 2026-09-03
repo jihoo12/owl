@@ -1,6 +1,6 @@
 -- examples/reflection_demo.owl — Reflection API demo (E1)
 --
--- Exercises quote/unquote: normalising terms to ASTs and back.
+-- Exercises quote, unquote, getContext, and getType.
 
 import "../lib/reflection.owl"
 import "../lib/logic.owl"
@@ -10,5 +10,11 @@ def quoted_tt : OwlTerm := quote Unit tt
 
 -- Quote the identity function.
 def quoted_id : OwlTerm := quote (forall (A : Type), A -> A) (fun A x => x)
+
+-- Get the type of a value.
+def type_of_tt : OwlTerm := getType Unit tt
+
+-- Get the current context.
+def my_ctx : OwlTerm := getContext
 
 def main : OwlTerm := quoted_tt

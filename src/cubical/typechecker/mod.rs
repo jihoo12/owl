@@ -3196,6 +3196,24 @@ fn infer_dt_inner(
                 "unquote requires a type annotation: use (unquote ast : A) or let x : A := unquote ast".to_string()
             ))
         }
+
+        // Reflection: getContext
+        Term::TGetContext => match session.reflection_ctx() {
+            Some(_ctx) => Ok(Term::TData("OwlTerm".to_string(), Vec::new())),
+            None => Err(TypeError::Other(
+                "getContext: no reflection context in session".to_string(),
+            )),
+        },
+
+        // Reflection: getType t — infer the type of t and return it as a quoted AST.
+        Term::TGetType(t) => {
+            let ty = infer_dt(dts, ctx, t, session)?;
+            // Normalise the type to get a clean AST.
+            let ty_normalized = nbe_eval(&ty, session);
+            // Store the result so NbE can retrieve it.
+            session.store_reflection_result(t.as_ref().clone(), ty_normalized);
+            Ok(Term::TData("OwlTerm".to_string(), Vec::new()))
+        }
     }
 }
 

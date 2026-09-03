@@ -3750,10 +3750,14 @@ Reflection API for meta-programming (E1). Provides quoted ASTs as first-class va
 - `OwlTerm` — the type of quoted ASTs (postulated, backed by kernel's internal `Term`)
 - `quote : forall (A : Type), A -> OwlTerm` — normalise a term and return its AST
 - `unquote : forall (A : Type), OwlTerm -> A` — evaluate a quoted AST back into a term
+- `getType : forall (A : Type), A -> OwlTerm` — infer the type of a value and return the normalised type as an AST
+- `getContext : OwlTerm` — return the current typing context as a quoted AST
 
 Kernel primitives (parsed as keywords):
 - `quote_ast t` — normalises `t` and wraps the result as `OwlTerm`
 - `unquote_ast ast` — evaluates `ast` (must be `OwlTerm`) and returns the result; requires a type annotation in infer mode
+- `getContext_ast` — reads the current context from the session
+- `getType_ast t` — infers the type of `t`, normalises it, and stores for NbE retrieval
 
 ```owl
 import "lib/reflection.owl"
@@ -3763,6 +3767,12 @@ def quoted_tt : OwlTerm := quote Unit tt
 
 -- Quote the identity function.
 def quoted_id : OwlTerm := quote (forall (A : Type), A -> A) (fun A x => x)
+
+-- Get the type of a value.
+def type_of_tt : OwlTerm := getType Unit tt
+
+-- Get the current context.
+def my_ctx : OwlTerm := getContext
 ```
 
 ### Example: Using Libraries

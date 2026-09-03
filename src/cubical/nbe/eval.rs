@@ -843,6 +843,25 @@ fn eval_nbe_inner(
                 ),
             }
         }
+        Term::TGetContext => match session.reflection_ctx() {
+            Some(t) => Value::TermVal(t.clone()),
+            None => panic!("getContext: no reflection context in session"),
+        },
+        Term::TGetType(t) => {
+            // Look up the pre-computed result stored by the typechecker.
+            let t_term = (**t).clone();
+            match session.get_reflection_result(&t_term) {
+                Some(quoted) => Value::TermVal(quoted.clone()),
+                None => {
+                    // Not pre-computed — evaluate t and return a stuck neutral.
+                    let _t_val = eval_nbe(env, globals, global_offset, &t_term, session);
+                    Value::VNeutral(Neutral::new(
+                        NeutralInner::NVar(0), // placeholder
+                        Frontier::False,
+                    ))
+                }
+            }
+        }
     }
 }
 

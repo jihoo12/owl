@@ -1805,6 +1805,16 @@ fn quote_case_body(
             a,
             session,
         ))),
+        Term::TGetContext => Term::TGetContext,
+        Term::TGetType(a) => Term::TGetType(Arc::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            a,
+            session,
+        ))),
         Term::TProj(field, r) => Term::TProj(
             field.clone(),
             Arc::new(quote_case_body(

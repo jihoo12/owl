@@ -31,3 +31,20 @@ postulate quote : forall (A : Type), A -> OwlTerm
 -- Note: `unquote` requires a type annotation in infer mode.  Use a let
 -- binding or explicit type ascription: (unquote ast : A).
 postulate unquote : forall (A : Type), OwlTerm -> A
+
+-- Get the type of a term as a quoted AST.
+-- `getType t` infers the type of `t` in the current context and returns
+-- the normalised type as an `OwlTerm`.
+--
+-- Usage:
+--   getType (suc zero) : OwlTerm
+--     returns the quoted Nat type.
+postulate getType : forall (A : Type), A -> OwlTerm
+
+-- Get the current typing context as a quoted AST.
+-- Returns the context as nested pairs of (name, type).
+--
+-- Usage:
+--   getContext : OwlTerm
+--     returns the current context.
+postulate getContext : OwlTerm

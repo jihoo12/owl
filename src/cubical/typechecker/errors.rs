@@ -140,6 +140,10 @@ fn head_var_idx(t: &Term) -> Option<i32> {
             | Term::TUnquote(a) => {
                 go(a, best);
             }
+            Term::TGetType(a) => {
+                go(a, best);
+            }
+            Term::TGetContext => {}
             Term::TData(_, args) => {
                 for a in args {
                     go(a, best);

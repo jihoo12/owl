@@ -322,6 +322,10 @@ fn check_body_guard(
 
         // Quote/unquote — recurse into inner term.
         Term::TQuote(a) | Term::TUnquote(a) => check_body_guard(d, a, binder_count, def_idx),
+
+        // Reflection — recurse into inner term.
+        Term::TGetContext => Ok(()),
+        Term::TGetType(a) => check_body_guard(d, a, binder_count, def_idx),
     }
 }
 

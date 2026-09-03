@@ -144,6 +144,8 @@ available directly. See `rust-analyzer-db.md` for the full command list. The
   The latter are reserved for the postulated user-facing API in `lib/reflection.owl`.
   `quote_ast` normalises a term to its AST (`TermVal`); `unquote_ast` evaluates
   an AST back. `unquote_ast` requires a type annotation in infer mode.
+- **`getContext_ast`/`getType_ast`** are the kernel-level reflection primitives.
+  The user-facing `getContext` and `getType` in `lib/reflection.owl` wrap them.
 - `by_wf` is a trusted escape hatch that disables the structural-recursion
   guard; only use where the user approves.
 - **Tactic output is re-checked by the kernel** — the proof trees from

@@ -1037,6 +1037,13 @@ impl Parser {
         if self.consume_ident("unquote_ast") {
             return Ok(Term::TUnquote(Arc::new(self.parse_prefix_or_atom()?)));
         }
+        // Reflection (E1): getContext_ast/getType_ast
+        if self.consume_ident("getContext_ast") {
+            return Ok(Term::TGetContext);
+        }
+        if self.consume_ident("getType_ast") {
+            return Ok(Term::TGetType(Arc::new(self.parse_prefix_or_atom()?)));
+        }
         // Module-qualified reference: `M.name`, `M.Nat`, `M.Nat.zero`.  Only
         // fires when the leading segment is a module prefix; otherwise the
         // name falls through to the plain atom / record-projection path.

@@ -8,7 +8,7 @@
 
 ## Completed
 
-- [x] **E1 — Reflection API (Phase 1: quote/unquote).** ✅ Added `TQuote`/`TUnquote` to `Term`, `TermVal(Term)` to `Value`, `NUnquote` to `NeutralInner`. Parsed as `quote_ast`/`unquote_ast` prefix keywords. Type rules in `typechecker/mod.rs`: `quote_ast t : OwlTerm` (infers type of t, returns postulated OwlTerm type); `unquote_ast` requires type annotation — in check mode validates the quoted AST against the expected type. NbE evaluation in `eval.rs`: `quote_ast` normalises via `quote()` and wraps as `Value::TermVal`; `unquote_ast` unwraps `TermVal` and re-evaluates, or sticks as `NUnquote` neutral. Quoting in `quote.rs`: `TermVal` quotes back to its enclosed `Term`. `lib/reflection.owl` postulates `OwlTerm`, `quote`, `unquote`. `examples/reflection_demo.owl` exercises the API. Updated `equality.rs`, `nbe/meta.rs`, `nbe/transport.rs`, `syntax/positivity.rs`, `syntax/mod.rs`, `typechecker/errors.rs`, `typechecker/termination.rs` for new Term/Value variants. All 263 tests pass.
+- [x] **E1 — Reflection API (Phase 1+2: quote/unquote, getContext, getType).** ✅ Phase 1: Added `TQuote`/`TUnquote` to `Term`, `TermVal(Term)` to `Value`, `NUnquote` to `NeutralInner`. Parsed as `quote_ast`/`unquote_ast` prefix keywords. Phase 2: Added `TGetContext`/`TGetType` to `Term`, parsed as `getContext_ast`/`getType_ast`. `getContext_ast` reads the quoted context from `session.reflection_ctx` (set by the driver in `process_def`). `getType_ast t` infers the type of `t`, normalises it via `nbe_eval`, and stores the result in `session.reflection_results` for NbE lookup. `lib/reflection.owl` postulates `OwlTerm`, `quote`, `unquote`, `getType`, `getContext`. `examples/reflection_demo.owl` exercises the API. Updated equality, nbe/meta, nbe/transport, positivity, typechecker errors/termination for new variants. All 263 tests pass.
 
 - [x] **G4 — Topology / Homotopy.** ✅ `lib/topology.owl` expanded: added `coproduct_topology` (proof that coproduct of open sets is open), `continuous_comp` (composition of continuous maps), `discrete_continuous` (universal property: any function from discrete space is continuous). Product topology type definition (`product_opens`) and `indiscrete_opens` type added. `examples/topology_demo.owl` exercises the constructions. Previously added: `lib/homotopy.owl` (path operations, homotopy, equivalences, loop spaces, truncated types, contractibility), `lib/suspension.owl` (Susp HIT), `lib/circle.owl` (S1 HIT), `lib/logic.owl`. Fixed parallel substitution bug. 263/263 tests pass.
 
@@ -220,15 +220,16 @@ Cubical Agda can restrict `--cumulativity`, `--level-universe`, etc. Owl's Prop 
 
 ### E. Metaprogramming / Extensibility 🟡
 
-#### E1. Reflection API 🟡 (Phase 1 done)
+#### E1. Reflection API 🟡 (Phase 1+2 done)
 
 Cubical Agda exposes `Agda.Builtin.Reflection` for meta-programming: `TC` monad, quotation, unquotation, typeclass resolution, custom solvers.
 
 **Phase 1 ✅** (2026-09-03): Quote/unquote kernel primitives. Added `TQuote`/`TUnquote` to `Term`, `TermVal(Term)` to `Value`, `NUnquote` to `NeutralInner`. Parsed as `quote_ast`/`unquote_ast` keywords. Type rules: `quote_ast t : OwlTerm` (checks t, returns postulated type); `unquote_ast` requires type annotation (check mode). Evaluation: `quote_ast` normalises via `quote()` and wraps as `TermVal`; `unquote_ast` evaluates the enclosed Term. `lib/reflection.owl` postulates `OwlTerm`, `quote`, `unquote`. `examples/reflection_demo.owl` exercises the API. All 263 tests pass.
 
+**Phase 2 ✅** (2026-09-03): getContext/getType. Added `TGetContext`/`TGetType` to `Term`, parsed as `getContext_ast`/`getType_ast` keywords. `getContext_ast` reads the quoted context from `session.reflection_ctx` (set by driver in `process_def`). `getType_ast t` infers the type of `t`, normalises via `nbe_eval`, stores result in `session.reflection_results`. `lib/reflection.owl` adds `getType` and `getContext` postulates wrapping the kernel primitives. `examples/reflection_demo.owl` exercises getContext and getType.
+
 **Remaining**:
-- `getType : Name → TC Type` / `getContext : TC Context` (Phase 2)
-- `unify : Term → Term → TC Unit` (Phase 3)
+- `unify : Term -> Term -> TC Unit` (Phase 3)
 - TC monad binding (Phase 3)
 
 #### E2. Postulates ✅

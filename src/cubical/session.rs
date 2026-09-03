@@ -54,6 +54,14 @@ pub struct Session {
     pub skip_guard: bool,
     pub current_def: Option<String>,
 
+    // ── Reflection state ────────────────────────────────────────────
+    /// The current typing context, quoted as a Term for reflection.
+    /// Set by the typechecker before evaluating reflection primitives.
+    pub reflection_ctx: Option<Term>,
+    /// Pre-computed reflection results: maps Term to its quoted result.
+    /// Populated by the typechecker for getType/getContext.
+    pub reflection_results: Vec<(Term, Term)>,
+
     // ── Error positions ─────────────────────────────────────────────
     pub decl_name_positions: Vec<(Name, Pos, bool)>,
     // ── Debug trace ─────────────────────────────────────────────────
@@ -78,6 +86,8 @@ impl Session {
             skip_plam_endpt: false,
             skip_guard: false,
             current_def: None,
+            reflection_ctx: None,
+            reflection_results: Vec::new(),
             decl_name_positions: Vec::new(),
         }
     }
@@ -115,6 +125,9 @@ impl Session {
     }
     pub fn clear_nbe_cache(&mut self) {
         self.eval_cache.clear();
+    }
+    pub fn clear_reflection_results(&mut self) {
+        self.reflection_results.clear();
     }
 
     // ── NbE: eval depth ────────────────────────────────────────────
@@ -268,6 +281,23 @@ impl Session {
     }
     pub fn set_skip_plam_endpt(&mut self, skip: bool) {
         self.skip_plam_endpt = skip;
+    }
+
+    // ── Reflection state ──────────────────────────────────────────
+    pub fn set_reflection_ctx(&mut self, ctx: Option<Term>) {
+        self.reflection_ctx = ctx;
+    }
+    pub fn reflection_ctx(&self) -> Option<&Term> {
+        self.reflection_ctx.as_ref()
+    }
+    pub fn store_reflection_result(&mut self, key: Term, val: Term) {
+        self.reflection_results.push((key, val));
+    }
+    pub fn get_reflection_result(&self, key: &Term) -> Option<&Term> {
+        self.reflection_results
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
     }
 
     // ── Error positions ────────────────────────────────────────────

@@ -555,6 +555,8 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
             check_positivity_in(target, a, negative)
         }
         Term::TQuote(a) | Term::TUnquote(a) => check_positivity_in(target, a, negative),
+        Term::TGetContext => Ok(()),
+        Term::TGetType(a) => check_positivity_in(target, a, negative),
     }
 }
 

@@ -212,6 +212,7 @@ fn process_file_source(
 ) -> Result<(), RunError> {
     let mut parser = ProgramParser::new_with_prefix(source, forced_prefix, session)?;
     session.clear_nbe_cache();
+    session.clear_reflection_results();
     // Accumulate name positions across the whole program so globals from
     // earlier declarations (which may only surface as inferred types) resolve
     // to a position. Reverse lookup prefers the most recent occurrence.
@@ -330,6 +331,7 @@ fn process_file_source(
         })();
         result?;
         session.clear_nbe_cache();
+        session.clear_reflection_results();
     }
     session.clear_decl_name_positions();
     Ok(())
@@ -893,6 +895,7 @@ fn process_postulate(
     session: &mut Session,
 ) -> Result<(), RunError> {
     session.clear_nbe_cache();
+    session.clear_reflection_results();
     crate::debug_log!("process_postulate '{}':", name);
 
     // Verify the type is in a universe.
@@ -923,6 +926,7 @@ fn process_def(
     session: &mut Session,
 ) -> Result<RunOutput, RunError> {
     session.clear_nbe_cache();
+    session.clear_reflection_results();
     crate::debug_log!("process_def '{}':", name);
     if by_wf {
         crate::cubical::typechecker::termination::set_skip_guard(true, session);
@@ -1005,6 +1009,24 @@ fn process_def(
         crate::cubical::typechecker::termination::set_current_def(Some(name.clone()), session);
     let tm_check = PhaseTiming::start(name.as_str());
     let from_tactic = matches!(val, Term::TBy(_));
+
+    // Set the reflection context so getContext can access it during NbE.
+    // Encode context as nested pairs: ((name1, type1), ((name2, type2), ...)).
+    let ctx_term = global_ctx.iter().rfold(
+        Term::TCon("Unit".to_string(), "tt".to_string(), Vec::new()),
+        |acc, (n, t)| {
+            Term::TPair(
+                Arc::new(Term::TPair(
+                    Arc::new(Term::TData("String".to_string(), vec![Term::TVar(0)])),
+                    Arc::new(t.clone()),
+                )),
+                Arc::new(acc),
+            )
+        },
+    );
+    let prev_ctx = session.reflection_ctx().cloned();
+    session.set_reflection_ctx(Some(ctx_term));
+
     let result = check_with_full_env(env, &resolved_val, &check_ty, session).map_err(|e| {
         let err = ContextualError::with_def(name, e);
         if from_tactic && !crate::cubical::debug::is_active() {
@@ -1018,6 +1040,7 @@ fn process_def(
     });
     tm_check.report("kernel-recheck");
     crate::cubical::typechecker::termination::set_current_def(prev_def, session);
+    session.set_reflection_ctx(prev_ctx);
     if by_wf {
         crate::cubical::typechecker::termination::set_skip_guard(false, session);
     }
