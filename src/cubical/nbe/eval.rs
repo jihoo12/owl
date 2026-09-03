@@ -15,7 +15,7 @@ use super::trace::record_step;
 use super::transport::{do_transp, do_transport, transport_term_fallback};
 use super::util::{do_equiv_fwd, equiv_dom_value, value_to_dnf, value_to_endpoint};
 use super::value::{
-    Closure, DNFSystem, Globals, IClosure, Neutral, NeutralInner, Scope, Value, value_str,
+    Closure, DNFSystem, Frontier, Globals, IClosure, Neutral, NeutralInner, Scope, Value, value_str,
 };
 use crate::cubical::interval::{DNF, I, Literal, dnf_bot, dnf_top};
 use crate::cubical::session::Session;
@@ -821,6 +821,28 @@ fn eval_nbe_inner(
             global_offset,
             session,
         ),
+        // Reflection (E1): quote t — normalise t and wrap the AST as a value.
+        Term::TQuote(t) => {
+            let t_val = eval_nbe(env, globals, global_offset, t, session);
+            let t_term = quote(env.len(), globals, global_offset, t_val, session);
+            Value::TermVal(t_term)
+        }
+        // Reflection (E1): unquote ast — ast must evaluate to a TermVal;
+        // re-evaluate the enclosed Term in the current environment.
+        Term::TUnquote(ast) => {
+            let ast_val = eval_nbe(env, globals, global_offset, ast, session);
+            match ast_val {
+                Value::TermVal(t) => eval_nbe(env, globals, global_offset, &t, session),
+                Value::VNeutral(n) => Value::VNeutral(Neutral::new(
+                    NeutralInner::NUnquote(Arc::new(n)),
+                    Frontier::False,
+                )),
+                _ => panic!(
+                    "unquote: expected a quoted term or neutral, got {:?}",
+                    ast_val
+                ),
+            }
+        }
     }
 }
 

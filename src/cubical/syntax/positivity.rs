@@ -554,6 +554,7 @@ fn check_positivity_in(target: &str, ty: &Term, negative: bool) -> Result<(), Po
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
             check_positivity_in(target, a, negative)
         }
+        Term::TQuote(a) | Term::TUnquote(a) => check_positivity_in(target, a, negative),
     }
 }
 

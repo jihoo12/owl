@@ -1,0 +1,14 @@
+-- examples/reflection_demo.owl — Reflection API demo (E1)
+--
+-- Exercises quote/unquote: normalising terms to ASTs and back.
+
+import "../lib/reflection.owl"
+import "../lib/logic.owl"
+
+-- Quote a unit value.
+def quoted_tt : OwlTerm := quote Unit tt
+
+-- Quote the identity function.
+def quoted_id : OwlTerm := quote (forall (A : Type), A -> A) (fun A x => x)
+
+def main : OwlTerm := quoted_tt

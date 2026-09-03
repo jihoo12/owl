@@ -1030,6 +1030,13 @@ impl Parser {
             let p = self.parse_prefix_or_atom()?;
             return Ok(Term::TJ(Arc::new(motive), Arc::new(base), Arc::new(p)));
         }
+        // Reflection (E1): quote_ast/unquote_ast
+        if self.consume_ident("quote_ast") {
+            return Ok(Term::TQuote(Arc::new(self.parse_prefix_or_atom()?)));
+        }
+        if self.consume_ident("unquote_ast") {
+            return Ok(Term::TUnquote(Arc::new(self.parse_prefix_or_atom()?)));
+        }
         // Module-qualified reference: `M.name`, `M.Nat`, `M.Nat.zero`.  Only
         // fires when the leading segment is a module prefix; otherwise the
         // name falls through to the plain atom / record-projection path.

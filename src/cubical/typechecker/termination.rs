@@ -319,6 +319,9 @@ fn check_body_guard(
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
             check_body_guard(d, a, binder_count, def_idx)
         }
+
+        // Quote/unquote — recurse into inner term.
+        Term::TQuote(a) | Term::TUnquote(a) => check_body_guard(d, a, binder_count, def_idx),
     }
 }
 

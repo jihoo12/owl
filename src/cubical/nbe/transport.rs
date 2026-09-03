@@ -502,6 +502,7 @@ pub fn uses_var_at_level(t: &Term, level: i32) -> bool {
         Term::Meta(_) => false,
         Term::TBy(_) => false,
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => uses_var_at_level(a, level),
+        Term::TQuote(a) | Term::TUnquote(a) => uses_var_at_level(a, level),
     }
 }
 

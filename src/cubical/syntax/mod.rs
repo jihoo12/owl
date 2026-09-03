@@ -214,6 +214,14 @@ pub enum Term {
     TDelay(Arc<Term>),
     TNext(Arc<Term>),
     TForce(Arc<Term>),
+
+    // -- Reflection (E1) ----------------------------------------------------
+    /// Quote a term to its AST representation.  `quote t` normalises `t` and
+    /// returns the result as a first-class `Term` value.
+    TQuote(Arc<Term>),
+    /// Unquote a quoted AST back into a term.  `unquote ast` evaluates `ast`
+    /// (which must be a well-formed `Term` value) and returns the result.
+    TUnquote(Arc<Term>),
 }
 
 /// One arm of an eliminator. Binds `binders.len()` fresh variables over
@@ -686,6 +694,8 @@ pub fn shift(d: i32, c: i32, term: &Term) -> Term {
         Term::TDelay(a) => Term::TDelay(b(shift(d, c, a))),
         Term::TNext(a) => Term::TNext(b(shift(d, c, a))),
         Term::TForce(a) => Term::TForce(b(shift(d, c, a))),
+        Term::TQuote(a) => Term::TQuote(b(shift(d, c, a))),
+        Term::TUnquote(a) => Term::TUnquote(b(shift(d, c, a))),
     }
 }
 
@@ -890,6 +900,8 @@ pub fn subst(j: i32, s: &Term, term: &Term) -> Term {
         Term::TDelay(a) => Term::TDelay(b(subst(j, s, a))),
         Term::TNext(a) => Term::TNext(b(subst(j, s, a))),
         Term::TForce(a) => Term::TForce(b(subst(j, s, a))),
+        Term::TQuote(a) => Term::TQuote(b(subst(j, s, a))),
+        Term::TUnquote(a) => Term::TUnquote(b(subst(j, s, a))),
     }
 }
 
@@ -1563,6 +1575,18 @@ fn subst_params_inner(
             binder_depth,
             a,
         ))),
+        Term::TQuote(a) => Term::TQuote(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            a,
+        ))),
+        Term::TUnquote(a) => Term::TUnquote(b(subst_params_inner(
+            num_params,
+            param_values,
+            binder_depth,
+            a,
+        ))),
     }
 }
 
@@ -1740,6 +1764,8 @@ pub fn max_var(t: &Term) -> i32 {
         Term::TDelay(a) => max_var(a),
         Term::TNext(a) => max_var(a),
         Term::TForce(a) => max_var(a),
+        Term::TQuote(a) => max_var(a),
+        Term::TUnquote(a) => max_var(a),
     }
 }
 

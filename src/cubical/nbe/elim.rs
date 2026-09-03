@@ -944,6 +944,11 @@ pub(super) fn try_destabilize(
             Some(result)
         }
 
+        // NUnquote(n): unquote stuck on a neutral.  Defer to quoting —
+        // the neutral will be re-quoted as `TUnquote(...)` and may
+        // reduce on the next evaluation pass.
+        NeutralInner::NUnquote(_) => None,
+
         // NElim(motive, cases, scrut, env, go): datatype elimination.
         // Try to destabilize the scrutinee; if it computes to a constructor,
         // re-enter do_elim.

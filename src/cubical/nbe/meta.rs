@@ -78,7 +78,9 @@ pub fn meta_mentions(id: i32, t: &Term) -> bool {
         | Term::TLower(p)
         | Term::TDelay(p)
         | Term::TNext(p)
-        | Term::TForce(p) => meta_mentions(id, p),
+        | Term::TForce(p)
+        | Term::TQuote(p)
+        | Term::TUnquote(p) => meta_mentions(id, p),
         Term::TRecordUpdate(r, updates) => {
             meta_mentions(id, r) || updates.iter().any(|(_, e)| meta_mentions(id, e))
         }
@@ -257,6 +259,8 @@ pub fn zonk(t: &Term, session: &Session) -> Term {
             Term::TDelay(p) => Term::TDelay(Arc::new(zonk_inner(p, session))),
             Term::TNext(p) => Term::TNext(Arc::new(zonk_inner(p, session))),
             Term::TForce(p) => Term::TForce(Arc::new(zonk_inner(p, session))),
+            Term::TQuote(p) => Term::TQuote(Arc::new(zonk_inner(p, session))),
+            Term::TUnquote(p) => Term::TUnquote(Arc::new(zonk_inner(p, session))),
             Term::TRecordUpdate(r, updates) => Term::TRecordUpdate(
                 Arc::new(zonk_inner(r, session)),
                 updates
@@ -387,7 +391,9 @@ fn term_children_ref(t: &Term) -> Vec<&Term> {
         | Term::TLower(p)
         | Term::TDelay(p)
         | Term::TNext(p)
-        | Term::TForce(p) => vec![p.as_ref()],
+        | Term::TForce(p)
+        | Term::TQuote(p)
+        | Term::TUnquote(p) => vec![p.as_ref()],
         Term::TRecordUpdate(r, updates) => {
             let mut children: Vec<&Term> = vec![r.as_ref()];
             for (_, e) in updates.iter() {

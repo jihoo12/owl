@@ -131,7 +131,13 @@ fn head_var_idx(t: &Term) -> Option<i32> {
                 go(a, best);
                 go(b, best);
             }
-            Term::TFst(a) | Term::TSnd(a) | Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
+            Term::TFst(a)
+            | Term::TSnd(a)
+            | Term::TDelay(a)
+            | Term::TNext(a)
+            | Term::TForce(a)
+            | Term::TQuote(a)
+            | Term::TUnquote(a) => {
                 go(a, best);
             }
             Term::TData(_, args) => {

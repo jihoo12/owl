@@ -176,6 +176,8 @@ pub enum Value {
     VDelay(Arc<Value>),
     VNext(Arc<Value>),
     VForce(Arc<Value>),
+    /// A quoted `Term` held as a first-class value (reflection E1).
+    TermVal(Term),
 }
 
 #[derive(Debug, Clone)]
@@ -300,6 +302,8 @@ pub enum NeutralInner {
     NForce(Arc<Neutral>),
     /// Record field projection stuck on a neutral record value.
     NProj(Arc<Neutral>, Name),
+    /// Unquote stuck on a neutral quoted-term argument (reflection E1).
+    NUnquote(Arc<Neutral>),
 }
 
 impl Neutral {

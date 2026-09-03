@@ -128,7 +128,11 @@ pub fn term_size(t: &Term) -> usize {
         Term::TRecordUpdate(r, updates) => {
             1 + term_size(r) + updates.iter().map(|(_, e)| term_size(e)).sum::<usize>()
         }
-        Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => 1 + term_size(a),
+        Term::TDelay(a)
+        | Term::TNext(a)
+        | Term::TForce(a)
+        | Term::TQuote(a)
+        | Term::TUnquote(a) => 1 + term_size(a),
         Term::TCellCon(_, _, args, ivars) => {
             1 + args.iter().map(term_size).sum::<usize>()
                 + ivars.iter().map(term_size).sum::<usize>()

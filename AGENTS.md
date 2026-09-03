@@ -140,6 +140,10 @@ available directly. See `rust-analyzer-db.md` for the full command list. The
   (`forall (a : Nat), forall (b : Nat), Path Nat a b -> …`).
 - **Tactic `by` blocks must sit at the root of a `def`** (a top-level `TBy`).
   `fun … => by ring with C` nested inside a body panics at NbE — don't write it.
+- **Reflection keywords are `quote_ast`/`unquote_ast`**, not `quote`/`unquote`.
+  The latter are reserved for the postulated user-facing API in `lib/reflection.owl`.
+  `quote_ast` normalises a term to its AST (`TermVal`); `unquote_ast` evaluates
+  an AST back. `unquote_ast` requires a type annotation in infer mode.
 - `by_wf` is a trusted escape hatch that disables the structural-recursion
   guard; only use where the user approves.
 - **Tactic output is re-checked by the kernel** — the proof trees from

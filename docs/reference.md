@@ -3743,6 +3743,28 @@ def id_cont :
   discrete_continuous Two Two (discrete_opens Two) (fun x => x)
 ```
 
+### lib/reflection.owl
+
+Reflection API for meta-programming (E1). Provides quoted ASTs as first-class values:
+
+- `OwlTerm` — the type of quoted ASTs (postulated, backed by kernel's internal `Term`)
+- `quote : forall (A : Type), A -> OwlTerm` — normalise a term and return its AST
+- `unquote : forall (A : Type), OwlTerm -> A` — evaluate a quoted AST back into a term
+
+Kernel primitives (parsed as keywords):
+- `quote_ast t` — normalises `t` and wraps the result as `OwlTerm`
+- `unquote_ast ast` — evaluates `ast` (must be `OwlTerm`) and returns the result; requires a type annotation in infer mode
+
+```owl
+import "lib/reflection.owl"
+
+-- Quote a value to its AST.
+def quoted_tt : OwlTerm := quote Unit tt
+
+-- Quote the identity function.
+def quoted_id : OwlTerm := quote (forall (A : Type), A -> A) (fun A x => x)
+```
+
 ### Example: Using Libraries
 
 ```owl
@@ -3755,5 +3777,5 @@ def add_comm : forall (m : Nat), forall (n : Nat),
 
 See `examples/ring_demo.owl`, `examples/comm_ring_demo.owl`,
 `examples/field_demo.owl`, `examples/group_demo.owl`,
-`examples/homotopy_demo.owl`, and `examples/topology_demo.owl`
-for worked examples.
+`examples/homotopy_demo.owl`, `examples/topology_demo.owl`,
+and `examples/reflection_demo.owl` for worked examples.

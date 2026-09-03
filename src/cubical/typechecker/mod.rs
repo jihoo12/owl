@@ -3173,6 +3173,29 @@ fn infer_dt_inner(
                 ))),
             }
         }
+
+        // Reflection (E1): quote t : Term
+        // Normalises `t` and wraps the result AST as a first-class value.
+        Term::TQuote(t) => {
+            // Typecheck the subterm so it's well-formed.
+            let _ty = infer_dt(dts, ctx, t, session)?;
+            // Return the postulated Term type (resolved via global name).
+            Ok(Term::TData("OwlTerm".to_string(), Vec::new()))
+        }
+
+        // Reflection (E1): unquote ast
+        // In *infer* mode this is ambiguous (we don't know the target type
+        // without evaluating `ast`).  The caller should use check mode:
+        //   (unquote ast : A)   — checks ast : Term, then checks the
+        //   unquoted result against A.  For now, infer returns a fresh
+        //   meta-variable so the check-mode rule can refine it.
+        Term::TUnquote(_ast) => {
+            // We can't infer the type of unquote without knowing what the
+            // quoted term represents.  Return a type-error hint.
+            Err(TypeError::Other(
+                "unquote requires a type annotation: use (unquote ast : A) or let x : A := unquote ast".to_string()
+            ))
+        }
     }
 }
 
@@ -4040,6 +4063,30 @@ fn check_dt_inner(
                 &nbe_eval_ctx(ctx.len(), &inferred, session),
                 session,
             )
+        }
+
+        // Reflection (E1): unquote ast : A
+        // Check that `ast` is a well-formed quoted term (of type OwlTerm),
+        // then check that the unquoted result type-checks against the
+        // expected type `ty`.
+        Term::TUnquote(ast) => {
+            let term_ty = Term::TData("OwlTerm".to_string(), Vec::new());
+            check_dt(dts, ctx, ast, &term_ty, session)?;
+            // Normalise `ast` to get the quoted term, then check it has
+            // the expected type.  This validates that the unquoted AST is
+            // well-typed at the expected type.
+            let ast_val = nbe_eval(ast, session);
+            match ast_val {
+                Term::TData(name, _) if name == "OwlTerm" => {
+                    // ast didn't reduce to a TermVal — it's stuck.
+                    // Accept it; the runtime unquote will handle it.
+                    Ok(())
+                }
+                _ => {
+                    // ast reduced to something — check it against ty.
+                    check_dt(dts, ctx, &ast_val, ty, session)
+                }
+            }
         }
 
         // Fall through to inference + cumulativity.

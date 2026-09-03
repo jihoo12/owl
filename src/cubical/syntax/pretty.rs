@@ -299,6 +299,8 @@ pub fn show_term(env: &[Name], t: &Term) -> String {
         Term::TDelay(a) => format!("Delay {}", show_term(env, a)),
         Term::TNext(a) => format!("Next {}", show_term(env, a)),
         Term::TForce(a) => format!("Force {}", show_term(env, a)),
+        Term::TQuote(a) => format!("quote_ast {}", show_term(env, a)),
+        Term::TUnquote(a) => format!("unquote_ast {}", show_term(env, a)),
     }
 }
 

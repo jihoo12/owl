@@ -698,6 +698,7 @@ fn quote_inner(
             a.as_ref().clone(),
             session,
         ))),
+        Value::TermVal(t) => t.clone(),
     }
 }
 
@@ -903,6 +904,13 @@ fn quote_neutral(
                 session,
             )),
         ),
+        NeutralInner::NUnquote(n) => Term::TUnquote(Arc::new(quote_neutral(
+            size,
+            globals,
+            global_offset,
+            (**n).clone(),
+            session,
+        ))),
     }
 }
 
@@ -1771,6 +1779,24 @@ fn quote_case_body(
             session,
         ))),
         Term::TForce(a) => Term::TForce(Arc::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            a,
+            session,
+        ))),
+        Term::TQuote(a) => Term::TQuote(Arc::new(quote_case_body(
+            size,
+            globals,
+            global_offset,
+            env,
+            go,
+            a,
+            session,
+        ))),
+        Term::TUnquote(a) => Term::TUnquote(Arc::new(quote_case_body(
             size,
             globals,
             global_offset,
