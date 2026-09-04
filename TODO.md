@@ -40,7 +40,7 @@
 
 - [x] **NbE eval depth guard + Arc-based O(1) clone + TApp spine trampoline.** `EVAL_NBE_MAX_DEPTH=2000` in `eval.rs` prevents stack overflow. All `Term`/`Value`/`Neutral`/`I`/`Frontier` subterms migrated from `Box` to `Arc` — `Term::clone()` is now O(1) (atomic refcount). `meta.rs` zonk rewritten as recursive rebuild (no in-place mutation). TApp evaluation collects the left spine iteratively: `TApp(TApp(TApp(f, a1), a2), a3)` → head=f, spine=[a1,a2,a3], then iteratively apply. This eliminates O(n) stack depth for deep application chains. Deep TApp chains (2,500+ applications) work on a 2 MiB stack thread. 256/256 tests pass, `cargo fmt` clean.
 
-- [x] **A2 — Indexed inductive type transport.** Fixed `transport_data_con`/`pcon`/`sqcon`/`cellcon` in `transport.rs`. The old indexed path tried to extract Pi types from `VData(d, params_at_i)`, which immediately fell through (VData is not VPi). The new approach: evaluate the closure at the formal interval variable to get `VData(d, params_at_i)`, then for each constructor arg type `T_k`, substitute each data type param variable `TVar(n + m - j)` with `quote(params_at_i[j])`. This correctly builds type families where data type parameters change along the interval. Creating a test for the non-constant path requires a `Path Type A B` with `A ≠ B`, which needs Glue/univalence — deferred. 253/253 tests pass, `cargo fmt` clean.
+- [x] **A2 — Indexed inductive type transport.** Fixed `transport_data_con`/`pcon`/`sqcon`/`cellcon` in `transport.rs`. The old indexed path tried to extract Pi types from `VData(d, params_at_i)`, which immediately fell through (VData is not VPi). The new approach: evaluate the closure at the formal interval variable to get `VData(d, params_at_i)`, then for each constructor arg type `T_k`, substitute each data type param variable `TVar(n + m - j)` with `quote(params_at_i[j])`. This correctly builds type families where data type parameters change along the interval. Creating a test for the non-constant path requires a `Path Type A B` with `A ≠ B`, which needs Glue/univalence — deferred. **Does NOT cover** dependent pattern matching / elimination on indexed types (see A6). 253/253 tests pass, `cargo fmt` clean.
 
 - [x] **A1 — Generalized transport (`transp`) primitive.** ✅ Full implementation: `TTransp(A, r, x)` AST, `VTransp`/`NTransp` values, parser syntax, eval with endpoint reduction (`i0`→base, `i1`→`do_transport`, non-concrete→stuck), eta-expansion for non-VPLam families, quote/quote_neutral/quote_case_body, typechecker infer rule, per-typeformer decomposition via `do_transport` VPLam branch (Pi, Sigma, Path, data, Glue). `examples/transp_basic.owl` exercises constant-family, function-lambda, Sigma, Pi, nested transport. 253/253 tests pass.
 
@@ -128,6 +128,8 @@ A consequence of A1. Cubical Agda's `transp` computes through indexed types by s
 
 **Test**: `examples/indexed_transp_test.owl` exercises the non-constant path (`is_constant = false`) by constructing `Bool ≃ Bool'` via `mkEquiv`, using `ua` to build a `Path U0 Bool Bool'`, then transporting `cons tt nil : List Bool` through `List (ua bool_bool' @ i)` to produce `List Bool'`. Also added `VUa` PApp endpoint reduction (`ua e @ 0 = equiv_dom(e)`, `ua e @ 1 = equiv_cod(e)`) in `elim.rs` so that `is_constant` correctly detects non-constant families. All 254 tests pass.
 
+**Does NOT cover**: A2 only handles transport (cubical `transp`/`coe`) through indexed types — an NbE-level operation on whole terms. It does **not** fix dependent pattern matching / elimination on indexed types (e.g. `vtail : Vec A (suc n) -> Vec A n`), which is a separate typechecking-level feature requiring index unification. See A6.
+
 - [x] **A3 — Frontier-of-instability Phase 4 (quoting).** ✅ Made `try_destabilize` `pub(super)` in `elim.rs`. In `quote_case_body`, the `_ => quote(...)` fallback now checks if the value is a `VNeutral` with a satisfied frontier and attempts destabilization before quoting. Defensive — kernel re-checks everything. `src/cubical/nbe/quote.rs`, `src/cubical/nbe/elim.rs`. 256/256 tests pass.
 
 #### A4. Cubical identity types (`Id`) ✅
@@ -153,6 +155,44 @@ Cubical Agda has a separate `Id` type where `J` computes **definitionally** on `
 This enables square composition (2D hcomp): composing paths whose type is itself a Path type. The decomposition recursively pushes hcomp through the Path structure until a non-Path type is reached.
 
 **Files**: `nbe/hcomp.rs`. **Example**: `examples/higher_dim_hcomp.owl` (tests empty system, constant tube, two-tube, fill, hfill, nested hcomp through Path types). 258/258 tests pass.
+
+#### A6. Indexed dependent pattern matching / index unification 🔴
+
+**Status**: OPEN — includes a confirmed soundness bug.
+
+When matching on an indexed inductive type (e.g. `Vec A n`), the kernel must **unify** the constructor's indices with the scrutinee's actual indices. Currently it does not: it blindly substitutes the scrutinee's parameters into each constructor's argument types, which is wrong when indices differ between constructors.
+
+**Example failure** (`lib/vector.owl`):
+```
+def vtail : forall (A : Type), forall (n : Nat), Vec A (suc n) -> Vec A n :=
+  fun A n v => match v return Vec A n with
+  | nil => nil
+  | cons x xs => xs  -- ERROR: xs : Vec A (suc n), expected Vec A n
+```
+The kernel substitutes the scrutinee's index `suc n` into `cons`'s arg type `Vec A n`, giving `xs : Vec A (suc n)`. It should instead unify `suc n' = suc n` (where `n'` is `cons`'s fresh index) to derive `n' = n`, making `xs : Vec A n`.
+
+**Soundness bug** (🔴 critical): Zero-arity constructors of indexed types are accepted against *any* index, not just their declared index. Reproduction:
+```
+inductive Eq (A : Type) (x : A) (y : A) where
+  | refl : Eq A x x
+
+def bad_eq : Eq Nat zero (suc zero) := refl  -- ACCEPTED (should fail: zero ≠ suc zero)
+def exploit : Eq Nat zero (suc zero) -> Empty := fun p => match p return Empty with | refl => void
+def unsound : Empty := exploit bad_eq  -- PROVES FALSE
+```
+NbE evaluates `main : Empty = void`. This is a genuine unsoundness: the kernel proves `Empty` (= `False`).
+
+**Root cause**: `Datatype` has no distinction between **parameters** (same in all constructors, like `A` in `List A`) and **indices** (vary per constructor, like `n` in `Vec A n`). All type arguments are stored as `params: Vec<(Name, Term)>`. The `check_dt_inner` handler for zero-arity constructors seeds parameters from the expected type and compares them against themselves, never validating that the constructor's actual return type matches the expected type.
+
+**Impact on existing tests**: None currently — the only indexed type in the codebase is `Vec` (just added in `lib/vector.owl`), and no tests rely on the bug. But any future indexed type with zero-arity constructors would be affected.
+
+**Fix plan**:
+1. Add `indices: Vec<usize>` field to `Datatype` in `syntax/mod.rs` — indices into `params` that are true indices (not parameters). Parser marks which params are indices.
+2. Add **index unification** during pattern matching in `typechecker/mod.rs` (`check_dt_inner` / `TElim` handler): when a constructor's return type mentions index params, unify those with the scrutinee's actual indices via `require_equal`.
+3. Fix the **zero-arity constructor soundness bug**: in `check_dt_inner`, when checking a zero-arity constructor against an expected type, validate that the constructor's actual return type (after substituting inferred params) is definitionally equal to the expected type — not just that the params match themselves.
+4. Update `subst_params_local` to use unified index values for index params instead of the scrutinee's raw param substitution.
+
+**Scope**: ~4 functions to modify (`Datatype` struct, parser param classification, `check_dt_inner` TCon handler, `subst_params_local`). Medium regression risk — the existing 264 tests should pass unchanged since they don't use indexed types, but the pattern matching codepath is kernel-critical.
 
 ---
 
@@ -379,7 +419,8 @@ Spectrum types for stable homotopy theory. Research-level.
 10. ~~**F1 (interactive REPL)**~~ — ✅ done.
 11. ~~**C1 (datatypes in parameterized modules)**~~ — ✅ done. Unblocks Cubical Agda module parity.
 12. ~~**G1 (core data types)**~~ — ✅ done. List, Vector, Maybe, Int, Bool libraries with proofs. Foundational for stdlib.
-13. **G3 (logic)** — propositional logic, quantifiers, decidability. Unlocks ideal predicates for G6.
+13. **A6 (indexed dependent pattern matching)** — 🔴 soundness bug: kernel proves False via zero-arity constructor index mismatch. Blocks safe use of any indexed type.
+14. **G3 (logic)** — propositional logic, quantifiers, decidability. Unlocks ideal predicates for G6.
 14. **G2 (algebra extensions)** — lattices, ordered structures. Feeds into G5 (categories of algebraic structures).
 15. **G5 (category theory)** — Category, Functor, NatTrans, Yoneda. Showcases G1–G2.
 16. **G6 (algebraic geometry)** — ideals, polynomial rings, Spec, sheaves. Needs G1+G2+G3.

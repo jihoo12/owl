@@ -7,7 +7,8 @@
 -- NOTE: Indexed inductive types in this kernel have limited support
 -- for dependent elimination. The type definition and basic constructors
 -- are provided; more advanced operations (vmap, vappend) require
--- indexed pattern matching that is not yet fully supported.
+-- index unification during pattern matching that is not yet implemented.
+-- See TODO.md A6 for the plan and the confirmed soundness bug.
 
 inductive Nat where
   | zero : Nat
