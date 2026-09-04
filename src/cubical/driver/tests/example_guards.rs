@@ -413,6 +413,19 @@ fn homotopy_lib_checks() {
 }
 
 #[test]
+fn custom_tactic_example_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/custom_tactic.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .unwrap();
+    handle
+        .join()
+        .unwrap()
+        .expect("custom_tactic.owl should typecheck");
+}
+
+#[test]
 fn all_example_files_check() {
     // Sweep every examples/*.owl file not already covered by a dedicated
     // test above (cubical/HIT/path/param/quotient/tactics/record demos and
@@ -422,6 +435,7 @@ fn all_example_files_check() {
     let covered = [
         "absurd_pattern.owl",
         "comm_ring_demo.owl",
+        "custom_tactic.owl",
         "field_demo.owl",
         "forall_after_arrow.owl",
         "group_demo.owl",

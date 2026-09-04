@@ -796,7 +796,11 @@ impl Parser {
         if self.consume_ident("eq") {
             return Ok(Tactic::Eq);
         }
-        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', 'omega', 'ring', 'field', 'group', 'ring with <term>', 'field with <term>', or 'group with <term>'"))
+        if self.consume_ident("tactic") {
+            let name = self.expect_ident("expected tactic name after 'tactic'")?;
+            return Ok(Tactic::Custom(name));
+        }
+        Err(self.error_here("expected tactic: 'exact', 'intro', 'apply', 'assumption', 'reflexivity', 'symmetry', 'split', 'constructor', 'destruct', 'transitivity', 'compute', 'trivial', 'omega', 'ring', 'field', 'group', 'ring with <term>', 'field with <term>', 'group with <term>', or 'tactic <name>'"))
     }
 
     fn parse_pair(&mut self) -> Result<Term, ParseError> {
@@ -3396,6 +3400,7 @@ fn is_tactic_keyword(name: &str) -> bool {
             | "field"
             | "group"
             | "eq"
+            | "tactic"
             | "def"
             | "inductive"
             | "record"

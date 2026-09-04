@@ -1,5 +1,5 @@
 use crate::cubical::equality::EtaResult;
-use crate::cubical::nbe::{nbe_eval, nbe_eval_ctx};
+use crate::cubical::nbe::{Scope, nbe_eval, nbe_eval_ctx, quote};
 use crate::cubical::session::Session;
 use crate::cubical::syntax::{Datatype, Name, Term, beta, shift, show_term};
 use crate::cubical::typechecker::{Ctx, TypeError, err_pos, infer_dt};
@@ -1163,6 +1163,120 @@ impl<'a> TacticEngine<'a> {
                     session,
                 )?;
                 self.result = Some(result);
+                Ok(())
+            }
+
+            // ── custom tactic ────────────────────────────────────────────
+            Tactic::Custom(name) => {
+                // Find the tactic function in the global definitions.
+                // `outer_ctx` has the current def at index 0, followed by
+                // env.defs most-recent-first.  The session's globals vector
+                // is built from env.defs *before* the current def is
+                // registered, so it has one fewer entry: globals[i] =
+                // outer_ctx[i+1].  We need to adjust func_idx accordingly.
+                let func_idx_outer =
+                    outer_ctx
+                        .iter()
+                        .position(|(n, _)| n == name)
+                        .ok_or_else(|| {
+                            TypeError::Other(format!(
+                                "tactic: unknown function '{}' (not in scope)",
+                                name
+                            ))
+                        })?;
+
+                // The current def is at outer_ctx[0] and is NOT in globals.
+                if func_idx_outer == 0 {
+                    return Err(TypeError::Other(format!(
+                        "tactic: '{}' is the current definition (not yet defined)",
+                        name
+                    )));
+                }
+                // Shift by -1 to skip the current-def entry.
+                let func_idx = func_idx_outer - 1;
+
+                // Get the globals from the session.
+                let globals = session.get_current_globals().ok_or_else(|| {
+                    TypeError::Other(
+                        "tactic: no global definitions available (internal error)".into(),
+                    )
+                })?;
+
+                // Evaluate the tactic function applied to the goal type.
+                // The tactic function type: `forall (A : Type), OwlTerm`.
+                // We construct `f goal_type` and evaluate via NbE.
+                //
+                // The tactic engine's local context (after `intro`) has
+                // `tactic_ctx_len` entries. Free variables in the goal type
+                // from this context need to resolve correctly during
+                // evaluation. We shift the goal type by `tactic_ctx_len`
+                // and evaluate with `global_offset = tactic_ctx_len` so that:
+                //   - variables 0..tactic_ctx_len-1 (tactic engine locals)
+                //     resolve via the eval scope
+                //   - variables >= tactic_ctx_len (outer context) resolve
+                //     via globals at the correct offset
+                let tactic_ctx_len = self.tactic_ctx.len();
+                let shifted_goal = shift(tactic_ctx_len as i32, 0, &self.goal_ty);
+
+                // Construct `TApp(TVar(func_idx), shifted_goal)`.
+                // func_idx is the index into globals (after adjusting for
+                // the current-def entry in outer_ctx).  With
+                // global_offset=tactic_ctx_len and scope size=tactic_ctx_len,
+                // TVar(func_idx) resolves to:
+                //   global_idx = tactic_ctx_len + (func_idx - tactic_ctx_len)
+                //              = func_idx
+                // which is the correct index into globals.
+                let app_term = Term::TApp(
+                    Arc::new(Term::TVar(func_idx as i32)),
+                    Arc::new(shifted_goal),
+                );
+
+                // Build the eval scope with tactic_ctx_len neutral entries
+                // for the tactic engine's local context.
+                let mut scope = Scope::empty();
+                for level in 0..tactic_ctx_len {
+                    scope = scope.extend(crate::cubical::nbe::Value::VNeutral(
+                        crate::cubical::nbe::Neutral::nvar(level),
+                    ));
+                }
+
+                // Evaluate the application.
+                let result_val = crate::cubical::nbe::eval_nbe(
+                    &scope,
+                    &globals,
+                    tactic_ctx_len,
+                    &app_term,
+                    session,
+                );
+
+                // The result should be a TermVal containing the proof term
+                // (from quote_ast). Extract the term and use it as the proof.
+                //
+                // The proof term's de Bruijn indices are relative to the
+                // tactic function's local scope (0 locals + outer_ctx).
+                // But the tactic engine's proof term lives in a scope with
+                // `tactic_ctx_len` locals + outer_ctx. We must shift the
+                // proof term up by `tactic_ctx_len` so that outer-context
+                // variables (which have higher indices) land at the right
+                // positions in the combined scope.
+                let proof = match &result_val {
+                    crate::cubical::nbe::Value::TermVal(t) => shift(tactic_ctx_len as i32, 0, t),
+                    crate::cubical::nbe::Value::VNeutral(_) => {
+                        // Stuck: the tactic function wasn't fully evaluated.
+                        // Quote it back and let the kernel reject it.
+                        let quoted = quote(0, &globals, 0, result_val.clone(), session);
+                        shift(tactic_ctx_len as i32, 0, &quoted)
+                    }
+                    other => {
+                        return Err(TypeError::Other(format!(
+                            "tactic '{}': expected a quoted term (OwlTerm), got: {}",
+                            name,
+                            show_term(&[], &quote(0, &globals, 0, other.clone(), session))
+                        )));
+                    }
+                };
+
+                self.result = Some(proof);
                 Ok(())
             }
         }?;

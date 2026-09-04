@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **E4 — Custom tactics.** ✅ Added `Tactic::Custom(String)` variant. Parser: `by tactic <name>` syntax. Tactic engine: evaluates the named global tactic function applied to the goal type via NbE, extracts the `TermVal` proof term. Critical fix: `TQuote`/`TGetContext`/`TGetType` now return `TVar(lookup_ctx_index("OwlTerm", ctx))` instead of `TData("OwlTerm", [])` so the typechecker unifies against the user's actual `OwlTerm` postulate. Files: `syntax/mod.rs`, `syntax/pretty.rs`, `parser/grammar.rs`, `tactics.rs`, `typechecker/mod.rs`. Example: `examples/custom_tactic.owl`. 264/264 tests pass, `cargo fmt` clean.
+
 - [x] **B4 — Forced (dot) patterns.** ✅ Added `.name` syntax for dot (forced) patterns referencing zero-arity constructors. `Pat::Dot(Term)` variant in `patterns.rs`, `.name` parsing in `parse_match_arm`, `Pat::con()` returns the constructor name for dot patterns so they participate in exhaustiveness checking. Dot patterns are irrefutable and used for error messages and explicit forcing annotations. `.(term)` syntax rejected with clear error (needs sub-pattern decomposition design). Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/dot_pattern.owl`. 263/263 tests pass.
 
 - [x] **B3 — With-patterns.** ✅ Added `match x with e as y return T with | ...` syntax (Cubical Agda `with` abstraction). Desugared at parse time to `(fun y => match x return T with | ...shifted_cases...) e` where case bodies have de Bruijn indices shifted by -1 at cutoff 1 to remove the `y` reference from the inner match context. `with_expr`/`with_name` fields on `MatchArm`, `stop_at_as` parser flag, lookahead heuristic to distinguish the `with`-pattern keyword from the `with` separator. Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/with_pattern.owl`. 263/263 tests pass.
@@ -248,9 +250,11 @@ Cubical Agda supports `postulate` — declared but unimplemented constants. Usef
 
 Cubical Agda's `REWRITE` mechanism: declare `f` and a proof `law : f x = e`, then all occurrences of `f x` reduce to `e`.
 
-#### E4. Custom tactics 🟢
+#### E4. Custom tactics ✅
 
 Depends on E1 (reflection API). Users define tactics via the TC monad.
+
+**Done** (2026-09-04): Added `Tactic::Custom(String)` variant to the `Tactic` enum. Parser: `by tactic <name>` syntax. Tactic engine: evaluates `f goal_type` via NbE where `f` is the named global tactic function, extracts the `TermVal` proof term, shifts de Bruijn indices for the tactic engine's local context. Critical fix: `TQuote`/`TGetContext`/`TGetType` now return `TVar(lookup_ctx_index("OwlTerm", ctx))` instead of `TData("OwlTerm", [])` so the typechecker can unify against the user's actual `OwlTerm` postulate. Files: `syntax/mod.rs`, `syntax/pretty.rs`, `parser/grammar.rs`, `tactics.rs`, `typechecker/mod.rs`. Example: `examples/custom_tactic.owl`. 264/264 tests pass, `cargo fmt` clean.
 
 ---
 

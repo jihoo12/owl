@@ -338,6 +338,7 @@ pub fn show_tactic(env: &[Name], t: &Tactic) -> String {
             None => "group".to_string(),
         },
         Tactic::Eq => "eq".to_string(),
+        Tactic::Custom(name) => format!("tactic {}", name),
     }
 }
 

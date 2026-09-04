@@ -2606,6 +2606,26 @@ def t_chain : forall (a : Nat), forall (b : Nat), forall (c : Nat),
   by intro a b c p q; eq
 ```
 
+#### `by tactic f` — user-defined tactics
+
+Invoke a user-defined tactic function `f`. The function must have type
+`forall (A : Type), OwlTerm` (or equivalent): it receives the goal type as an
+`OwlTerm` argument and returns a quoted proof term. The kernel re-checks the
+result.
+
+```
+import "lib/reflection.owl"
+
+def trivialTactic : forall (_ : Type), OwlTerm := fun _ => quote_ast tt
+
+def uses_custom : Unit := by tactic trivialTactic
+```
+
+The tactic function is evaluated at typecheck time via NbE. If it reduces to a
+`TermVal` (a successfully quoted AST), that term is used as the proof. If it
+gets stuck (the function references undefined terms), the stuck term is quoted
+back and the kernel rejects it with a clear error.
+
 ### Example: Multi-Step Tactic Proof
 
 ```
@@ -3116,6 +3136,7 @@ recursive-descent parser; precedence is encoded in the call hierarchy.
                 | "group" "with" NAME
                 | "omega"
                 | "eq"
+                | "tactic" NAME
 
 <face>        ::= <face_atom> ("\/" <face_atom>)*
 <face_atom>   ::= <face_lit> ("/\ " <face_lit>)*

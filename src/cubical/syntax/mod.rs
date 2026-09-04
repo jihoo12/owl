@@ -388,6 +388,11 @@ pub enum Tactic {
     /// hypotheses into a chain (BFS over endpoints matched up to
     /// normalization).  See `src/cubical/eq.rs`.
     Eq,
+    /// `tactic f` — invoke a user-defined tactic function `f`.
+    /// The function must have type `forall (A : Type), OwlTerm` (or
+    /// equivalent): it receives the goal type as an `OwlTerm` argument
+    /// and returns a quoted proof term.  The kernel re-checks the result.
+    Custom(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -734,6 +739,7 @@ fn shift_tactic(d: i32, c: i32, tac: &Tactic) -> Tactic {
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),
+        Tactic::Custom(_) => tac.clone(),
     }
 }
 
@@ -944,6 +950,7 @@ fn subst_tactic(j: i32, s: &Term, tac: &Tactic) -> Tactic {
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),
+        Tactic::Custom(_) => tac.clone(),
     }
 }
 
@@ -1675,6 +1682,7 @@ fn subst_params_tactic(
         Tactic::Intro(_) => tac.clone(),
         Tactic::Constructor(_) => tac.clone(),
         Tactic::Destruct(_) => tac.clone(),
+        Tactic::Custom(_) => tac.clone(),
     }
 }
 

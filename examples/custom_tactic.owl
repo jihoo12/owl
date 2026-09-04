@@ -1,0 +1,15 @@
+-- examples/custom_tactic.owl — E4: Custom tactics demo
+--
+-- Demonstrates user-defined tactics via the TC monad.
+-- A custom tactic function takes the goal type (as an OwlTerm) and
+-- returns a quoted proof term via quote_ast.
+
+import "../lib/reflection.owl"
+
+-- A custom tactic: prove Unit by returning the quoted `tt` constructor.
+-- Note: the tactic function must be defined before use, and its return
+-- type is OwlTerm (a quoted AST).
+def trivialTactic : forall (_ : Type), OwlTerm := fun _ => quote_ast tt
+
+-- Use the custom tactic to prove Unit.
+def uses_custom : Unit := by tactic trivialTactic

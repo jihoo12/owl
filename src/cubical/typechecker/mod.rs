@@ -38,6 +38,18 @@ use crate::cubical::syntax::{is_bot_dnf, is_top_dnf};
 // Require helpers (used by infer_dt_inner / check_dt_inner)
 // ---------------------------------------------------------------------------
 
+/// Look up a name in the context and return its de Bruijn index.
+/// The context is ordered with locals first, then globals (newest-first).
+/// De Bruijn index = position in the context list.
+fn lookup_ctx_index(name: &str, ctx: &Ctx) -> i32 {
+    for (i, (n, _)) in ctx.iter().enumerate() {
+        if n == name {
+            return i as i32;
+        }
+    }
+    0
+}
+
 pub fn require_equal(
     ctx: &Ctx,
     expected: &Term,
@@ -2320,7 +2332,7 @@ fn infer_dt_inner(
         // Reflection (E1): quote t : Term
         Term::TQuote(t) => {
             let _ty = infer_dt(dts, ctx, t, session)?;
-            Ok(Term::TData("OwlTerm".to_string(), Vec::new()))
+            Ok(Term::TVar(lookup_ctx_index("OwlTerm", ctx)))
         }
 
         Term::TUnquote(_ast) => Err(TypeError::Other(
@@ -2329,7 +2341,7 @@ fn infer_dt_inner(
         )),
 
         Term::TGetContext => match session.reflection_ctx() {
-            Some(_ctx) => Ok(Term::TData("OwlTerm".to_string(), Vec::new())),
+            Some(_ctx) => Ok(Term::TVar(lookup_ctx_index("OwlTerm", ctx))),
             None => Err(TypeError::Other(
                 "getContext: no reflection context in session".to_string(),
             )),
@@ -2339,7 +2351,7 @@ fn infer_dt_inner(
             let ty = infer_dt(dts, ctx, t, session)?;
             let ty_normalized = nbe_eval(&ty, session);
             session.store_reflection_result(t.as_ref().clone(), ty_normalized);
-            Ok(Term::TData("OwlTerm".to_string(), Vec::new()))
+            Ok(Term::TVar(lookup_ctx_index("OwlTerm", ctx)))
         }
 
         Term::TUnify(a, bx) => {
