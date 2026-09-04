@@ -1,0 +1,83 @@
+-- Bool operations library for Owl.
+--
+-- Provides the Boolean type with standard logical and conditional operations.
+
+inductive Bool where
+  | false : Bool
+  | true : Bool
+
+-- Negation.
+def bool_not : Bool -> Bool := fun b =>
+  match b return Bool with
+  | false => true
+  | true => false
+
+-- Conjunction.
+def bool_and : Bool -> Bool -> Bool := fun a b =>
+  match a return Bool with
+  | false => false
+  | true => b
+
+-- Disjunction.
+def bool_or : Bool -> Bool -> Bool := fun a b =>
+  match a return Bool with
+  | false => b
+  | true => true
+
+-- Exclusive or.
+def bool_xor : Bool -> Bool -> Bool := fun a b =>
+  match a return Bool with
+  | false => b
+  | true => bool_not b
+
+-- Conditional (if-then-else).
+def bool_if : forall (A : Type), Bool -> A -> A -> A :=
+  fun A b t f => match b return A with
+  | false => f
+  | true => t
+
+-- Equality test: true when both arguments are equal.
+def bool_eq : Bool -> Bool -> Bool := fun a b =>
+  match a return Bool with
+  | false => bool_not b
+  | true => b
+
+-- Negation is involutive: not (not b) = b.
+def bool_not_not : forall (b : Bool), Path Bool (bool_not (bool_not b)) b :=
+  fun b => match b return Path Bool (bool_not (bool_not b)) b with
+  | false => <i> false
+  | true => <i> true
+
+-- And is idempotent: and b b = b.
+def bool_and_idem : forall (b : Bool), Path Bool (bool_and b b) b :=
+  fun b => match b return Path Bool (bool_and b b) b with
+  | false => <i> false
+  | true => <i> true
+
+-- Or is idempotent: or b b = b.
+def bool_or_idem : forall (b : Bool), Path Bool (bool_or b b) b :=
+  fun b => match b return Path Bool (bool_or b b) b with
+  | false => <i> false
+  | true => <i> true
+
+-- And is commutative.
+def bool_and_comm : forall (a : Bool), forall (b : Bool),
+  Path Bool (bool_and a b) (bool_and b a) :=
+  fun a b => match a return Path Bool (bool_and a b) (bool_and b a) with
+  | false => match b return Path Bool false (bool_and b false) with
+    | false => <i> false
+    | true => <i> false
+  | true => match b return Path Bool b (bool_and b true) with
+    | false => <i> false
+    | true => <i> true
+
+-- Or is commutative.
+def bool_or_comm : forall (a : Bool), forall (b : Bool),
+  Path Bool (bool_or a b) (bool_or b a) :=
+  fun a b => match a return Path Bool (bool_or a b) (bool_or b a) with
+  | false => match b return Path Bool b (bool_or b false) with
+    | false => <i> false
+    | true => <i> true
+  | true => match b return Path Bool true (bool_or b true) with
+    | false => <i> true
+    | true => <i> true

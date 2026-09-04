@@ -1,0 +1,24 @@
+-- Example: List library usage.
+--
+-- Demonstrates List operations from lib/list.owl.
+
+import "../lib/list.owl" only [List, cons, nil, append, map, length, filter,
+  append_nil_l, append_assoc, map_append, Nat, zero, suc]
+
+-- A small list of naturals.
+def mylist : List Nat := cons (suc zero) (cons zero nil)
+
+-- Appending two lists.
+def test_append : List Nat := append Nat mylist (cons (suc (suc zero)) nil)
+
+-- Length of a list.
+def test_length : Nat := length Nat test_append
+
+-- Map suc over a list.
+def test_map : List Nat := map Nat Nat (fun n => suc n) mylist
+
+-- Append nil is identity (via library proof).
+def test_append_nil : Path (List Nat) (append Nat nil mylist) mylist :=
+  append_nil_l Nat mylist
+
+def main : U1 := U0

@@ -1,0 +1,15 @@
+-- Example: Bool library usage.
+--
+-- Demonstrates Bool operations from lib/bool.owl.
+
+import "../lib/bool.owl" only [Bool, bool_not, bool_and, bool_or, bool_xor, bool_if, bool_eq,
+  bool_not_not, bool_and_idem, bool_or_idem, bool_and_comm, bool_or_comm]
+
+-- Two small proofs exercised via the library.
+def test_and_comm : Path Bool (bool_and true false) (bool_and false true) :=
+  bool_and_comm true false
+
+def test_or_comm : Path Bool (bool_or false true) (bool_or true false) :=
+  bool_or_comm false true
+
+def main : U1 := U0

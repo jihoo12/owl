@@ -1,0 +1,48 @@
+-- Maybe/Option operations library for Owl.
+--
+-- Provides the Maybe type (optional values) with standard operations.
+
+import "../lib/bool.owl" only [Bool]
+
+inductive Maybe (A : Type) where
+  | nothing : Maybe A
+  | just : A -> Maybe A
+
+-- Default value extraction.
+def maybe_default : forall (A : Type), A -> Maybe A -> A :=
+  fun A default m => match m return A with
+  | nothing => default
+  | just x => x
+
+-- Map a function over a Maybe value.
+def maybe_map : forall (A : Type), forall (B : Type), (A -> B) -> Maybe A -> Maybe B :=
+  fun A B f m => match m return Maybe B with
+  | nothing => nothing
+  | just x => just (f x)
+
+-- Bind (monadic join).
+def maybe_bind : forall (A : Type), forall (B : Type), Maybe A -> (A -> Maybe B) -> Maybe B :=
+  fun A B m f => match m return Maybe B with
+  | nothing => nothing
+  | just x => f x
+
+-- Is this value a just?
+def is_just : forall (A : Type), Maybe A -> Bool :=
+  fun A m => match m return Bool with
+  | nothing => false
+  | just x => true
+
+-- Is this value a nothing?
+def is_nothing : forall (A : Type), Maybe A -> Bool :=
+  fun A m => match m return Bool with
+  | nothing => true
+  | just x => false
+
+-- fromMaybe: like maybe_default but argument order matches Haskell.
+def from_maybe : forall (A : Type), A -> Maybe A -> A :=
+  fun A default m => match m return A with
+  | nothing => default
+  | just x => x
+
+-- map is idempotent: map f (map g m) = map (f . g) m
+-- (omitted: would require function composition)

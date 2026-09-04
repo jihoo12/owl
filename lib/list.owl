@@ -1,0 +1,113 @@
+-- List operations library for Owl.
+--
+-- Provides the standard list datatype with basic operations and proofs.
+-- Nested match expressions are avoided by using helper functions
+-- (e.g. filter_cons) so that the parser can handle all definitions.
+
+import "../lib/bool.owl" only [Bool, bool_if]
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive List (A : Type) where
+  | nil : List A
+  | cons : A -> List A -> List A
+
+-- Append two lists.
+def append : forall (A : Type), List A -> List A -> List A :=
+  fun A l1 l2 => match l1 return List A with
+  | nil => l2
+  | cons x xs => cons x (append A xs l2)
+
+-- Length of a list.
+def length : forall (A : Type), List A -> Nat :=
+  fun A l => match l return Nat with
+  | nil => zero
+  | cons x xs => suc (length A xs)
+
+-- Map a function over a list.
+def map : forall (A : Type), forall (B : Type), (A -> B) -> List A -> List B :=
+  fun A B f l => match l return List B with
+  | nil => nil
+  | cons x xs => cons (f x) (map A B f xs)
+
+-- Left fold.
+def foldl : forall (A : Type), forall (B : Type), B -> (B -> A -> B) -> List A -> B :=
+  fun A B acc f l => match l return B with
+  | nil => acc
+  | cons x xs => foldl A B (f acc x) f xs
+
+-- Right fold.
+def foldr : forall (A : Type), forall (B : Type), B -> (A -> B -> B) -> List A -> B :=
+  fun A B acc f l => match l return B with
+  | nil => acc
+  | cons x xs => f x (foldr A B acc f xs)
+
+-- Reverse a list (O(n^2), simple definition).
+def reverse : forall (A : Type), List A -> List A :=
+  fun A l => match l return List A with
+  | nil => nil
+  | cons x xs => append A (reverse A xs) (cons x nil)
+
+-- Head with default.
+def head : forall (A : Type), A -> List A -> A :=
+  fun A default l => match l return A with
+  | nil => default
+  | cons x xs => x
+
+-- Tail (returns nil for empty list).
+def tail : forall (A : Type), List A -> List A :=
+  fun A l => match l return List A with
+  | nil => nil
+  | cons x xs => xs
+
+-- Filter helper: decide whether to keep an element.
+def filter_cons : forall (A : Type), (A -> Bool) -> A -> List A -> List A :=
+  fun A p x xs => bool_if (List A) (p x) (cons x xs) xs
+
+-- Filter elements satisfying a predicate.
+def filter : forall (A : Type), (A -> Bool) -> List A -> List A :=
+  fun A p l => match l return List A with
+  | nil => nil
+  | cons x xs => filter_cons A p x (filter A p xs)
+
+-- Any helper: combine element result with accumulator.
+def any_cons : forall (A : Type), (A -> Bool) -> A -> Bool -> Bool :=
+  fun A p x acc => bool_if Bool (p x) true acc
+
+-- Any element satisfies the predicate.
+def any : forall (A : Type), (A -> Bool) -> List A -> Bool :=
+  fun A p l => match l return Bool with
+  | nil => false
+  | cons x xs => any_cons A p x (any A p xs)
+
+-- All helper: combine element result with accumulator.
+def all_cons : forall (A : Type), (A -> Bool) -> A -> Bool -> Bool :=
+  fun A p x acc => bool_if Bool (p x) acc false
+
+-- All elements satisfy the predicate.
+def all : forall (A : Type), (A -> Bool) -> List A -> Bool :=
+  fun A p l => match l return Bool with
+  | nil => true
+  | cons x xs => all_cons A p x (all A p xs)
+
+-- Append nil l = l.
+def append_nil_l : forall (A : Type), forall (l : List A),
+  Path (List A) (append A nil l) l :=
+  fun A l => <i> l
+
+-- Append is associative.
+def append_assoc : forall (A : Type), forall (l1 : List A), forall (l2 : List A), forall (l3 : List A),
+  Path (List A) (append A (append A l1 l2) l3) (append A l1 (append A l2 l3)) :=
+  fun A l1 l2 l3 => match l1 return Path (List A) (append A (append A l1 l2) l3) (append A l1 (append A l2 l3)) with
+  | nil => <i> append A l2 l3
+  | cons x xs => <i> cons x (append_assoc A xs l2 l3 @ i)
+
+-- map distributes over append.
+def map_append : forall (A : Type), forall (B : Type), forall (f : A -> B),
+  forall (l1 : List A), forall (l2 : List A),
+  Path (List B) (map A B f (append A l1 l2)) (append B (map A B f l1) (map A B f l2)) :=
+  fun A B f l1 l2 => match l1 return Path (List B) (map A B f (append A l1 l2)) (append B (map A B f l1) (map A B f l2)) with
+  | nil => <i> map A B f l2
+  | cons x xs => <i> cons (f x) (map_append A B f xs l2 @ i)

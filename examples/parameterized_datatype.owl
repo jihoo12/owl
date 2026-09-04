@@ -1,0 +1,5 @@
+module M (A : Type) where
+  inductive List where
+    | nil : List
+    | cons : A -> List -> List
+  end

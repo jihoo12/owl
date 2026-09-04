@@ -290,20 +290,24 @@ fn parses_module_param_sibling_autoapplication() {
 }
 
 #[test]
-fn rejects_datatype_inside_parameterized_module() {
+fn accepts_datatype_inside_parameterized_module() {
     with_session(|session| {
-        let err = parse_program(
+        let decls = parse_program(
             "module M (A : Type) where\n\
              inductive T where | mk : T\n\
              end",
             session,
         )
-        .unwrap_err();
-        assert!(
-            err.message.contains("not supported"),
-            "got: {}",
-            err.message
-        );
+        .expect("datatype inside parameterized module should parse");
+        // The datatype should have the module parameter prepended.
+        match &decls[1] {
+            Decl::Data(dt) => {
+                assert_eq!(dt.name, "M.T");
+                assert_eq!(dt.params.len(), 1);
+                assert_eq!(dt.params[0].0, "A");
+            }
+            other => panic!("expected Data decl, got {:?}", other),
+        }
     });
 }
 

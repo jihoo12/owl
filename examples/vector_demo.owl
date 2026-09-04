@@ -1,0 +1,18 @@
+-- Example: Vector library usage.
+--
+-- Demonstrates Vec operations from lib/vector.owl.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+import "../lib/vector.owl" only [Vec, nil, cons, vhead, vnil]
+
+-- A vector of 3 nats.
+def myvec : Vec Nat (suc (suc (suc zero))) :=
+  cons (suc (suc zero)) (cons (suc zero) (cons zero nil))
+
+-- Head of a non-empty vector.
+def test_head : Nat := vhead Nat (suc (suc zero)) zero myvec
+
+def main : U1 := U0

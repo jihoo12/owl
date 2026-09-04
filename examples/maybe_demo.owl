@@ -1,0 +1,29 @@
+-- Example: Maybe library usage.
+--
+-- Demonstrates Maybe operations from lib/maybe.owl.
+
+import "../lib/maybe.owl" only [Maybe, nothing, just, maybe_default, maybe_map, maybe_bind, is_just, is_nothing]
+import "../lib/bool.owl" only [Bool]
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- A small Maybe value.
+def myval : Maybe Nat := just (suc zero)
+
+-- Default when nothing.
+def test_default : Nat := maybe_default Nat zero nothing
+
+-- Map over a Maybe.
+def test_map : Maybe Nat := maybe_map Nat Nat (fun n => suc n) myval
+
+-- Bind (monadic chaining).
+def test_bind : Maybe Nat :=
+  maybe_bind Nat Nat myval (fun n => just (suc n))
+
+-- is_just / is_nothing.
+def test_is_just : Bool := is_just Nat myval
+def test_is_nothing : Bool := is_nothing Nat nothing
+
+def main : U1 := U0

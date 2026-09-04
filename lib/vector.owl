@@ -1,0 +1,25 @@
+-- Vector (length-indexed list) library for Owl.
+--
+-- Provides a length-indexed list type with basic operations.
+-- The Vec type is parameterized by element type A and length n : Nat.
+-- Constructors: nil : Vec A zero, cons : A -> Vec A n -> Vec A (suc n).
+--
+-- NOTE: Indexed inductive types in this kernel have limited support
+-- for dependent elimination. The type definition and basic constructors
+-- are provided; more advanced operations (vmap, vappend) require
+-- indexed pattern matching that is not yet fully supported.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Vec (A : Type) (n : Nat) where
+  | nil : Vec A zero
+  | cons : A -> Vec A n -> Vec A (suc n)
+
+def vhead : forall (A : Type), forall (n : Nat), A -> Vec A (suc n) -> A :=
+  fun A n default v => match v return A with
+  | nil => default
+  | cons x xs => x
+
+def vnil : forall (A : Type), Vec A zero := fun (A : Type) => (nil : Vec A zero)

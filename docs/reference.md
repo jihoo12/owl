@@ -2732,7 +2732,27 @@ def v : Nat := ((Semi.twice_id Nat) two)
   in-scope parameters, so bodies read as if the parameters were fixed.
   Unrelated globals are left untouched.
 - Plain modules may nest inside parameterized ones; parameterized modules may
-  not nest, and datatypes, records, and imports are rejected inside them.
+  not nest, and imports are rejected inside them. Datatypes and records are
+  allowed — they are automatically closed over the module parameters.
+
+```
+module M (A : Type) where
+  inductive List where
+    | nil : List
+    | cons : A -> List -> List
+  end
+
+  record Wrapper where
+    field wrap : A
+  end
+end
+```
+
+Every datatype or record inside a parameterized module gains the module
+parameters as extra parameters at the front. The constructor argument types
+and face expressions are adjusted so that self-references (the datatype
+being defined) include the module parameter applications. This matches
+Cubical Agda's behaviour for data types inside `module _` blocks.
 
 **Module instantiation**:
 

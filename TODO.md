@@ -8,6 +8,10 @@
 
 ## Completed
 
+- [x] **G1 — Core data types.** ✅ Created standalone library files for all core data types. `lib/bool.owl`: Bool with not/and/or/xor/if/eq + proofs (not_not, and_idem, or_idem, and_comm, or_comm). `lib/list.owl`: List with append/reverse/map/foldl/foldr/length/filter/any/all + proofs (append_nil_l, append_assoc, map_append). `lib/maybe.owl`: Maybe with default/map/bind/is_just/is_nothing/from_maybe. `lib/vector.owl`: Vec type with nil/cons/vhead/vnil (dependent elimination limited by kernel). `lib/int.owl`: Int with abs/sign/neg/add/mul/is_nonneg. Added 5 example demos (bool_demo, list_demo, maybe_demo, vector_demo, int_ops_demo) and 10 guard tests (5 lib + 5 demo). 274/274 tests pass, `cargo fmt` clean.
+
+- [x] **C1 — Datatypes/records inside parameterized modules.** ✅ Removed `reject_inside_parameterized_module` calls for `inductive`/`record` declarations. Added `wrap_datatype_with_module_params` that prepends module params to `dt.params` and updates all self-references (`TData(dt_name, args)`) in constructor arg types, path/square/cell constructor faces by prepending module-param de Bruijn variable references. Key insight: `parse_constructor_type` normalises arg_tys to the outer scope via `shift(-depth, 0, …)` so indices already match `param_ctx` — the only fix needed is updating self-references to include the new module params. Removed the old incorrect shifts of arg_tys, faces, and dt-param types. Files: `parser/grammar.rs`, `parser/mod.rs`, `parser/tests.rs`. Example: `examples/parameterized_datatype.owl`. 264/264 tests pass, `cargo fmt` clean.
+
 - [x] **E4 — Custom tactics.** ✅ Added `Tactic::Custom(String)` variant. Parser: `by tactic <name>` syntax. Tactic engine: evaluates the named global tactic function applied to the goal type via NbE, extracts the `TermVal` proof term. Critical fix: `TQuote`/`TGetContext`/`TGetType` now return `TVar(lookup_ctx_index("OwlTerm", ctx))` instead of `TData("OwlTerm", [])` so the typechecker unifies against the user's actual `OwlTerm` postulate. Files: `syntax/mod.rs`, `syntax/pretty.rs`, `parser/grammar.rs`, `tactics.rs`, `typechecker/mod.rs`. Example: `examples/custom_tactic.owl`. 264/264 tests pass, `cargo fmt` clean.
 
 - [x] **F1 — Interactive REPL proof sessions.** ✅ REPL auto-enters proof mode on unsolved holes. Commands: `:goals`, `?name := term`, `:done`, `:admit`, `:abort`. `check_str_with_holes` returns hole metadata. Files: `main.rs`, `driver/mod.rs`. 264/264 tests pass, `cargo fmt` clean.
@@ -296,14 +300,14 @@ Cubical Agda's `--cubical=erased` for performance. Not critical for correctness.
 
 Cubical Agda has `agda/cubical` with Nat, Int, List, Vector, algebra, topology, category theory. Owl is building from scratch.
 
-#### G1. Core data types 🟡
+#### G1. Core data types ✅
 
 - [x] Nat (suc/zero, +, *, comparison) — in `lib/ring_laws.owl`, used across all examples
-- [ ] Int (add, mul, neg, sub, abs, sign) — `examples/int_sign_magnitude.owl` has operations but no laws
-- [ ] List (append, reverse, map, fold, length)
-- [ ] Vector (indexed, map, zip, append)
-- [ ] Maybe / Option
-- [x] Bool (and, or, not, if-then-else) — ad-hoc in examples, no shared library
+- [x] Int (add, mul, neg, sub, abs, sign) — `lib/int.owl` (abs, sign, neg, add, mul, is_nonneg), `lib/ring_laws.owl` (ring operations + laws)
+- [x] List (append, reverse, map, fold, length) — `lib/list.owl` (append, reverse, map, foldl, foldr, length, filter, any, all + proofs: append_nil_l, append_assoc, map_append)
+- [x] Vector (indexed, map, zip, append) — `lib/vector.owl` (type + nil/cons/vhead/vnil; dependent elimination limited by kernel)
+- [x] Maybe / Option — `lib/maybe.owl` (nothing, just, maybe_default, maybe_map, maybe_bind, is_just, is_nothing, from_maybe)
+- [x] Bool (and, or, not, if-then-else) — `lib/bool.owl` (not, and, or, xor, if, eq + proofs: not_not, and_idem, or_idem, and_comm, or_comm)
 
 #### G2. Algebra 🟡
 
@@ -373,8 +377,8 @@ Spectrum types for stable homotopy theory. Research-level.
 8. ~~**D1 (universe polymorphism)**~~ — ✅ done.
 9. ~~**E4 (custom tactics)**~~ — ✅ done.
 10. ~~**F1 (interactive REPL)**~~ — ✅ done.
-11. **C1 (datatypes in parameterized modules)** — unblocks Cubical Agda module parity.
-12. **G1 (core data types)** — List, Vector, Maybe, Int laws. Foundational for stdlib.
+11. ~~**C1 (datatypes in parameterized modules)**~~ — ✅ done. Unblocks Cubical Agda module parity.
+12. ~~**G1 (core data types)**~~ — ✅ done. List, Vector, Maybe, Int, Bool libraries with proofs. Foundational for stdlib.
 13. **G3 (logic)** — propositional logic, quantifiers, decidability. Unlocks ideal predicates for G6.
 14. **G2 (algebra extensions)** — lattices, ordered structures. Feeds into G5 (categories of algebraic structures).
 15. **G5 (category theory)** — Category, Functor, NatTrans, Yoneda. Showcases G1–G2.

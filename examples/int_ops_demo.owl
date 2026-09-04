@@ -1,0 +1,26 @@
+-- Example: Int library usage.
+--
+-- Demonstrates Int operations from lib/int.owl.
+
+import "../lib/int.owl" only [Int, pos, negsuc, int_abs, int_sign, int_neg, int_add, int_mul, int_is_nonneg, Nat, zero, suc]
+
+-- Some Int values.
+def five : Int := pos (suc (suc (suc (suc (suc zero)))))
+def neg_three : Int := negsuc (suc (suc zero))
+
+-- Absolute value.
+def test_abs_neg : Int := int_abs neg_three
+def test_abs_pos : Int := int_abs five
+
+-- Negation.
+def test_neg : Int := int_neg neg_three
+
+-- Sign.
+def test_sign_pos : Int := int_sign five
+def test_sign_neg : Int := int_sign neg_three
+
+-- Is non-negative?
+def test_nonneg_pos : Bool := int_is_nonneg five
+def test_nonneg_neg : Bool := int_is_nonneg neg_three
+
+def main : U1 := U0

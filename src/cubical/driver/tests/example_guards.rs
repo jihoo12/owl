@@ -426,6 +426,156 @@ fn custom_tactic_example_checks() {
 }
 
 #[test]
+fn bool_lib_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("lib")
+        .join("bool.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn bool lib check thread");
+    handle
+        .join()
+        .expect("bool lib check thread panicked")
+        .expect("lib/bool.owl should typecheck");
+}
+
+#[test]
+fn list_lib_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("lib")
+        .join("list.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn list lib check thread");
+    handle
+        .join()
+        .expect("list lib check thread panicked")
+        .expect("lib/list.owl should typecheck");
+}
+
+#[test]
+fn maybe_lib_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("lib")
+        .join("maybe.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn maybe lib check thread");
+    handle
+        .join()
+        .expect("maybe lib check thread panicked")
+        .expect("lib/maybe.owl should typecheck");
+}
+
+#[test]
+fn vector_lib_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("lib")
+        .join("vector.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn vector lib check thread");
+    handle
+        .join()
+        .expect("vector lib check thread panicked")
+        .expect("lib/vector.owl should typecheck");
+}
+
+#[test]
+fn int_lib_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("lib")
+        .join("int.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn int lib check thread");
+    handle
+        .join()
+        .expect("int lib check thread panicked")
+        .expect("lib/int.owl should typecheck");
+}
+
+#[test]
+fn bool_demo_example_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("bool_demo.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn bool_demo check thread");
+    handle
+        .join()
+        .expect("bool_demo check thread panicked")
+        .expect("examples/bool_demo.owl should typecheck");
+}
+
+#[test]
+fn list_demo_example_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("list_demo.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn list_demo check thread");
+    handle
+        .join()
+        .expect("list_demo check thread panicked")
+        .expect("examples/list_demo.owl should typecheck");
+}
+
+#[test]
+fn maybe_demo_example_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("maybe_demo.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn maybe_demo check thread");
+    handle
+        .join()
+        .expect("maybe_demo check thread panicked")
+        .expect("examples/maybe_demo.owl should typecheck");
+}
+
+#[test]
+fn vector_demo_example_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("vector_demo.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn vector_demo check thread");
+    handle
+        .join()
+        .expect("vector_demo check thread panicked")
+        .expect("examples/vector_demo.owl should typecheck");
+}
+
+#[test]
+fn int_ops_demo_example_checks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("int_ops_demo.owl");
+    let handle = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || check(&path))
+        .expect("spawn int_ops_demo check thread");
+    handle
+        .join()
+        .expect("int_ops_demo check thread panicked")
+        .expect("examples/int_ops_demo.owl should typecheck");
+}
+
+#[test]
 fn all_example_files_check() {
     // Sweep every examples/*.owl file not already covered by a dedicated
     // test above (cubical/HIT/path/param/quotient/tactics/record demos and
@@ -461,6 +611,12 @@ fn all_example_files_check() {
         "stress_nested_patterns.owl",
         "stress_record_types.owl",
         "stress_update_or_patterns.owl",
+        // G1 — new library demos
+        "bool_demo.owl",
+        "list_demo.owl",
+        "maybe_demo.owl",
+        "vector_demo.owl",
+        "int_ops_demo.owl",
     ];
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     let mut files: Vec<_> = std::fs::read_dir(&examples)

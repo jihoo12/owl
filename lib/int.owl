@@ -1,0 +1,60 @@
+-- Int operations library for Owl.
+--
+-- Extends ring_laws.owl with additional Int operations: abs, sign, comparison.
+-- The Int type (pos/negsuc) and ring operations/laws live in ring_laws.owl.
+-- This file provides convenience operations not needed by the ring solver.
+
+import "../lib/bool.owl" only [Bool, bool_if]
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Int where
+  | pos : Nat -> Int
+  | negsuc : Nat -> Int
+
+-- Absolute value: |pos n| = pos n, |negsuc n| = pos (suc n).
+def int_abs : Int -> Int := fun a =>
+  match a return Int with
+  | pos n => pos n
+  | negsuc n => pos (suc n)
+
+-- Sign: returns pos zero for non-negative, negsuc zero for negative.
+def int_sign : Int -> Int := fun a =>
+  match a return Int with
+  | pos n => pos zero
+  | negsuc n => negsuc zero
+
+-- Negation.
+def int_neg : Int -> Int := fun a =>
+  match a return Int with
+  | pos zero => pos zero
+  | pos (suc n) => negsuc n
+  | negsuc n => pos (suc n)
+
+-- Addition (non-recursive, via matching).
+def int_add : Int -> Int -> Int by_wf := fun a b =>
+  match a return Int with
+  | pos zero => b
+  | pos (suc m) => int_add (pos m) (match b return Int with
+    | pos n => pos (suc n)
+    | negsuc zero => pos m
+    | negsuc (suc n) => negsuc n)
+  | negsuc m => int_add (match b return Int with
+    | pos zero => negsuc m
+    | pos (suc n) => negsuc (suc n)
+    | negsuc n => negsuc (suc n)) (pos zero)
+
+-- Multiplication.
+def int_mul : Int -> Int -> Int by_wf := fun a b =>
+  match a return Int with
+  | pos zero => pos zero
+  | pos (suc m) => int_add b (int_mul (pos m) b)
+  | negsuc m => int_neg (int_add (pos (suc m)) b)
+
+-- Is non-negative?
+def int_is_nonneg : Int -> Bool := fun a =>
+  match a return Bool with
+  | pos n => true
+  | negsuc n => false

@@ -195,10 +195,8 @@ impl ProgramParser {
                 return Err(self.parser.error_here("'end' without a matching 'module'"));
             }
         } else if self.parser.consume_ident("inductive") {
-            self.parser.reject_inside_parameterized_module("datatype")?;
             self.parser.parse_data_decl()?
         } else if self.parser.consume_ident("record") {
-            self.parser.reject_inside_parameterized_module("record")?;
             let dt = self.parser.parse_record_decl()?;
             Decl::Record(dt)
         } else if self.parser.consume_ident("import") {

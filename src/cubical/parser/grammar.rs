@@ -460,7 +460,7 @@ impl Parser {
         for _ in &params {
             self.term_env.remove(0);
         }
-        Ok(Datatype {
+        let mut dt = Datatype {
             name,
             params,
             cons,
@@ -469,7 +469,10 @@ impl Parser {
             cellcons,
             universe_level: uni_level,
             field_names: None,
-        })
+        };
+        // If inside a parameterized module, prepend module params and shift.
+        self.wrap_datatype_with_module_params(&mut dt);
+        Ok(dt)
     }
 
     /// Parse a record declaration:
@@ -552,6 +555,9 @@ impl Parser {
         for _ in &params {
             self.term_env.remove(0);
         }
+
+        // If inside a parameterized module, prepend module params and shift.
+        self.wrap_datatype_with_module_params(&mut local_dt);
 
         Ok(local_dt)
     }
@@ -2474,6 +2480,112 @@ impl Parser {
                 (ty_w, val_w)
             }
             None => (ty, val),
+        }
+    }
+
+    /// Prepend the enclosing parameterized module's parameters to a
+    /// datatype's own parameter list and shift all constructor types
+    /// accordingly.  This enables datatypes/records inside parameterized
+    /// modules (C1).
+    fn wrap_datatype_with_module_params(&self, dt: &mut Datatype) {
+        if let Some((_, params)) = self.active_param_module() {
+            if params.is_empty() {
+                return;
+            }
+            let m = params.len();
+            let n = dt.params.len();
+            // Prepend module params (outermost-first) to the datatype's params.
+            let mut new_params: Vec<(Name, Term)> = params.clone();
+            new_params.append(&mut dt.params);
+            dt.params = new_params;
+            // After prepending module params, every self-reference TData(dt_name, args)
+            // in constructor types needs the module-param variables prepended to args.
+            // The i-th module param (0=outermost) is at de Bruijn index (n + m - 1 - i)
+            // in param_ctx (which is dt.params reversed).
+            let dt_name = dt.name.clone();
+            let module_param_vars: Vec<Term> =
+                (0..m).map(|i| Term::TVar((n + m - 1 - i) as i32)).collect();
+            let update = |term: &Term| Self::prepend_self_refs(term, &dt_name, &module_param_vars);
+            for con in &mut dt.cons {
+                for arg_ty in &mut con.arg_tys {
+                    *arg_ty = update(arg_ty);
+                }
+            }
+            for pcon in &mut dt.pcons {
+                for arg_ty in &mut pcon.arg_tys {
+                    *arg_ty = update(arg_ty);
+                }
+                pcon.face0 = update(&pcon.face0);
+                pcon.face1 = update(&pcon.face1);
+            }
+            for sqcon in &mut dt.sqcons {
+                for arg_ty in &mut sqcon.arg_tys {
+                    *arg_ty = update(arg_ty);
+                }
+                sqcon.face_i0 = update(&sqcon.face_i0);
+                sqcon.face_i1 = update(&sqcon.face_i1);
+                sqcon.face_j0 = update(&sqcon.face_j0);
+                sqcon.face_j1 = update(&sqcon.face_j1);
+            }
+            for cellcon in &mut dt.cellcons {
+                for arg_ty in &mut cellcon.arg_tys {
+                    *arg_ty = update(arg_ty);
+                }
+                for face in &mut cellcon.faces {
+                    *face = update(face);
+                }
+            }
+        }
+    }
+
+    /// Walk `term` and prepend `extra_args` to every `TData(name, args)` node.
+    fn prepend_self_refs(term: &Term, name: &str, extra_args: &[Term]) -> Term {
+        match term {
+            Term::TData(n, args) if n == name => {
+                let mut new_args = extra_args.to_vec();
+                new_args.extend(args.iter().cloned());
+                Term::TData(n.clone(), new_args)
+            }
+            Term::TData(n, args) => Term::TData(
+                n.clone(),
+                args.iter()
+                    .map(|a| Self::prepend_self_refs(a, name, extra_args))
+                    .collect(),
+            ),
+            Term::TApp(f, a) => Term::TApp(
+                Arc::new(Self::prepend_self_refs(f, name, extra_args)),
+                Arc::new(Self::prepend_self_refs(a, name, extra_args)),
+            ),
+            Term::TPi(x, a, body, imp) => Term::TPi(
+                x.clone(),
+                Arc::new(Self::prepend_self_refs(a, name, extra_args)),
+                Arc::new(Self::prepend_self_refs(body, name, extra_args)),
+                *imp,
+            ),
+            Term::TVar(i) => Term::TVar(*i),
+            Term::TUniv(n) => Term::TUniv(n.clone()),
+            Term::TProp => Term::TProp,
+            Term::TSSet => Term::TSSet,
+            Term::TIntervalTy => Term::TIntervalTy,
+            Term::TLevelTy => Term::TLevelTy,
+            Term::TInterval(i) => Term::TInterval(i.clone()),
+            Term::TCube(cu) => Term::TCube(cu.clone()),
+            Term::TPath(a, u, v) => Term::TPath(
+                Arc::new(Self::prepend_self_refs(a, name, extra_args)),
+                Arc::new(Self::prepend_self_refs(u, name, extra_args)),
+                Arc::new(Self::prepend_self_refs(v, name, extra_args)),
+            ),
+            Term::TId(a, u, v) => Term::TId(
+                Arc::new(Self::prepend_self_refs(a, name, extra_args)),
+                Arc::new(Self::prepend_self_refs(u, name, extra_args)),
+                Arc::new(Self::prepend_self_refs(v, name, extra_args)),
+            ),
+            Term::TSigma(x, a, body) => Term::TSigma(
+                x.clone(),
+                Arc::new(Self::prepend_self_refs(a, name, extra_args)),
+                Arc::new(Self::prepend_self_refs(body, name, extra_args)),
+            ),
+            other => other.clone(),
         }
     }
 
