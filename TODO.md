@@ -10,6 +10,8 @@
 
 - [x] **E4 — Custom tactics.** ✅ Added `Tactic::Custom(String)` variant. Parser: `by tactic <name>` syntax. Tactic engine: evaluates the named global tactic function applied to the goal type via NbE, extracts the `TermVal` proof term. Critical fix: `TQuote`/`TGetContext`/`TGetType` now return `TVar(lookup_ctx_index("OwlTerm", ctx))` instead of `TData("OwlTerm", [])` so the typechecker unifies against the user's actual `OwlTerm` postulate. Files: `syntax/mod.rs`, `syntax/pretty.rs`, `parser/grammar.rs`, `tactics.rs`, `typechecker/mod.rs`. Example: `examples/custom_tactic.owl`. 264/264 tests pass, `cargo fmt` clean.
 
+- [x] **F1 — Interactive REPL proof sessions.** ✅ REPL auto-enters proof mode on unsolved holes. Commands: `:goals`, `?name := term`, `:done`, `:admit`, `:abort`. `check_str_with_holes` returns hole metadata. Files: `main.rs`, `driver/mod.rs`. 264/264 tests pass, `cargo fmt` clean.
+
 - [x] **B4 — Forced (dot) patterns.** ✅ Added `.name` syntax for dot (forced) patterns referencing zero-arity constructors. `Pat::Dot(Term)` variant in `patterns.rs`, `.name` parsing in `parse_match_arm`, `Pat::con()` returns the constructor name for dot patterns so they participate in exhaustiveness checking. Dot patterns are irrefutable and used for error messages and explicit forcing annotations. `.(term)` syntax rejected with clear error (needs sub-pattern decomposition design). Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/dot_pattern.owl`. 263/263 tests pass.
 
 - [x] **B3 — With-patterns.** ✅ Added `match x with e as y return T with | ...` syntax (Cubical Agda `with` abstraction). Desugared at parse time to `(fun y => match x return T with | ...shifted_cases...) e` where case bodies have de Bruijn indices shifted by -1 at cutoff 1 to remove the `y` reference from the inner match context. `with_expr`/`with_name` fields on `MatchArm`, `stop_at_as` parser flag, lookahead heuristic to distinguish the `with`-pattern keyword from the `with` separator. Files: `parser/patterns.rs`, `parser/grammar.rs`. Example: `examples/with_pattern.owl`. 263/263 tests pass.
@@ -260,9 +262,11 @@ Depends on E1 (reflection API). Users define tactics via the TC monad.
 
 ### F. Ergonomics 🟡
 
-#### F1. Interactive REPL proof sessions 🟡
+#### F1. Interactive REPL proof sessions ✅
 
 `:proof` / `:goals` / `:admit` / `:done` commands. Builds on existing hole (`?name`) and tactic infrastructure.
+
+**Done** (2026-09-04): REPL auto-enters proof mode when a definition has unsolved holes. Commands: `:goals` (show holes with expected types), `?name := term` (solve a hole via string substitution + re-check), `:done` (finish, requires all holes solved), `:admit` (accept with remaining holes), `:abort` (discard). `check_str_with_holes` function returns hole metadata from `UnsolvedHoles` errors. Invalid solutions are rejected and the user can retry. Files: `main.rs`, `driver/mod.rs`. 264/264 tests pass, `cargo fmt` clean.
 
 #### F2. `forall` after `->` ✅
 
@@ -368,7 +372,7 @@ Spectrum types for stable homotopy theory. Research-level.
 7. ~~**E1 (reflection API)**~~ — ✅ done.
 8. ~~**D1 (universe polymorphism)**~~ — ✅ done.
 9. ~~**E4 (custom tactics)**~~ — ✅ done.
-10. **F1 (interactive REPL)** — biggest UX win; holes/tactics exist, now make them interactive.
+10. ~~**F1 (interactive REPL)**~~ — ✅ done.
 11. **C1 (datatypes in parameterized modules)** — unblocks Cubical Agda module parity.
 12. **G1 (core data types)** — List, Vector, Maybe, Int laws. Foundational for stdlib.
 13. **G3 (logic)** — propositional logic, quantifiers, decidability. Unlocks ideal predicates for G6.

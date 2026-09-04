@@ -22,4 +22,4 @@ pub mod dependent_pi_transport_test;
 #[cfg(test)]
 pub mod test_helpers;
 
-pub use driver::{RunError, check, check_str, run, run_str};
+pub use driver::{RunError, check, check_str, check_str_with_holes, run, run_str};

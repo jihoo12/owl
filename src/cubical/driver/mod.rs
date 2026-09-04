@@ -108,6 +108,26 @@ pub fn check_str(source: &str, session: &mut Session) -> Result<(), RunError> {
     check_source(Path::new("."), source, session)
 }
 
+/// Like `check_str`, but on `UnsolvedHoles` errors returns the hole
+/// information instead of just the error.  Used by the REPL proof mode.
+pub fn check_str_with_holes(
+    source: &str,
+    session: &mut Session,
+) -> Result<(), (RunError, Vec<(i32, Name, Option<Term>)>)> {
+    check_source(Path::new("."), source, session).map_err(|err| {
+        let holes = if let RunError::Type(ref boxed) = err {
+            if let TypeError::UnsolvedHoles { metas, .. } = boxed.as_ref() {
+                metas.clone()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+        (err, holes)
+    })
+}
+
 fn run_source(
     root_path: &Path,
     source: &str,

@@ -3698,6 +3698,36 @@ The REPL accepts one complete top-level declaration per line. Commands:
 - `:load <file>` — add a source file to the session
 - `:quit` — exit
 
+#### Proof Mode
+
+When you enter a definition with unsolved holes (`?name` or `_`), the REPL
+enters **proof mode** automatically. In proof mode the prompt changes to
+`proof>` and you can interactively fill holes:
+
+- `:goals` — show all unsolved holes with their expected types
+- `?name := term` — solve a hole by providing a term
+- `:done` — finish the proof (all holes must be solved)
+- `:admit` — accept the definition with remaining holes as axioms
+- `:abort` — discard the definition and exit proof mode
+
+```
+owl> inductive Nat where | zero : Nat | suc : Nat -> Nat
+owl> def x : Nat := ?hole
+Entering proof mode for 'x'. 1 hole(s) to fill.
+Goals (1 remaining):
+  ?hole : Nat
+proof> :goals
+Goals (1 remaining):
+  ?hole : Nat
+proof> ?hole := zero
+Hole ?hole solved.
+x : Nat = 0
+owl>
+```
+
+If a solution is rejected (type mismatch or parse error), you can try again.
+Use `:abort` to exit without saving.
+
 ### Debug Logging
 
 Pass `--debug` (or `-d`) to any command to enable detailed trace output from
