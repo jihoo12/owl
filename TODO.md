@@ -364,8 +364,15 @@ Spectrum types for stable homotopy theory. Research-level.
 3. ~~**A4 (cubical identity types)**~~ — ✅ done.
 4. ~~**F2 (`forall` after `->`)**~~ — ✅ done.
 5. ~~**B2 (absurd patterns)**~~ — ✅ done.
-6. **F1 (interactive REPL)** — biggest UX win once holes/tactics exist.
-7. ~~**E2 (postulates)**~~ — ✅ done.
-8. **E1 (reflection API)** — large but enables all subsequent automation.
-9. ~~**D1 (universe polymorphism)**~~ — ✅ done.
-10. **G1–G6 (standard library)** — breadth work, can proceed in parallel.
+6. ~~**E2 (postulates)**~~ — ✅ done.
+7. ~~**E1 (reflection API)**~~ — ✅ done.
+8. ~~**D1 (universe polymorphism)**~~ — ✅ done.
+9. ~~**E4 (custom tactics)**~~ — ✅ done.
+10. **F1 (interactive REPL)** — biggest UX win; holes/tactics exist, now make them interactive.
+11. **C1 (datatypes in parameterized modules)** — unblocks Cubical Agda module parity.
+12. **G1 (core data types)** — List, Vector, Maybe, Int laws. Foundational for stdlib.
+13. **G3 (logic)** — propositional logic, quantifiers, decidability. Unlocks ideal predicates for G6.
+14. **G2 (algebra extensions)** — lattices, ordered structures. Feeds into G5 (categories of algebraic structures).
+15. **G5 (category theory)** — Category, Functor, NatTrans, Yoneda. Showcases G1–G2.
+16. **G6 (algebraic geometry)** — ideals, polynomial rings, Spec, sheaves. Needs G1+G2+G3.
+17. **H2 (spectrum / stabilization)** — research-level, last. Needs mature cubical TT + deep stdlib.
