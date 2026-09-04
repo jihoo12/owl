@@ -315,10 +315,11 @@ impl Parser {
             self.stop_at_with = false;
             // For parameterized types, the result is TData(name, param_args).
             // For non-parameterized types, the result is TData(name, []).
+            // Capture result_args for index consistency checking.
+            let mut captured_return_args = Vec::new();
             match &result {
                 Term::TData(n, result_args) if n == &name => {
-                    // OK — return type matches the declared datatype
-                    let _ = result_args;
+                    captured_return_args = result_args.clone();
                 }
                 _ => {
                     return Err(self.error_here(format!(
@@ -449,6 +450,7 @@ impl Parser {
                 let sig = ConSig {
                     name: con_name,
                     arg_tys,
+                    return_args: Some(captured_return_args),
                 };
                 local_dt.cons.push(sig.clone());
                 cons.push(sig);
@@ -547,6 +549,7 @@ impl Parser {
         let con_sig = ConSig {
             name: con_name,
             arg_tys: field_tys,
+            return_args: None,
         };
         local_dt.cons.push(con_sig);
         local_dt.field_names = Some(field_names);

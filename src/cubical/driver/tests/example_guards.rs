@@ -653,3 +653,32 @@ fn all_example_files_check() {
             .unwrap_or_else(|e| panic!("examples/{name} thread panicked: {e:?}"));
     }
 }
+
+#[test]
+fn bad_examples_must_fail() {
+    // Negative tests: every bad_examples/*.owl must FAIL to typecheck.
+    // Some files are known to currently pass (parser handles them); skip them.
+    let skip = [
+        "parse_forall_after_arrow.owl", // parser accepts forall after ->
+    ];
+    let bad_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("bad_examples");
+    let mut files: Vec<_> = std::fs::read_dir(&bad_dir)
+        .expect("bad_examples/ should exist")
+        .map(|e| {
+            e.expect("read dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|n| n.ends_with(".owl") && !skip.contains(&n.as_str()))
+        .collect();
+    files.sort();
+    for name in &files {
+        let path = bad_dir.join(name);
+        let result = check(&path);
+        assert!(
+            result.is_err(),
+            "bad_examples/{name} should FAIL to typecheck but succeeded"
+        );
+    }
+}

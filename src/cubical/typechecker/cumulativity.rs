@@ -249,6 +249,7 @@ mod tests {
             cons: vec![crate::cubical::syntax::ConSig {
                 name: "mk".into(),
                 arg_tys,
+                return_args: None,
             }],
             pcons: vec![],
             sqcons: vec![],

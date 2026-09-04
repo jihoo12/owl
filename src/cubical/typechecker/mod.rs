@@ -2612,6 +2612,50 @@ fn check_dt_inner(
                     session,
                 )?;
                 let params = build_params(&param_terms);
+                // For zero-arity constructors with index constraints, verify
+                // that the constructor's return-type constraints are consistent
+                // with the expected type. Without this, refl : Eq A x x is
+                // accepted against Eq Nat zero (suc zero) because the check is
+                // circular (params are seeded from expected, then compared).
+                //
+                // We only apply this check when the return_args contain a
+                // repeated de Bruijn variable at index positions — this
+                // indicates the constructor constrains those indices to be
+                // equal (like refl: Eq A x x where both indices reference x).
+                // Constructors without repeated vars (like nil: Vec A zero)
+                // have fixed indices that don't create this circularity.
+                if args.is_empty() {
+                    if let Some(ref return_args) = sig.return_args {
+                        // Check if any de Bruijn var appears more than once
+                        // in the return_args (skipping position 0 which is
+                        // typically the type param).
+                        let mut seen_vars: std::collections::HashSet<i32> =
+                            std::collections::HashSet::new();
+                        let mut has_repeated = false;
+                        for ra in return_args.iter().skip(1) {
+                            if let Term::TVar(k) = ra {
+                                if !seen_vars.insert(*k) {
+                                    has_repeated = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if has_repeated {
+                            let substituted: Vec<Term> = return_args
+                                .iter()
+                                .map(|arg| {
+                                    crate::cubical::syntax::subst_params(
+                                        num_params,
+                                        &param_terms,
+                                        arg,
+                                    )
+                                })
+                                .collect();
+                            let inferred_ty = Term::TData(d.clone(), substituted);
+                            return require_equal(ctx, &expected_ty_nf, &inferred_ty, session);
+                        }
+                    }
+                }
                 require_equal(
                     ctx,
                     &expected_ty_nf,

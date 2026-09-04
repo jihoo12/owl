@@ -1,0 +1,31 @@
+-- SOUNDNESS BUG: indexed inductive type with mismatched indices.
+-- This file MUST fail to typecheck. If it passes, the kernel has a
+-- soundness hole — it can prove False.
+--
+-- Bug: check_dt_inner seeds constructor params from the expected type,
+-- then checks require_equal(expected, TData(d, seeded_params)) which
+-- is trivially true (circular). The constructor's own index constraints
+-- (e.g. refl requiring both indices to be equal) are never verified.
+
+inductive Empty where
+  | void : Empty
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- Indexed equality: refl : Eq A x x  (constrains both indices to be equal)
+inductive Eq (A : Type) (x : A) (y : A) where
+  | refl : Eq A x x
+
+-- BAD: zero != suc zero, but refl is accepted anyway
+def bad_eq : Eq Nat zero (suc zero) := refl
+
+-- Exploit: use the bad proof to extract Empty (= False)
+def exploit : Eq Nat zero (suc zero) -> Empty :=
+  fun p => match p return Empty with
+  | refl => void
+
+def unsound : Empty := exploit bad_eq
+
+def main : Empty := unsound

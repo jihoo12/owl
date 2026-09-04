@@ -414,6 +414,11 @@ pub enum Tactic {
 pub struct ConSig {
     pub name: Name,
     pub arg_tys: Vec<Term>,
+    /// The TData args from the constructor's return type (de Bruijn-encoded).
+    /// E.g. for `refl : Eq A x x`, this is `[TVar(2), TVar(1), TVar(1)]`
+    /// (positions 1 and 2 share the same param variable `x`).
+    /// Used to verify index consistency for zero-arity constructors.
+    pub return_args: Option<Vec<Term>>,
 }
 
 impl ConSig {
@@ -1935,10 +1940,12 @@ mod tests {
                 ConSig {
                     name: "zero".into(),
                     arg_tys: vec![],
+                    return_args: None,
                 },
                 ConSig {
                     name: "suc".into(),
                     arg_tys: vec![Term::TData("Nat".into(), vec![])],
+                    return_args: None,
                 },
             ],
             pcons: vec![],

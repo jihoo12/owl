@@ -635,10 +635,12 @@ mod tests {
             params: vec![],
             cons: vec![
                 ConSig {
+                    return_args: None,
                     name: "zero".into(),
                     arg_tys: vec![],
                 },
                 ConSig {
+                    return_args: None,
                     name: "suc".into(),
                     arg_tys: vec![Term::TData("Nat".into(), vec![])],
                 },
@@ -659,10 +661,12 @@ mod tests {
             params: vec![],
             cons: vec![
                 ConSig {
+                    return_args: None,
                     name: "nil".into(),
                     arg_tys: vec![],
                 },
                 ConSig {
+                    return_args: None,
                     name: "cons".into(),
                     arg_tys: vec![
                         Term::TUniv(LevelExpr::LConst(0)),
@@ -685,6 +689,7 @@ mod tests {
             name: "Bad".into(),
             params: vec![],
             cons: vec![ConSig {
+                return_args: None,
                 name: "mk".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
@@ -713,6 +718,7 @@ mod tests {
             name: "Bad".into(),
             params: vec![],
             cons: vec![ConSig {
+                return_args: None,
                 name: "cons".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
@@ -738,6 +744,7 @@ mod tests {
             name: "Bad".into(),
             params: vec![],
             cons: vec![ConSig {
+                return_args: None,
                 name: "cons".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
@@ -766,6 +773,7 @@ mod tests {
             name: "Bad".into(),
             params: vec![],
             cons: vec![ConSig {
+                return_args: None,
                 name: "cons".into(),
                 arg_tys: vec![Term::TPi(
                     "_".into(),
@@ -795,6 +803,7 @@ mod tests {
             name: "Pair".into(),
             params: vec![],
             cons: vec![ConSig {
+                return_args: None,
                 name: "mk".into(),
                 arg_tys: vec![Term::TSigma(
                     "_".into(),
@@ -817,6 +826,7 @@ mod tests {
             name: "S1".into(),
             params: vec![],
             cons: vec![ConSig {
+                return_args: None,
                 name: "base".into(),
                 arg_tys: vec![],
             }],
@@ -843,6 +853,7 @@ mod tests {
             name: name.into(),
             params: vec![("A".into(), Term::TUniv(LevelExpr::LConst(0)))],
             cons: vec![ConSig {
+                return_args: None,
                 name: "mk".into(),
                 arg_tys,
             }],

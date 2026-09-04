@@ -8,6 +8,8 @@
 
 ## Completed
 
+- [x] **A6 — Soundness fix for indexed type zero-arity constructors.** ✅ Added `return_args: Option<Vec<Term>>` to `ConSig` struct, storing the TData args from constructor return types during parsing. Modified `check_dt_inner` TCon handler: for zero-arity constructors with repeated de Bruijn vars in return_args (indicating index constraints like refl's `Eq A x x`), substitute inferred params into return_args and check the result matches the expected type via `require_equal`. Scoped to avoid false positives for constructors without index constraints (like nil). Added `bad_examples/soundness_indexed.owl` as negative test, `bad_examples_must_fail` guard test. 275/275 tests pass, `cargo fmt` clean. **Note**: Full index unification (vtail etc.) remains OPEN — see A6.
+
 - [x] **G1 — Core data types.** ✅ Created standalone library files for all core data types. `lib/bool.owl`: Bool with not/and/or/xor/if/eq + proofs (not_not, and_idem, or_idem, and_comm, or_comm). `lib/list.owl`: List with append/reverse/map/foldl/foldr/length/filter/any/all + proofs (append_nil_l, append_assoc, map_append). `lib/maybe.owl`: Maybe with default/map/bind/is_just/is_nothing/from_maybe. `lib/vector.owl`: Vec type with nil/cons/vhead/vnil (dependent elimination limited by kernel). `lib/int.owl`: Int with abs/sign/neg/add/mul/is_nonneg. Added 5 example demos (bool_demo, list_demo, maybe_demo, vector_demo, int_ops_demo) and 10 guard tests (5 lib + 5 demo). 274/274 tests pass, `cargo fmt` clean.
 
 - [x] **C1 — Datatypes/records inside parameterized modules.** ✅ Removed `reject_inside_parameterized_module` calls for `inductive`/`record` declarations. Added `wrap_datatype_with_module_params` that prepends module params to `dt.params` and updates all self-references (`TData(dt_name, args)`) in constructor arg types, path/square/cell constructor faces by prepending module-param de Bruijn variable references. Key insight: `parse_constructor_type` normalises arg_tys to the outer scope via `shift(-depth, 0, …)` so indices already match `param_ctx` — the only fix needed is updating self-references to include the new module params. Removed the old incorrect shifts of arg_tys, faces, and dt-param types. Files: `parser/grammar.rs`, `parser/mod.rs`, `parser/tests.rs`. Example: `examples/parameterized_datatype.owl`. 264/264 tests pass, `cargo fmt` clean.
@@ -158,11 +160,12 @@ This enables square composition (2D hcomp): composing paths whose type is itself
 
 #### A6. Indexed dependent pattern matching / index unification 🔴
 
-**Status**: OPEN — includes a confirmed soundness bug.
+**Status**: Soundness fix done ✅ — full index unification still OPEN.
 
-When matching on an indexed inductive type (e.g. `Vec A n`), the kernel must **unify** the constructor's indices with the scrutinee's actual indices. Currently it does not: it blindly substitutes the scrutinee's parameters into each constructor's argument types, which is wrong when indices differ between constructors.
+**Soundness fix (done)**: Added `return_args: Option<Vec<Term>>` to `ConSig` in `syntax/mod.rs`. The parser extracts the TData arguments from each constructor's return type and stores them. In `check_dt_inner` (TCon handler), for zero-arity constructors whose `return_args` contain a repeated de Bruijn variable at index positions (indicating an index constraint like `refl : Eq A x x`), we substitute the inferred params into `return_args` and check the result matches the expected type via `require_equal`. This catches the soundness bug where `refl : Eq Nat zero (suc zero)` was accepted because the old check was circular (params seeded from expected, then compared). The check is scoped to avoid false positives for constructors like `nil : Vec A zero` (no repeated vars) that would fail due to a separate pre-existing issue where parameter propagation to nested constructors doesn't account for index families. Files: `syntax/mod.rs`, `parser/grammar.rs`, `typechecker/mod.rs`, `driver/tests/example_guards.rs`. `bad_examples/soundness_indexed.owl` added as negative test. 275/275 tests pass, `cargo fmt` clean.
 
-**Example failure** (`lib/vector.owl`):
+**Remaining: full index unification (OPEN)**:
+The kernel still cannot do dependent elimination on indexed types. Example failure:
 ```
 def vtail : forall (A : Type), forall (n : Nat), Vec A (suc n) -> Vec A n :=
   fun A n v => match v return Vec A n with
@@ -171,28 +174,36 @@ def vtail : forall (A : Type), forall (n : Nat), Vec A (suc n) -> Vec A n :=
 ```
 The kernel substitutes the scrutinee's index `suc n` into `cons`'s arg type `Vec A n`, giving `xs : Vec A (suc n)`. It should instead unify `suc n' = suc n` (where `n'` is `cons`'s fresh index) to derive `n' = n`, making `xs : Vec A n`.
 
-**Soundness bug** (🔴 critical): Zero-arity constructors of indexed types are accepted against *any* index, not just their declared index. Reproduction:
-```
-inductive Eq (A : Type) (x : A) (y : A) where
-  | refl : Eq A x x
-
-def bad_eq : Eq Nat zero (suc zero) := refl  -- ACCEPTED (should fail: zero ≠ suc zero)
-def exploit : Eq Nat zero (suc zero) -> Empty := fun p => match p return Empty with | refl => void
-def unsound : Empty := exploit bad_eq  -- PROVES FALSE
-```
-NbE evaluates `main : Empty = void`. This is a genuine unsoundness: the kernel proves `Empty` (= `False`).
-
-**Root cause**: `Datatype` has no distinction between **parameters** (same in all constructors, like `A` in `List A`) and **indices** (vary per constructor, like `n` in `Vec A n`). All type arguments are stored as `params: Vec<(Name, Term)>`. The `check_dt_inner` handler for zero-arity constructors seeds parameters from the expected type and compares them against themselves, never validating that the constructor's actual return type matches the expected type.
-
-**Impact on existing tests**: None currently — the only indexed type in the codebase is `Vec` (just added in `lib/vector.owl`), and no tests rely on the bug. But any future indexed type with zero-arity constructors would be affected.
-
-**Fix plan**:
-1. Add `indices: Vec<usize>` field to `Datatype` in `syntax/mod.rs` — indices into `params` that are true indices (not parameters). Parser marks which params are indices.
-2. Add **index unification** during pattern matching in `typechecker/mod.rs` (`check_dt_inner` / `TElim` handler): when a constructor's return type mentions index params, unify those with the scrutinee's actual indices via `require_equal`.
-3. Fix the **zero-arity constructor soundness bug**: in `check_dt_inner`, when checking a zero-arity constructor against an expected type, validate that the constructor's actual return type (after substituting inferred params) is definitionally equal to the expected type — not just that the params match themselves.
-4. Update `subst_params_local` to use unified index values for index params instead of the scrutinee's raw param substitution.
+**Root cause**: `Datatype` has no distinction between **parameters** (same in all constructors, like `A` in `List A`) and **indices** (vary per constructor, like `n` in `Vec A n`). All type arguments are stored as `params: Vec<(Name, Term)>`. Full fix requires:
+1. Add `indices: Vec<usize>` field to `Datatype` — indices into `params` that are true indices.
+2. Add **index unification** during pattern matching in `check_dt_inner` / `TElim` handler.
+3. Update `subst_params_local` to use unified index values.
 
 **Scope**: ~4 functions to modify (`Datatype` struct, parser param classification, `check_dt_inner` TCon handler, `subst_params_local`). Medium regression risk — the existing 264 tests should pass unchanged since they don't use indexed types, but the pattern matching codepath is kernel-critical.
+
+#### A7. Small trusted kernel 🔴
+
+**Status**: OPEN — not yet started.
+
+The current kernel is ~10k lines of Rust spanning NbE evaluation, typechecking, equality checking, quoting, and transport. While the kernel has been audited for individual soundness bugs (e.g. A6), the overall trusted computing base (TCB) is large relative to proof-assistant standards. A smaller kernel reduces the surface area for soundness bugs and makes formal verification of the kernel feasible.
+
+**Current TCB size** (approximate):
+- NbE eval: `nbe/eval.rs` + `nbe/mod.rs` + `nbe/elim.rs` — core evaluation
+- Typechecker: `typechecker/mod.rs` — infer/check
+- Equality: `equality.rs` — definitional equality
+- Quote: `nbe/quote.rs` — quote back to syntax
+- Transport/hcomp: `nbe/transport.rs` + `nbe/hcomp.rs` — cubical reduction
+- Session/env: `session.rs` + `env.rs` — state management
+
+**Approach** (phased, deferred until after stdlib maturity):
+1. **Audit & document** the TCB: identify which functions are kernel-critical (affect soundness) vs. peripheral (errors, pretty-printing, tactics). Produce a verified subset list.
+2. **Minimize NbE**: ensure all cubical reduction rules are covered by the smallest possible eval+quote pair. Remove dead code paths, simplify stuck-neutral handling where safe.
+3. **Consider extracting the kernel** to a standalone crate (`owl-kernel`) with no I/O, no tactics, no tactic-generated proof trees. The driver/tactic layer becomes trusted-external.
+4. **Long-term**: model the kernel in a proof assistant (Lean/Coq/Agda) and extract verified Rust code.
+
+**Rationale**: Every soundness fix (like A6) is a patch on a large surface. Shrinking the kernel从根本上 reduces the need for such patches. This is not urgent (the kernel is sound for all currently-expressible programs), but should be done before any claim of formal verification.
+
+**Scope**: Large (months of work for a full formal verification). Should be done after the stdlib stabilizes (G1–G6) so the kernel's feature set is final.
 
 ---
 
@@ -419,9 +430,10 @@ Spectrum types for stable homotopy theory. Research-level.
 10. ~~**F1 (interactive REPL)**~~ — ✅ done.
 11. ~~**C1 (datatypes in parameterized modules)**~~ — ✅ done. Unblocks Cubical Agda module parity.
 12. ~~**G1 (core data types)**~~ — ✅ done. List, Vector, Maybe, Int, Bool libraries with proofs. Foundational for stdlib.
-13. **A6 (indexed dependent pattern matching)** — 🔴 soundness bug: kernel proves False via zero-arity constructor index mismatch. Blocks safe use of any indexed type.
+13. ~~**A6 (indexed dependent pattern matching)**~~ — 🔴 soundness fix done ✅. Kernel no longer proves False via zero-arity constructor index mismatch. Full index unification (vtail, etc.) still OPEN. 275/275 tests pass.
 14. **G3 (logic)** — propositional logic, quantifiers, decidability. Unlocks ideal predicates for G6.
 14. **G2 (algebra extensions)** — lattices, ordered structures. Feeds into G5 (categories of algebraic structures).
 15. **G5 (category theory)** — Category, Functor, NatTrans, Yoneda. Showcases G1–G2.
 16. **G6 (algebraic geometry)** — ideals, polynomial rings, Spec, sheaves. Needs G1+G2+G3.
 17. **H2 (spectrum / stabilization)** — research-level, last. Needs mature cubical TT + deep stdlib.
+18. **A7 (small trusted kernel)** — 🔴 audit & minimize the TCB, extract kernel crate, long-term formal verification. Deferred until after stdlib maturity (G1–G6).
