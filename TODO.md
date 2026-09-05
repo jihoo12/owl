@@ -181,29 +181,7 @@ The kernel substitutes the scrutinee's index `suc n` into `cons`'s arg type `Vec
 
 **Scope**: ~4 functions to modify (`Datatype` struct, parser param classification, `check_dt_inner` TCon handler, `subst_params_local`). Medium regression risk — the existing 264 tests should pass unchanged since they don't use indexed types, but the pattern matching codepath is kernel-critical.
 
-#### A7. Small trusted kernel 🔴
-
-**Status**: OPEN — not yet started.
-
-The current kernel is ~10k lines of Rust spanning NbE evaluation, typechecking, equality checking, quoting, and transport. While the kernel has been audited for individual soundness bugs (e.g. A6), the overall trusted computing base (TCB) is large relative to proof-assistant standards. A smaller kernel reduces the surface area for soundness bugs and makes formal verification of the kernel feasible.
-
-**Current TCB size** (approximate):
-- NbE eval: `nbe/eval.rs` + `nbe/mod.rs` + `nbe/elim.rs` — core evaluation
-- Typechecker: `typechecker/mod.rs` — infer/check
-- Equality: `equality.rs` — definitional equality
-- Quote: `nbe/quote.rs` — quote back to syntax
-- Transport/hcomp: `nbe/transport.rs` + `nbe/hcomp.rs` — cubical reduction
-- Session/env: `session.rs` + `env.rs` — state management
-
-**Approach** (phased, deferred until after stdlib maturity):
-1. **Audit & document** the TCB: identify which functions are kernel-critical (affect soundness) vs. peripheral (errors, pretty-printing, tactics). Produce a verified subset list.
-2. **Minimize NbE**: ensure all cubical reduction rules are covered by the smallest possible eval+quote pair. Remove dead code paths, simplify stuck-neutral handling where safe.
-3. **Consider extracting the kernel** to a standalone crate (`owl-kernel`) with no I/O, no tactics, no tactic-generated proof trees. The driver/tactic layer becomes trusted-external.
-4. **Long-term**: model the kernel in a proof assistant (Lean/Coq/Agda) and extract verified Rust code.
-
-**Rationale**: Every soundness fix (like A6) is a patch on a large surface. Shrinking the kernel从根本上 reduces the need for such patches. This is not urgent (the kernel is sound for all currently-expressible programs), but should be done before any claim of formal verification.
-
-**Scope**: Large (months of work for a full formal verification). Should be done after the stdlib stabilizes (G1–G6) so the kernel's feature set is final.
+#### A7. need new kernel architecture 🔴
 
 ---
 
