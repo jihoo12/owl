@@ -55,7 +55,7 @@ fn all_tubes_constant_and_coherent(
     // constant-tube shortcut); bailing out is safe — the hcomp simply stays
     // stuck instead of reducing to base.
     let depth = session.all_tubes_depth_enter();
-    if depth > 0 {
+    if depth > 1 {
         session.all_tubes_depth_restore(depth);
         return false;
     }
@@ -288,10 +288,13 @@ pub fn do_hcomp(
                         (phi.clone(), snd_tube_plam)
                     })
                     .collect();
+                // Use the composed fst_result for the second component's type,
+                // not the original fst_base. For dependent Sigma types, the
+                // second component's type depends on the first component.
                 let snd_result = do_hcomp(
                     globals,
                     global_offset,
-                    snd_clos.apply((**fst_base).clone(), session),
+                    snd_clos.apply(fst_result.clone(), session),
                     snd_sys,
                     (**snd_base).clone(),
                     session,

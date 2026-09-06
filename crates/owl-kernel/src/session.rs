@@ -338,6 +338,15 @@ pub fn with_session_mut<R>(f: impl FnOnce(&mut Session) -> R) -> R {
 /// Borrow the current session as a shared reference, if one is active
 /// (i.e. we are inside `with_session_mut`). Returns `None` otherwise.
 /// Useful in code paths (like pretty-printing) that don't receive `&Session`.
+///
+/// SAFETY: The raw pointer `CURRENT_SESSION` is only set to a valid `*const Session`
+/// during the execution of `with_session_mut`, and cleared to null immediately after.
+/// The returned `&'static Session` reference is only valid for the duration of the
+/// enclosing `with_session_mut` call. Callers must not store the reference beyond
+/// that scope. This is sound because:
+/// 1. The pointer is derived from a `&Session` that lives for the `with_session_mut` scope
+/// 2. No mutable borrows exist while `CURRENT_SESSION` is set (RefCell borrow is shared)
+/// 3. The reference is only used for read-only operations (meta name lookup)
 pub fn current_session() -> Option<&'static Session> {
     CURRENT_SESSION.with(|c| {
         let p = c.get();

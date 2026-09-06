@@ -59,9 +59,12 @@ pub fn cumulativity_check(
         // fall through to structural equality.
         (Term::TUniv(m), Term::TUniv(n)) => n.leq(m, &[]).unwrap_or_else(|| n == m),
 
-        // Pi cumulativity: contravariant in domain, covariant in codomain
-        (Term::TPi(_, a_exp, b_exp, _), Term::TPi(_, a_inf, b_inf, _)) => {
-            cumulativity_check(a_inf, a_exp, dts, session)
+        // Pi cumulativity: contravariant in domain, covariant in codomain.
+        // Implicit flags must match — implicit and explicit Pi types
+        // are not interconvertible under subtyping.
+        (Term::TPi(_, a_exp, b_exp, imp_exp), Term::TPi(_, a_inf, b_inf, imp_inf)) => {
+            imp_exp == imp_inf
+                && cumulativity_check(a_inf, a_exp, dts, session)
                 && cumulativity_check(b_exp, b_inf, dts, session)
         }
 

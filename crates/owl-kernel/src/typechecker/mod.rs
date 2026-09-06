@@ -357,22 +357,19 @@ fn infer_dt_inner(
             Ok(Term::TUniv(LevelExpr::max(n.clone(), m.clone())))
         }
         // Universe lowering: lower A : U_n when A : U_{n+1}
+        // Only valid for lifted types — lower requires a TLift wrapper.
         Term::TLower(a) => match nbe_eval_ctx(ctx.len(), a, session) {
             Term::TLift(inner, _m) => {
                 let lvl = type_level_dt(dts, ctx, &inner, session)?;
                 Ok(Term::TUniv(lvl))
             }
-            other => {
-                let ty = type_level_dt(dts, ctx, &other, session)?;
-                if ty.as_const().map_or(false, |c| c > 0) {
-                    Ok(Term::TUniv(if let Some(c) = ty.as_const() {
-                        LevelExpr::LConst(c - 1)
-                    } else {
-                        LevelExpr::LSuc(Box::new(ty))
-                    }))
-                } else {
-                    Ok(Term::TUniv(LevelExpr::LConst(0)))
-                }
+            _ => {
+                // lower on a non-lifted type is an error — the type must
+                // be explicitly lifted before lowering.
+                Err(TypeError::Other(format!(
+                    "lower requires a lifted type (TLift), got {}",
+                    show_term(&names, &nbe_eval_ctx(ctx.len(), a, session))
+                )))
             }
         },
 
@@ -1340,6 +1337,50 @@ fn infer_dt_inner(
                     let lvl = type_level_dt(dts, &tel_ctx, &arg_ty_inst, session)?;
                     max_level = LevelExpr::max(max_level, lvl);
                     let var_name = format!("_pcon_arg_{}", k);
+                    let depth = k as i32;
+                    prev_args.push(shift(depth + 1, 0, &Term::TVar(0)));
+                    tel_ctx = extend_ctx(var_name, nbe_eval(&arg_ty_inst, session), &tel_ctx);
+                }
+            }
+            // Also check square constructors for universe level.
+            for sqcon_sig in &dt.sqcons {
+                let mut tel_ctx = ctx.clone();
+                let mut prev_args: Vec<Term> = Vec::new();
+                for (k, arg_ty) in sqcon_sig.arg_tys.iter().enumerate() {
+                    let mut substituted = arg_ty.clone();
+                    for i in 0..num_params.min(args.len()) {
+                        let d = (num_params - 1 - i) as i32;
+                        substituted = subst(d, &args[i], &substituted);
+                    }
+                    let arg_ty_inst = prev_args
+                        .iter()
+                        .rev()
+                        .fold(substituted, |ty, a| beta(&ty, a));
+                    let lvl = type_level_dt(dts, &tel_ctx, &arg_ty_inst, session)?;
+                    max_level = LevelExpr::max(max_level, lvl);
+                    let var_name = format!("_sqcon_arg_{}", k);
+                    let depth = k as i32;
+                    prev_args.push(shift(depth + 1, 0, &Term::TVar(0)));
+                    tel_ctx = extend_ctx(var_name, nbe_eval(&arg_ty_inst, session), &tel_ctx);
+                }
+            }
+            // Also check cell constructors for universe level.
+            for cellcon_sig in &dt.cellcons {
+                let mut tel_ctx = ctx.clone();
+                let mut prev_args: Vec<Term> = Vec::new();
+                for (k, arg_ty) in cellcon_sig.arg_tys.iter().enumerate() {
+                    let mut substituted = arg_ty.clone();
+                    for i in 0..num_params.min(args.len()) {
+                        let d = (num_params - 1 - i) as i32;
+                        substituted = subst(d, &args[i], &substituted);
+                    }
+                    let arg_ty_inst = prev_args
+                        .iter()
+                        .rev()
+                        .fold(substituted, |ty, a| beta(&ty, a));
+                    let lvl = type_level_dt(dts, &tel_ctx, &arg_ty_inst, session)?;
+                    max_level = LevelExpr::max(max_level, lvl);
+                    let var_name = format!("_cellcon_arg_{}", k);
                     let depth = k as i32;
                     prev_args.push(shift(depth + 1, 0, &Term::TVar(0)));
                     tel_ctx = extend_ctx(var_name, nbe_eval(&arg_ty_inst, session), &tel_ctx);
@@ -2936,8 +2977,10 @@ fn check_dt_inner(
                     if nf == *t {
                         Err(e)
                     } else {
+                        // Only skip guard for tactic-generated proofs, not
+                        // for arbitrary reduction fallbacks. This prevents
+                        // non-terminating functions from being accepted.
                         let prev = crate::typechecker::termination::should_skip_guard(session);
-                        crate::typechecker::termination::set_skip_guard(true, session);
                         let r = check_dt(dts, ctx, &nf, ty, session);
                         crate::typechecker::termination::set_skip_guard(prev, session);
                         r

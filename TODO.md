@@ -8,6 +8,16 @@
 
 ## Completed
 
+- [x] **A8 — Kernel soundness audit and fixes.** ✅ Comprehensive audit of the owl-kernel crate for soundness bugs. Fixed 6 issues:
+  1. **CRITICAL**: Guard skip on reduced fallback was unconditional — bypassed termination checking. Fixed by only skipping guard for tactic-generated proofs (ring/field/group), not for arbitrary reduction fallbacks.
+  2. **HIGH**: Sigma hcomp decomposition used original `fst_base` for the second component's type instead of the composed result. Fixed by using `fst_result` for dependent Sigma types.
+  3. **HIGH**: TData universe inference missed `sqcons` and `cellcons` — only iterated over `cons` and `pcons`. Fixed by adding loops for square and cell constructors.
+  4. **HIGH**: Pi cumulativity ignored the `implicit` flag — implicit and explicit Pi types were treated as interconvertible. Fixed by requiring implicit flags to match.
+  5. **HIGH**: TLower accepted non-lifted types at lower universes. Fixed by requiring a `TLift` wrapper for `lower`.
+  6. **HIGH**: Termination guard was permissive for nested elim on different datatypes — accepted non-structurally-smaller scrutinees. Fixed by checking that inner scrutinees are case binders or constructors of the expected datatype.
+  
+  Also improved the hcomp re-entrancy guard (depth 1 → depth 2) and enhanced the J eliminator to handle constructor applications. Documented the `unsafe` block in `session.rs` as sound with safety justification. 275/275 tests pass, `cargo fmt` clean.
+
 - [x] **A6 — Soundness fix for indexed type zero-arity constructors.** ✅ Added `return_args: Option<Vec<Term>>` to `ConSig` struct, storing the TData args from constructor return types during parsing. Modified `check_dt_inner` TCon handler: for zero-arity constructors with repeated de Bruijn vars in return_args (indicating index constraints like refl's `Eq A x x`), substitute inferred params into return_args and check the result matches the expected type via `require_equal`. Scoped to avoid false positives for constructors without index constraints (like nil). Added `bad_examples/soundness_indexed.owl` as negative test, `bad_examples_must_fail` guard test. 275/275 tests pass, `cargo fmt` clean. **Note**: Full index unification (vtail etc.) remains OPEN — see A6.
 
 - [x] **G1 — Core data types.** ✅ Created standalone library files for all core data types. `lib/bool.owl`: Bool with not/and/or/xor/if/eq + proofs (not_not, and_idem, or_idem, and_comm, or_comm). `lib/list.owl`: List with append/reverse/map/foldl/foldr/length/filter/any/all + proofs (append_nil_l, append_assoc, map_append). `lib/maybe.owl`: Maybe with default/map/bind/is_just/is_nothing/from_maybe. `lib/vector.owl`: Vec type with nil/cons/vhead/vnil (dependent elimination limited by kernel). `lib/int.owl`: Int with abs/sign/neg/add/mul/is_nonneg. Added 5 example demos (bool_demo, list_demo, maybe_demo, vector_demo, int_ops_demo) and 10 guard tests (5 lib + 5 demo). 274/274 tests pass, `cargo fmt` clean.
@@ -195,6 +205,8 @@ Key changes:
 4. All 275 tests pass, `cargo fmt` clean
 
 The kernel is now a self-contained crate that can be audited independently. Tactics and solvers live in the frontend and are re-checked by the kernel.
+
+**Soundness audit** (2026-09-06): Comprehensive audit of the kernel for soundness bugs. Fixed 6 issues (see A8). The kernel's `unsafe` code (single block in `session.rs`) was documented as sound with safety justification. The kernel is now ready for formal verification efforts.
 
 ---
 

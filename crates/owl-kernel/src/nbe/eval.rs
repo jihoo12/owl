@@ -905,6 +905,10 @@ fn do_j(
             // J B d (Refl x) = d — the key definitional reduction
             base
         }
+        Value::VCon(_, con_name, _) if con_name == "Refl" => {
+            // J B d (Refl x) = d — constructor application case
+            base
+        }
         Value::VNeutral(_) => {
             // Stuck: J applied to a neutral proof
             Value::VJelim(Arc::new(_motive), Arc::new(base), Arc::new(p))
