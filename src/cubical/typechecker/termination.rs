@@ -44,7 +44,6 @@ pub enum GuardStatus {
 ///
 /// `d` is the name of the datatype being eliminated.
 /// `cases` are the eliminator cases.
-/// ` scrut_args_count` is the number of binders in each case.
 ///
 /// `def_idx` is the de Bruijn index of the definition being checked in the
 /// context of the eliminator (i.e. `ctx` at the `TElim` node, *without* the
@@ -55,15 +54,28 @@ pub enum GuardStatus {
 ///
 /// The check walks each case body looking for nested `TElim` calls and
 /// self-references to the definition being checked, both on the same
-/// datatype. Each such call must pass a case binder
-/// (de Bruijn index in `0..binder_count`) as the recursive argument.
+/// datatype. Each such call must pass a case binder as the recursive
+/// argument — a strict subterm of the scrutinee.
 pub fn check_guard(d: &str, cases: &[ElimCase], def_idx: Option<i32>) -> GuardStatus {
     for case in cases {
-        let binder_count = case.binders.len() + if case.as_name.is_some() { 1 } else { 0 };
+        // `total_binders` counts everything that introduces a binding in the
+        // case body context (pattern binders + optional as-name). This is
+        // needed to compute the correct de Bruijn index of the definition
+        // being checked, because each binder shifts all outer indices up.
+        let total_binders = case.binders.len() + if case.as_name.is_some() { 1 } else { 0 };
+        // `guard_binders` counts only the pattern binders — the as-name
+        // refers to the *full* constructor application (structurally equal
+        // to the scrutinee), so it must NOT be accepted as a structurally
+        // smaller recursive argument.
+        let guard_binders = case.binders.len();
         // The current definition sits just below the eliminator's case
-        // binders, so its index is `def_idx + binder_count`.
-        let case_def_idx = def_idx.map(|i| i + binder_count as i32);
-        if let Err(msg) = check_body_guard(d, &case.body, binder_count, case_def_idx) {
+        // binders + as-name, so its index is `def_idx + total_binders`.
+        let case_def_idx = def_idx.map(|i| i + total_binders as i32);
+        // The parser puts the as-name at term_env index 0, pushing pattern
+        // binders to indices 1..=n. The guard checker operates on the raw
+        // AST, so we must skip index 0 when an as-name is present.
+        let as_offset = if case.as_name.is_some() { 1 } else { 0 };
+        if let Err(msg) = check_body_guard(d, &case.body, guard_binders, case_def_idx, as_offset) {
             return GuardStatus::Violation {
                 case: case.con.clone(),
                 msg,
@@ -77,14 +89,17 @@ pub fn check_guard(d: &str, cases: &[ElimCase], def_idx: Option<i32>) -> GuardSt
 ///
 /// `d` — the datatype being eliminated (recursive calls target this).
 /// `body` — the term to check.
-/// `binder_count` — number of case binders in scope (de Bruijn 0..binder_count-1).
+/// `binder_count` — number of case binders in scope (excluding as-name).
 /// `def_idx` — current de Bruijn index of the definition being checked,
 ///             `None` when no definition is in scope.
+/// `as_offset` — 1 if the current case has an as-name (shifts binders in the
+///               raw AST by +1), 0 otherwise.
 fn check_body_guard(
     d: &str,
     body: &Term,
     binder_count: usize,
     def_idx: Option<i32>,
+    as_offset: usize,
 ) -> Result<(), String> {
     match body {
         // Recursive call: TElim on the same datatype.
@@ -92,18 +107,21 @@ fn check_body_guard(
             // Check if the motive targets our datatype.
             if motive_targets_datatype(d, motive) {
                 // The scrutinee of the recursive call must be a case binder
-                // (de Bruijn index < binder_count).
+                // (de Bruijn index in as_offset..as_offset+binder_count).
                 match scrut.as_ref() {
                     Term::TVar(i) => {
                         let idx = *i as usize;
-                        if idx < binder_count {
+                        if idx >= as_offset && idx < as_offset + binder_count {
                             Ok(())
                         } else {
                             Err(format!(
                                 "recursive call uses variable at index {} \
                                  but only {} case binders are available \
-                                 (index {} would be the scrutinee itself)",
-                                idx, binder_count, binder_count
+                                 (valid range is {}..{})",
+                                idx,
+                                binder_count,
+                                as_offset,
+                                as_offset + binder_count
                             ))
                         }
                     }
@@ -124,23 +142,29 @@ fn check_body_guard(
             } else {
                 // Different datatype — no guard requirement, but check
                 // subterms for nested guard violations against d.
-                check_body_guard(d, motive, binder_count, def_idx)?;
+                check_body_guard(d, motive, binder_count, def_idx, as_offset)?;
                 for case in inner_cases {
                     let n = case.binders.len() as i32;
+                    let inner_as_offset = if case.as_name.is_some() { 1 } else { 0 };
                     check_body_guard(
                         d,
                         &case.body,
                         binder_count + case.binders.len(),
                         def_idx.map(|i| i + n),
+                        as_offset + inner_as_offset,
                     )?;
                 }
-                check_body_guard(d, scrut, binder_count, def_idx)
+                check_body_guard(d, scrut, binder_count, def_idx, as_offset)
             }
         }
 
         // Lambda: extend binder count.
-        Term::TAbs(_, body) => check_body_guard(d, body, binder_count + 1, def_idx.map(|i| i + 1)),
-        Term::PLam(_, body) => check_body_guard(d, body, binder_count, def_idx),
+        Term::TAbs(_, body) => {
+            check_body_guard(d, body, binder_count + 1, def_idx.map(|i| i + 1), as_offset)
+        }
+        Term::PLam(_, body) => {
+            check_body_guard(d, body, binder_count, def_idx.map(|i| i + 1), as_offset)
+        }
 
         // Recursive call via TApp/PApp spine: the head is a reference to the
         // definition being checked (`TVar(def_idx)`), applied to arguments.
@@ -152,66 +176,72 @@ fn check_body_guard(
                         if *gi == di {
                             // A self-call to the definition being checked.
                             // It is guarded iff at least one argument is a
-                            // case binder (de Bruijn index < binder_count) —
+                            // case binder (de Bruijn index in
+                            // as_offset..as_offset+binder_count) —
                             // a strict subterm of the scrutinee.
                             let guarded = args.iter().any(|a| {
-                                matches!(a, Term::TVar(i) if *i >= 0 && (*i as usize) < binder_count)
+                                matches!(a, Term::TVar(i)
+                                    if *i >= 0
+                                        && (*i as usize) >= as_offset
+                                        && (*i as usize) < as_offset + binder_count)
                             });
                             if !guarded {
                                 return Err(format!(
                                     "recursive call to the definition being checked \
                                      passes no structurally smaller argument \
-                                     ({} case binders are available, so indices 0..{} \
+                                     ({} case binders are available, so indices {}..{} \
                                      are strictly smaller)",
-                                    binder_count, binder_count
+                                    binder_count,
+                                    as_offset,
+                                    as_offset + binder_count
                                 ));
                             }
                         }
                     }
                 }
             }
-            check_body_guard(d, head, binder_count, def_idx)?;
+            check_body_guard(d, head, binder_count, def_idx, as_offset)?;
             for a in args {
-                check_body_guard(d, a, binder_count, def_idx)?;
+                check_body_guard(d, a, binder_count, def_idx, as_offset)?;
             }
             Ok(())
         }
 
         // Sigma, pair, fst, snd — check subterms.
         Term::TSigma(_, a, b) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, b, binder_count + 1, def_idx.map(|i| i + 1))
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, b, binder_count + 1, def_idx.map(|i| i + 1), as_offset)
         }
         Term::TPair(a, b) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, b, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, b, binder_count, def_idx, as_offset)
         }
-        Term::TFst(p) | Term::TSnd(p) => check_body_guard(d, p, binder_count, def_idx),
+        Term::TFst(p) | Term::TSnd(p) => check_body_guard(d, p, binder_count, def_idx, as_offset),
 
         // Pi — domain is negative, codomain is positive.
         Term::TPi(_, a, b, _) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, b, binder_count + 1, def_idx.map(|i| i + 1))
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, b, binder_count + 1, def_idx.map(|i| i + 1), as_offset)
         }
 
         // Path type.
         Term::TPath(a, u, v) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, u, binder_count, def_idx)?;
-            check_body_guard(d, v, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, u, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, v, binder_count, def_idx, as_offset)
         }
 
         // Identity type.
         Term::TId(a, u, v) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, u, binder_count, def_idx)?;
-            check_body_guard(d, v, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, u, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, v, binder_count, def_idx, as_offset)
         }
-        Term::TRefl(a) => check_body_guard(d, a, binder_count, def_idx),
+        Term::TRefl(a) => check_body_guard(d, a, binder_count, def_idx, as_offset),
         Term::TJ(motive, base, p) => {
-            check_body_guard(d, motive, binder_count, def_idx)?;
-            check_body_guard(d, base, binder_count, def_idx)?;
-            check_body_guard(d, p, binder_count, def_idx)
+            check_body_guard(d, motive, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, base, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, p, binder_count, def_idx, as_offset)
         }
 
         // Kan operations.
@@ -219,73 +249,73 @@ fn check_body_guard(
         | Term::TComp(a, sys, base)
         | Term::TFill(a, sys, base)
         | Term::THFill(a, sys, base) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
             for (phi, t) in sys {
-                check_body_guard(d, phi, binder_count, def_idx)?;
-                check_body_guard(d, t, binder_count, def_idx)?;
+                check_body_guard(d, phi, binder_count, def_idx, as_offset)?;
+                check_body_guard(d, t, binder_count, def_idx, as_offset)?;
             }
-            check_body_guard(d, base, binder_count, def_idx)
+            check_body_guard(d, base, binder_count, def_idx, as_offset)
         }
 
         // Equiv, transport, glue, etc.
         Term::TEquiv(a, b) | Term::TEquivFwd(a, b) | Term::TTransport(a, b) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, b, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, b, binder_count, def_idx, as_offset)
         }
         Term::TTransp(a, r, x) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, r, binder_count, def_idx)?;
-            check_body_guard(d, x, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, r, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, x, binder_count, def_idx, as_offset)
         }
-        Term::TUa(e) => check_body_guard(d, e, binder_count, def_idx),
+        Term::TUa(e) => check_body_guard(d, e, binder_count, def_idx, as_offset),
 
         Term::TGlue(a, phi, te) | Term::TGlueElem(a, phi, te) | Term::TUnglue(a, phi, te) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, phi, binder_count, def_idx)?;
-            check_body_guard(d, te, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, phi, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, te, binder_count, def_idx, as_offset)
         }
 
         Term::TMkEquiv(a, b, f, g, eta, eps) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, b, binder_count, def_idx)?;
-            check_body_guard(d, f, binder_count, def_idx)?;
-            check_body_guard(d, g, binder_count, def_idx)?;
-            check_body_guard(d, eta, binder_count, def_idx)?;
-            check_body_guard(d, eps, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, b, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, f, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, g, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, eta, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, eps, binder_count, def_idx, as_offset)
         }
 
         Term::TPartial(phi, a) => {
-            check_body_guard(d, phi, binder_count, def_idx)?;
-            check_body_guard(d, a, binder_count, def_idx)
+            check_body_guard(d, phi, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, a, binder_count, def_idx, as_offset)
         }
 
         Term::TSystemType(sys) => {
             for (phi, a) in sys {
-                check_body_guard(d, phi, binder_count, def_idx)?;
-                check_body_guard(d, a, binder_count, def_idx)?;
+                check_body_guard(d, phi, binder_count, def_idx, as_offset)?;
+                check_body_guard(d, a, binder_count, def_idx, as_offset)?;
             }
             Ok(())
         }
 
         Term::TCon(_, _, args) | Term::TPCon(_, _, args, _) => {
             for arg in args {
-                check_body_guard(d, arg, binder_count, def_idx)?;
+                check_body_guard(d, arg, binder_count, def_idx, as_offset)?;
             }
             Ok(())
         }
         Term::TSqCon(_, _, args, r, s) => {
             for arg in args {
-                check_body_guard(d, arg, binder_count, def_idx)?;
+                check_body_guard(d, arg, binder_count, def_idx, as_offset)?;
             }
-            check_body_guard(d, r, binder_count, def_idx)?;
-            check_body_guard(d, s, binder_count, def_idx)
+            check_body_guard(d, r, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, s, binder_count, def_idx, as_offset)
         }
         Term::TCellCon(_, _, args, ivars) => {
             for arg in args {
-                check_body_guard(d, arg, binder_count, def_idx)?;
+                check_body_guard(d, arg, binder_count, def_idx, as_offset)?;
             }
             for iv in ivars {
-                check_body_guard(d, iv, binder_count, def_idx)?;
+                check_body_guard(d, iv, binder_count, def_idx, as_offset)?;
             }
             Ok(())
         }
@@ -304,31 +334,33 @@ fn check_body_guard(
         Term::TBy(_) | Term::TLift(_, _) | Term::TLower(_) | Term::TLevelTy => Ok(()),
 
         // Record projection — recurse into the record term.
-        Term::TProj(_, r) => check_body_guard(d, r, binder_count, def_idx),
+        Term::TProj(_, r) => check_body_guard(d, r, binder_count, def_idx, as_offset),
 
         // Record update — recurse into record and update values.
         Term::TRecordUpdate(r, updates) => {
-            check_body_guard(d, r, binder_count, def_idx)?;
+            check_body_guard(d, r, binder_count, def_idx, as_offset)?;
             for (_, e) in updates {
-                check_body_guard(d, e, binder_count, def_idx)?;
+                check_body_guard(d, e, binder_count, def_idx, as_offset)?;
             }
             Ok(())
         }
 
         // Coinduction — recurse into subterms.
         Term::TDelay(a) | Term::TNext(a) | Term::TForce(a) => {
-            check_body_guard(d, a, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)
         }
 
         // Quote/unquote — recurse into inner term.
-        Term::TQuote(a) | Term::TUnquote(a) => check_body_guard(d, a, binder_count, def_idx),
+        Term::TQuote(a) | Term::TUnquote(a) => {
+            check_body_guard(d, a, binder_count, def_idx, as_offset)
+        }
 
         // Reflection — recurse into inner term.
         Term::TGetContext => Ok(()),
-        Term::TGetType(a) => check_body_guard(d, a, binder_count, def_idx),
+        Term::TGetType(a) => check_body_guard(d, a, binder_count, def_idx, as_offset),
         Term::TUnify(a, bx) => {
-            check_body_guard(d, a, binder_count, def_idx)?;
-            check_body_guard(d, bx, binder_count, def_idx)
+            check_body_guard(d, a, binder_count, def_idx, as_offset)?;
+            check_body_guard(d, bx, binder_count, def_idx, as_offset)
         }
     }
 }

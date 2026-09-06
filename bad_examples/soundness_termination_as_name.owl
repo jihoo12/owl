@@ -1,0 +1,13 @@
+-- BAD: the `as` pattern binds the full constructor application (suc m'),
+-- which is NOT structurally smaller than the scrutinee. Using it as the
+-- recursive argument bypasses the guard check (bug in as_name binder counting).
+-- Expected rejection: termination violation.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+def bad_loop : Nat -> Nat := fun m =>
+  match m return Nat with
+  | zero => zero
+  | suc m' as full => bad_loop full
