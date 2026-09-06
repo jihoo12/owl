@@ -4,6 +4,6 @@
 --
 -- Expected rejection: field unable to solve.
 
-import "../lib/ring_laws.owl"
+import "../lib/algebra.owl"
 
 def bad_field : Path Nat (suc zero) zero := by field with NatCommRing

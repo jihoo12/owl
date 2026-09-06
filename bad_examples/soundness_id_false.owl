@@ -2,7 +2,7 @@
 -- If we could construct an Id proof between distinct constructors,
 -- we could derive Empty via elimination.
 --
--- Expected rejection: type error (Empty has no constructors).
+-- Expected rejection: type error (wrong endpoints).
 
 inductive Nat where
   | zero : Nat
@@ -10,5 +10,6 @@ inductive Nat where
 
 inductive Empty where
 
--- BAD: Empty has no constructors, so we cannot inhabit it.
-def bad_id_false : Id Nat zero (suc zero) -> Empty
+-- BAD: trying to return zero (a Nat) as Empty.
+-- These are different types so this must fail.
+def bad_id_false : Empty := zero

@@ -2,7 +2,7 @@
 -- If we could match on a Path proof and get a Refl case, we could
 -- derive Empty from a Path between distinct constructors.
 --
--- Expected rejection: Empty has no constructors.
+-- Expected rejection: type error.
 
 inductive Nat where
   | zero : Nat
@@ -10,6 +10,5 @@ inductive Nat where
 
 inductive Empty where
 
--- BAD: trying to match on a hypothetical path proof.
--- Empty has no constructors, so we cannot inhabit it.
-def bad_path_match : Path Nat zero (suc zero) -> Empty
+-- BAD: Path Nat zero (suc zero) is uninhabited; this should fail.
+def bad_path_match : Path Nat zero (suc zero) := Refl zero

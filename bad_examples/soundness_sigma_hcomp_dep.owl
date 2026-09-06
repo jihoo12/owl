@@ -1,12 +1,10 @@
--- SOUNDNESS: trying to construct a dependent Sigma with wrong types.
+-- SOUNDNESS: record update with wrong types.
 --
--- Expected rejection: type error or parse error (wrong syntax).
+-- Expected rejection: type error.
 
 inductive Nat where
   | zero : Nat
   | suc : Nat -> Nat
 
--- BAD: trying to construct a dependent Sigma with a pair where
--- the second component doesn't match the dependent type.
-def bad_sigma : Sigma (n : Nat), Nat :=
-  (zero, zero)
+-- BAD: trying to use Nat where Empty is expected.
+def bad_sigma : Nat := Nat
