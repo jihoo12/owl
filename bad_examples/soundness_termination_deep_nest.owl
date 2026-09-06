@@ -1,0 +1,15 @@
+-- SOUNDNESS: Deeply nested non-termination.
+-- Tests that the termination guard catches non-terminating functions
+-- even when they recurse through multiple levels of nesting.
+--
+-- Expected rejection: termination violation.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: non-terminating via self-recursion.
+def bad_deep : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero => zero
+  | suc n' => bad_deep n

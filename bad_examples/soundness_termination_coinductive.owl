@@ -1,0 +1,15 @@
+-- SOUNDNESS: Termination with coinductive types.
+-- Coinductive types (Delay, Next, Force) should not allow
+-- non-terminating definitions via Force (Next x) = x tricks.
+--
+-- Expected rejection: termination violation.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: non-terminating recursion on Nat.
+def bad_coind : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero => zero
+  | suc n' => bad_coind n

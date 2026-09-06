@@ -1,0 +1,15 @@
+-- SOUNDNESS: Paulson's paradox variant.
+-- Self-application tricks can derive False if the type system is
+-- unsound. This tests that the termination guard and positivity
+-- checking prevent such paradoxes.
+--
+-- Expected rejection: termination or positivity violation.
+
+inductive Bad where
+  | mk : (Bad -> Bad) -> Bad
+
+-- BAD: self-application through the Bad constructor.
+-- Without termination/positivity checks, this could loop.
+def bad_self_app : Bad -> Bad := fun b =>
+  match b return Bad with
+  | mk f => f b

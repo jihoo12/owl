@@ -1,0 +1,11 @@
+-- SOUNDNESS: trying to construct a path between distinct constructors.
+-- Path Nat zero (suc zero) has no proof because zero != suc zero.
+--
+-- Expected rejection: type error (no valid proof term).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: Path between distinct constructors should be uninhabited.
+def bad_path : Path Nat zero (suc zero) := ?bad_path_hole

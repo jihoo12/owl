@@ -1,0 +1,19 @@
+-- SOUNDNESS: Negative occurrence in inductive type.
+-- If a type occurs negatively in its own constructor, we can derive
+-- False via Curry's paradox or similar self-reference tricks.
+--
+-- Expected rejection: positivity violation.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: Nat occurs negatively (on the left of an arrow) in its own
+-- constructor. This is the classic non-termination source.
+inductive BadNat where
+  | mk : (BadNat -> Nat) -> BadNat
+
+-- BAD: trying to use the negative occurrence to loop.
+def bad_negative : BadNat -> Nat := fun b =>
+  match b return Nat with
+  | mk f => f b

@@ -1,0 +1,7 @@
+-- SOUNDNESS: Universe lowering without lift.
+-- If lower accepted any type, we could put U1 types in U0.
+--
+-- Expected rejection: lower requires a lifted type.
+
+-- BAD: trying to lower U1 to U0 without using lift.
+def bad_lower_univ : U0 := lower U1

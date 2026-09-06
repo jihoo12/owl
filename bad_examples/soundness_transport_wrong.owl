@@ -1,0 +1,14 @@
+-- SOUNDNESS: Transport with wrong type family.
+-- Transport should not change the type of the transported term.
+-- If the type family is wrong, the result has the wrong type.
+--
+-- Expected rejection: type error.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: trying to transport Nat through a function type family.
+-- The result should be a function, not Nat.
+def bad_transport : Nat :=
+  transport (fun (i : I) => Nat -> Nat) (suc zero)

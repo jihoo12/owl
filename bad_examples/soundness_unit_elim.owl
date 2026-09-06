@@ -1,0 +1,14 @@
+-- SOUNDNESS: Unit elimination to derive Empty.
+-- If we could eliminate Unit and get any type from it, we could
+-- derive Empty. Unit should only eliminate to itself (or propositions).
+--
+-- Expected rejection: Empty has no constructors, so match has no valid case body.
+
+inductive Empty where
+
+inductive Unit where
+  | tt : Unit
+
+-- BAD: trying to eliminate Unit to get Empty (which has no constructors).
+-- match tt return Empty with has no valid case body.
+def bad_unit_elim : Empty := match tt return Empty with

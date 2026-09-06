@@ -1,0 +1,12 @@
+-- SOUNDNESS: Universe inconsistency via cumulativity.
+-- If cumulativity were too permissive (e.g. ignoring implicit flags),
+-- we could derive contradictions by swapping universe levels.
+--
+-- Expected rejection: type mismatch.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: trying to prove 0 = 1 via a bogus identity function.
+def bad_univ : Path Nat zero (suc zero) := fun x => x

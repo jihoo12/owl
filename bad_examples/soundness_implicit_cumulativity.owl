@@ -1,0 +1,12 @@
+-- SOUNDNESS: Pi cumulativity must not treat implicit and explicit
+-- Pi types as interconvertible. {x : A} -> B and (x : A) -> B are
+-- different types; subtyping between them is unsound.
+--
+-- Expected rejection: type mismatch (implicit flag differs).
+
+def id_explicit : (A : Type) -> A -> A :=
+  fun A x => x
+
+-- BAD: id_implicit has type {A : Type} -> A -> A which is NOT
+-- a subtype of (A : Type) -> A -> A. They differ in implicit flag.
+def bad_cumul : (A : Type) -> A -> A := fun {A} x => x

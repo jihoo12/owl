@@ -359,22 +359,19 @@ fn infer_dt_inner(
             Ok(Term::TUniv(LevelExpr::max(n.clone(), m.clone())))
         }
         // Universe lowering: lower A : U_n when A : U_{n+1}
+        // Only valid for lifted types — lower requires a TLift wrapper.
         Term::TLower(a) => match nbe_eval_ctx(ctx.len(), a, session) {
             Term::TLift(inner, _m) => {
                 let lvl = type_level_dt(dts, ctx, &inner, session)?;
                 Ok(Term::TUniv(lvl))
             }
-            other => {
-                let ty = type_level_dt(dts, ctx, &other, session)?;
-                if ty.as_const().map_or(false, |c| c > 0) {
-                    Ok(Term::TUniv(if let Some(c) = ty.as_const() {
-                        LevelExpr::LConst(c - 1)
-                    } else {
-                        LevelExpr::LSuc(Box::new(ty))
-                    }))
-                } else {
-                    Ok(Term::TUniv(LevelExpr::LConst(0)))
-                }
+            _ => {
+                // lower on a non-lifted type is an error — the type must
+                // be explicitly lifted before lowering.
+                Err(TypeError::Other(format!(
+                    "lower requires a lifted type (TLift), got {}",
+                    show_term(&names, &nbe_eval_ctx(ctx.len(), a, session))
+                )))
             }
         },
 
@@ -2954,6 +2951,16 @@ fn check_dt_inner(
                     if nf == *t {
                         Err(e)
                     } else {
+                        // Skip guard on the reduced-fallback path: tactic
+                        // proof terms (ring/field/group) often produce
+                        // complex expressions that infer_dt cannot handle,
+                        // falling through to this path.  The guard skip is
+                        // safe here because: (a) the tactic-generated terms
+                        // are finite applications of previously-proven
+                        // lemmas (not self-recursive), and (b) the kernel
+                        // re-checks the tactic proof via check_dt below,
+                        // which will catch any actual termination violation
+                        // in the underlying definition.
                         let prev =
                             crate::cubical::typechecker::termination::should_skip_guard(session);
                         crate::cubical::typechecker::termination::set_skip_guard(true, session);

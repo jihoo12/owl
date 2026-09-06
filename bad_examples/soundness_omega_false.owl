@@ -1,0 +1,9 @@
+-- SOUNDNESS: omega tactic false identity.
+-- The omega tactic solves linear arithmetic over Nat/Int.
+-- If it accepted non-arithmetic identities, we could derive False.
+--
+-- Expected rejection: omega unable to solve.
+
+import "../lib/ring_laws.owl"
+
+def bad_omega : Path Nat zero (suc zero) := by omega

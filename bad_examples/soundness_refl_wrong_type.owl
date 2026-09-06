@@ -1,0 +1,12 @@
+-- SOUNDNESS: Refl against a Path type.
+-- Refl : Id A x x, not Path A x y. If Refl were accepted against
+-- Path types, we could derive False.
+--
+-- Expected rejection: Refl must be checked against Id type.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: Refl against a Path type. Refl : Id A x x, not Path A x y.
+def bad_refl_path : Path Nat zero zero := Refl zero

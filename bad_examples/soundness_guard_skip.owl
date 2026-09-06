@@ -1,0 +1,18 @@
+-- SOUNDNESS: Guard skip on reduced fallback.
+-- When infer_dt fails, the typechecker reduces the term and re-checks.
+-- The old code unconditionally disabled the termination guard on this
+-- fallback path, allowing non-terminating functions to be accepted.
+-- After the fix, only tactic-generated proofs skip the guard.
+--
+-- Expected rejection: termination violation (infinite recursion).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: non-terminating via self-recursion on full argument.
+-- The fallback path must NOT skip the guard.
+def bad_loop : Nat -> Nat := fun m =>
+  match m return Nat with
+  | zero => zero
+  | suc m' => bad_loop m

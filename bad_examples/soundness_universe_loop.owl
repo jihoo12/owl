@@ -1,0 +1,8 @@
+-- SOUNDNESS: Universe inconsistency.
+-- If U0 : U0 were accepted, we'd have a Girard-style paradox.
+-- Owl's universe hierarchy U0 : U1 : U2 must be respected.
+--
+-- Expected rejection: universe level error.
+
+-- BAD: trying to prove U0 : U0. This should fail because U0 : U1.
+def bad_universe : U0 := U0

@@ -1,0 +1,9 @@
+-- SOUNDNESS: field tactic false identity.
+-- The field tactic solves rational function identities.
+-- If it accepted false identities, we could derive False.
+--
+-- Expected rejection: field unable to solve.
+
+import "../lib/ring_laws.owl"
+
+def bad_field : Path Nat (suc zero) zero := by field with NatCommRing

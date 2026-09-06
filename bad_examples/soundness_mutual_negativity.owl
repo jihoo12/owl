@@ -1,0 +1,16 @@
+-- SOUNDNESS: mutual negative occurrence.
+-- Two types that refer to each other negatively create a paradox.
+--
+-- Expected rejection: parse error (forward reference) or positivity violation.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: B occurs negatively in A's constructor, but B is defined after A.
+-- Forward references are not allowed, so this should fail to parse.
+inductive A where
+  | mkA : B -> Nat
+
+inductive B where
+  | mkB : A -> Nat

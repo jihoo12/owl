@@ -1,0 +1,13 @@
+-- SOUNDNESS: lower requires a TLift wrapper. Using lower on a
+-- non-lifted type would allow escaping universe stratification:
+-- lower (Nat : U1) : U0 would let you put Nat in any universe.
+--
+-- Expected rejection: lower requires a lifted type.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: lower on a non-lifted type. Nat : U0, not U1,
+-- so there's nothing to lower.
+def bad_lower : Nat := lower Nat

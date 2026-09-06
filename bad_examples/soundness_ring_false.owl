@@ -1,0 +1,9 @@
+-- SOUNDNESS: ring tactic false identity.
+-- The ring tactic solves polynomial identities over commutative rings.
+-- If it accepted false identities, we could derive False.
+--
+-- Expected rejection: ring unable to solve.
+
+import "../lib/ring_laws.owl"
+
+def bad_ring : Path Nat zero (suc zero) := by ring

@@ -1,0 +1,13 @@
+-- SOUNDNESS: lower/lift roundtrip.
+-- lower (lift x) should equal x, but only for properly lifted types.
+-- If lower accepted non-lifted types, the roundtrip would be broken.
+--
+-- Expected rejection: type error (lower requires TLift).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: trying to lower a non-lifted Nat twice. Without the TLift check,
+-- this could be accepted and create a type confusion.
+def bad_roundtrip : Nat := lower (lower (lift (lift Nat 1) 0))

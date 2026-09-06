@@ -1,0 +1,14 @@
+-- SOUNDNESS: Deriving False from Id types.
+-- If we could construct an Id proof between distinct constructors,
+-- we could derive Empty via elimination.
+--
+-- Expected rejection: type error (Empty has no constructors).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Empty where
+
+-- BAD: Empty has no constructors, so we cannot inhabit it.
+def bad_id_false : Id Nat zero (suc zero) -> Empty

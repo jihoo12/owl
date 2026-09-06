@@ -1,0 +1,13 @@
+-- SOUNDNESS: lower/lift universe escape.
+-- If lower accepted non-lifted types, we could put U0 types in U(-1)
+-- or similar tricks. The fix requires TLift wrapper.
+--
+-- Expected rejection: lower requires a lifted type.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: trying to lower Nat directly (not wrapped in lift).
+-- Nat : U0, so lower Nat is invalid — Nat is not a lifted type.
+def bad_escape : U0 := lower Nat

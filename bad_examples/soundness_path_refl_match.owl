@@ -1,0 +1,15 @@
+-- SOUNDNESS: Matching on a Path proof to derive Empty.
+-- If we could match on a Path proof and get a Refl case, we could
+-- derive Empty from a Path between distinct constructors.
+--
+-- Expected rejection: Empty has no constructors.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Empty where
+
+-- BAD: trying to match on a hypothetical path proof.
+-- Empty has no constructors, so we cannot inhabit it.
+def bad_path_match : Path Nat zero (suc zero) -> Empty

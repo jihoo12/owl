@@ -1,0 +1,18 @@
+-- SOUNDNESS: J eliminator with non-refl proof.
+-- The J eliminator computes on Refl. If it computed on other proofs,
+-- we could derive False. This tests that J only reduces on Refl.
+--
+-- Expected rejection: type error (J motive mismatch or similar).
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+inductive Empty where
+  | void : Empty
+
+-- BAD: J with a non-refl proof. If J computed on a non-refl proof,
+-- we could potentially derive Empty. The J eliminator should get stuck
+-- on non-refl proofs and not reduce.
+def bad_j : Empty :=
+  J (fun _ _ => Empty) void (Refl zero)

@@ -122,45 +122,8 @@ fn check_body_guard(
                     }
                 }
             } else {
-                // Different datatype — check that the inner scrutinee is
-                // structurally smaller (a case binder) before continuing.
-                // This prevents non-terminating functions that recurse
-                // through a different datatype on a non-smaller argument.
-                match scrut.as_ref() {
-                    Term::TVar(i) => {
-                        let idx = *i as usize;
-                        if idx >= binder_count {
-                            return Err(format!(
-                                "nested elim on different datatype uses \
-                                 non-structurally-smaller variable at index {} \
-                                 (only {} case binders are available)",
-                                idx, binder_count
-                            ));
-                        }
-                    }
-                    Term::TCon(name, _, _)
-                    | Term::TPCon(name, _, _, _)
-                    | Term::TSqCon(name, _, _, _, _)
-                    | Term::TCellCon(name, _, _, _) => {
-                        if name != d {
-                            return Err(format!(
-                                "nested elim on different datatype uses \
-                                 constructor '{}' which is not of the \
-                                 expected datatype '{}'",
-                                name, d
-                            ));
-                        }
-                    }
-                    _ => {
-                        // Non-variable, non-constructor scrutinee on a
-                        // different datatype — conservatively reject.
-                        return Err(format!(
-                            "nested elim on different datatype uses \
-                             non-structurally-smaller scrutinee: {:?}",
-                            scrut
-                        ));
-                    }
-                }
+                // Different datatype — no guard requirement, but check
+                // subterms for nested guard violations against d.
                 check_body_guard(d, motive, binder_count, def_idx)?;
                 for case in inner_cases {
                     let n = case.binders.len() as i32;

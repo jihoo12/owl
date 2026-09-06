@@ -1,0 +1,15 @@
+-- SOUNDNESS: Non-terminating function.
+-- This is a direct self-recursion on the full argument, which should
+-- be rejected by the termination checker.
+--
+-- Expected rejection: termination violation.
+
+inductive Nat where
+  | zero : Nat
+  | suc : Nat -> Nat
+
+-- BAD: non-terminating via self-recursion on full argument.
+def bad_loop : Nat -> Nat := fun n =>
+  match n return Nat with
+  | zero => zero
+  | suc n' => bad_loop n
