@@ -66,7 +66,6 @@ lib/*.owl                    Owl standard library, two kinds:
 bad_examples/*.owl            negative tests — every file must FAIL to typecheck
 docs/reference.md             the language reference manual
 TODO.md                       live project tracker (single source of truth, §3)
-rust-analyzer-db.md            how to query the code-analysis SQLite db (§5)
 ```
 
 ## 2. Build / test / run commands
@@ -156,26 +155,6 @@ use it when reducing or typechecking behaves unexpectedly.
   actual `cargo test` summary line.
 - When you add a kernel feature or fix, add a **dedicated example guard test**
   so it can't silently regress.
-
-## 5. Code analysis: rust-analyzer-db
-
-Use the SQLite code database for navigation instead of guessing:
-
-```sh
-uvx rust-analyzer-db scan src --db rust_code.db   # rescan after editing .rs files
-uvx rust-analyzer-db list --kind function --name parse --db rust_code.db
-uvx rust-analyzer-db show <id> --db rust_code.db
-uvx rust-analyzer-db methods <Type> --db rust_code.db
-uvx rust-analyzer-db search "phrase" --db rust_code.db
-uvx rust-analyzer-db stats --db rust_code.db
-uvx rust-analyzer-db complexity --db rust_code.db
-uvx rust-analyzer-db graph --root <fn> --depth 3 --db rust_code.db
-```
-
-The db is registered as an opencode **MCP server**, so tools like
-`list_items`, `get_item`, `search_code`, `methods_of`, `call_graph_info` are
-available directly. See `rust-analyzer-db.md` for the full command list. The
-`/rescan` and `/analyze` commands in §7 wrap the common cases.
 
 ## 6. Verification protocol — run this after EVERY code change
 
@@ -282,6 +261,3 @@ available directly. See `rust-analyzer-db.md` for the full command list. The
 
 - Nix shell (`shell.nix`) provides `python3`, `uv`, and the Rust toolchain
   (`cargo`, `rustc`, `rustfmt`, `clippy`).
-- `rust-analyzer-db` lives in `.venv/` (run it via `uvx` or directly).
-- `.venv/`, `target/`, `rust_code.db`, `AGENTS.md`, `opencode.jsonc`, and
-  `.opencode/` are git-ignored (local tooling, not committed).

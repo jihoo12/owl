@@ -17,7 +17,8 @@ pub mod params;
 pub mod reduce;
 pub mod termination;
 
-pub use context::{Ctx, err_names, extend_ctx, interval_ty, lookup_ctx};
+pub use crate::cubical::syntax::Ctx;
+pub use context::{err_names, extend_ctx, interval_ty, lookup_ctx};
 pub use cumulativity::cumulativity_check;
 pub use errors::{TypeError, err_pos};
 pub use face::{apply_literal, check_faces, eval_elim_face, strip_n_plams};

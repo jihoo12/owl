@@ -15,6 +15,16 @@ use std::sync::Arc;
 pub type Name = String;
 pub type Level = i32;
 
+/// The typing context: a list of (name, type) pairs, innermost-first.
+pub type Ctx = Vec<(Name, Term)>;
+
+/// A 1-based source position (line, column).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pos {
+    pub line: usize,
+    pub col: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Level Expressions — the sub-language of universe levels
 // ---------------------------------------------------------------------------

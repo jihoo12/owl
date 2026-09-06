@@ -8,9 +8,7 @@ use std::sync::Arc;
 use crate::cubical::equality::{EtaResult, definitionally_equal_ctx_r};
 use crate::cubical::nbe::nbe_eval_ctx;
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{Datatype, Term, beta, shift};
-
-use super::context::Ctx;
+use crate::cubical::syntax::{Ctx, Datatype, Term, beta, shift};
 
 /// Try to find a term in the context that matches the given type.
 /// This is used for implicit argument resolution - when we have an implicit

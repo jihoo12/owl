@@ -9,9 +9,8 @@ use std::sync::Arc;
 use crate::cubical::interval::{DNF, I, Literal};
 use crate::cubical::nbe::nbe_eval;
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{ElimCase, Term, beta, shift};
+use crate::cubical::syntax::{Ctx, ElimCase, Term, beta, shift};
 
-use super::context::Ctx;
 use super::errors::TypeError;
 use super::require_equal_endpt;
 

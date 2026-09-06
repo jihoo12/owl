@@ -21,8 +21,7 @@ use lexer::{Lexer, TokenKind};
 use std::fmt;
 
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{Datatype, Name, Term};
-use crate::cubical::typechecker::errors::Pos;
+use crate::cubical::syntax::{Datatype, Name, Pos, Term};
 use crate::cubical::typechecker::infer_closed_dt;
 
 // ---------------------------------------------------------------------------

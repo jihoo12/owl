@@ -1,0 +1,9 @@
+[package]
+name = "owl-cli"
+version = "0.1.0"
+edition = "2024"
+description = "CLI interface for the Owl proof assistant"
+
+[dependencies]
+owl-kernel = { path = "../owl-kernel" }
+owl-frontend = { path = "../owl-frontend" }

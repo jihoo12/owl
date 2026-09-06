@@ -5,3 +5,22 @@ version = 4
 [[package]]
 name = "owl"
 version = "0.1.0"
+
+[[package]]
+name = "owl-cli"
+version = "0.1.0"
+dependencies = [
+ "owl-frontend",
+ "owl-kernel",
+]
+
+[[package]]
+name = "owl-frontend"
+version = "0.1.0"
+dependencies = [
+ "owl-kernel",
+]
+
+[[package]]
+name = "owl-kernel"
+version = "0.1.0"

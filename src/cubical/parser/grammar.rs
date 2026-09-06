@@ -7,10 +7,9 @@ use super::patterns::{MatchArm, Pat};
 use super::{Decl, ParseError};
 use crate::cubical::interval::I;
 use crate::cubical::syntax::{
-    CellConSig, ConSig, Datatype, ElimCase, LevelExpr, Name, PConSig, SqConSig, Tactic, Term,
+    CellConSig, ConSig, Datatype, ElimCase, LevelExpr, Name, PConSig, Pos, SqConSig, Tactic, Term,
     shift, subst,
 };
-use crate::cubical::typechecker::errors::Pos;
 use std::sync::Arc;
 
 pub(super) struct Parser {

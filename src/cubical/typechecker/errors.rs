@@ -1,14 +1,6 @@
 use std::fmt;
 
-use super::Ctx;
-use crate::cubical::syntax::{Name, Term, show_term};
-
-/// A 1-based source position (line, column).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Pos {
-    pub line: usize,
-    pub col: usize,
-}
+use crate::cubical::syntax::{Ctx, Name, Pos, Term, show_term};
 
 // Names observed by the parser in the current top-level declaration, in
 // source order: `(name, source position, is_introduction)`. `is_introduction`

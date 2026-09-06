@@ -11,8 +11,7 @@ use std::ptr;
 use std::sync::{Arc, Mutex};
 
 use crate::cubical::interval::I;
-use crate::cubical::syntax::{Datatype, Name, Term};
-use crate::cubical::typechecker::errors::Pos;
+use crate::cubical::syntax::{Datatype, Name, Pos, Term};
 
 // Re-export core NbE types.
 pub use crate::cubical::nbe::Value;

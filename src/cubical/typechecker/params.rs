@@ -4,9 +4,8 @@
 
 use crate::cubical::nbe::nbe_eval;
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{Datatype, Term, subst_params};
+use crate::cubical::syntax::{Ctx, Datatype, Term, subst_params};
 
-use super::context::Ctx;
 use super::errors::TypeError;
 use super::{check_dt, infer_dt};
 

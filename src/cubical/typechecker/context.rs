@@ -1,10 +1,8 @@
 // Context type and basic context operations for the typechecker.
 
-use crate::cubical::syntax::{Name, Term, shift};
+use crate::cubical::syntax::{Ctx, Name, Term, shift};
 
 use super::errors::TypeError;
-
-pub type Ctx = Vec<(Name, Term)>;
 
 pub fn err_names(ctx: &Ctx) -> Vec<Name> {
     ctx.iter().map(|(n, _)| n.clone()).collect()

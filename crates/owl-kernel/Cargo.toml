@@ -1,0 +1,7 @@
+[package]
+name = "owl-kernel"
+version = "0.1.0"
+edition = "2024"
+description = "Trusted kernel for the Owl cubical type theory proof assistant"
+
+[dependencies]

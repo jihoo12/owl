@@ -1,0 +1,399 @@
+// Cubical Interval — Rust port of interval.hs
+
+use std::collections::BTreeSet;
+use std::fmt;
+use std::sync::Arc;
+
+// ---------------------------------------------------------------------------
+// Interval Syntax
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum I {
+    I0,
+    I1,
+    Var(i32),
+    Meet(Arc<I>, Arc<I>),
+    Join(Arc<I>, Arc<I>),
+    Neg(Arc<I>),
+}
+
+impl fmt::Display for I {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            I::I0 => write!(f, "0"),
+            I::I1 => write!(f, "1"),
+            I::Var(n) => write!(f, "i{}", n),
+            I::Meet(i, j) => write!(f, "({} ∧ {})", i, j),
+            I::Join(i, j) => write!(f, "({} ∨ {})", i, j),
+            I::Neg(i) => write!(f, "¬{}", i),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Literal {
+    Pos(i32),
+    NegVar(i32),
+}
+
+impl fmt::Display for Literal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Literal::Pos(n) => write!(f, "i{}", n),
+            Literal::NegVar(n) => write!(f, "¬i{}", n),
+        }
+    }
+}
+
+// DNF = Disjunctive Normal Form: a set of cubes, each cube a set of literals.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(clippy::upper_case_acronyms)]
+pub struct DNF {
+    pub cubes: BTreeSet<BTreeSet<Literal>>,
+}
+
+impl fmt::Display for DNF {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.cubes.is_empty() {
+            return write!(f, "0");
+        }
+        // Single empty cube => top (⊤ / 1)
+        if self.cubes.len() == 1 && self.cubes.iter().next().unwrap().is_empty() {
+            return write!(f, "1");
+        }
+        let parts: Vec<String> = self.cubes.iter().map(show_cube).collect();
+        write!(f, "{}", parts.join(" ∨ "))
+    }
+}
+
+fn show_cube(c: &BTreeSet<Literal>) -> String {
+    if c.is_empty() {
+        "1".to_string()
+    } else {
+        let lits: Vec<String> = c.iter().map(|l| l.to_string()).collect();
+        format!("({})", lits.join(" ∧ "))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Interval Algebra
+// ---------------------------------------------------------------------------
+
+/// Top element: a single empty cube (always true).
+pub fn dnf_top() -> DNF {
+    let mut cubes = BTreeSet::new();
+    cubes.insert(BTreeSet::new());
+    DNF { cubes }
+}
+
+/// Bottom element: no cubes (always false).
+pub fn dnf_bot() -> DNF {
+    DNF {
+        cubes: BTreeSet::new(),
+    }
+}
+
+/// Remove any cube that is a strict superset of another cube in the set
+/// (absorption / redundancy elimination).
+fn simplify(cubes: BTreeSet<BTreeSet<Literal>>) -> BTreeSet<BTreeSet<Literal>> {
+    cubes
+        .iter()
+        .filter(|c| cube_consistent(c))
+        .filter(|c| {
+            !cubes
+                .iter()
+                .filter(|other| cube_consistent(other))
+                .any(|other| other != *c && other.is_subset(c))
+        })
+        .cloned()
+        .collect()
+}
+
+/// A cube is contradictory when it contains both `i` and `¬i`.
+pub fn cube_consistent(cube: &BTreeSet<Literal>) -> bool {
+    cube.iter().all(|lit| !cube.contains(&neg_lit(lit)))
+}
+
+/// Evaluate an interval expression to its DNF.
+pub fn eval_interval(i: &I) -> DNF {
+    match i {
+        I::I0 => dnf_bot(),
+        I::I1 => dnf_top(),
+        I::Var(n) => {
+            let mut inner = BTreeSet::new();
+            inner.insert(Literal::Pos(*n));
+            let mut cubes = BTreeSet::new();
+            cubes.insert(inner);
+            DNF { cubes }
+        }
+        I::Neg(i) => dnf_neg(&eval_interval(i)),
+        I::Meet(i, j) => dnf_meet(&eval_interval(i), &eval_interval(j)),
+        I::Join(i, j) => dnf_join(&eval_interval(i), &eval_interval(j)),
+    }
+}
+
+/// Disjunction (join / union of cube sets).
+pub fn dnf_join(a: &DNF, b: &DNF) -> DNF {
+    let union: BTreeSet<_> = a.cubes.union(&b.cubes).cloned().collect();
+    DNF {
+        cubes: simplify(union),
+    }
+}
+
+/// Conjunction (meet / pairwise union of cubes).
+pub fn dnf_meet(a: &DNF, b: &DNF) -> DNF {
+    let mut product = BTreeSet::new();
+    for ca in &a.cubes {
+        for cb in &b.cubes {
+            let merged: BTreeSet<_> = ca.union(cb).cloned().collect();
+            if cube_consistent(&merged) {
+                product.insert(merged);
+            }
+        }
+    }
+    DNF {
+        cubes: simplify(product),
+    }
+}
+
+/// Negation (De Morgan / distribute negation over DNF).
+pub fn dnf_neg(d: &DNF) -> DNF {
+    if d.cubes.is_empty() {
+        // ¬⊥ = ⊤
+        return dnf_top();
+    }
+    // ¬(c₁ ∨ c₂ ∨ …) = ¬c₁ ∧ ¬c₂ ∧ …
+    // ¬cube = join of negated literals
+    let top = dnf_top();
+    d.cubes.iter().fold(top, |acc, cube| {
+        let neg_cube = neg_cube(cube);
+        dnf_meet(&acc, &neg_cube)
+    })
+}
+
+fn neg_cube(c: &BTreeSet<Literal>) -> DNF {
+    let mut cubes = BTreeSet::new();
+    for lit in c {
+        let mut singleton = BTreeSet::new();
+        singleton.insert(neg_lit(lit));
+        cubes.insert(singleton);
+    }
+    DNF { cubes }
+}
+
+fn neg_lit(l: &Literal) -> Literal {
+    match l {
+        Literal::Pos(n) => Literal::NegVar(*n),
+        Literal::NegVar(n) => Literal::Pos(*n),
+    }
+}
+
+/// Check face implication: does `a ⇒ b`?
+/// In DNF terms, every cube in `a` must be covered by (a subset of) some cube in `b`.
+/// `dnf_bot() ⇒ anything` is true (vacuously).
+/// `anything ⇒ dnf_top()` is true (top covers everything).
+pub fn dnf_leq(a: &DNF, b: &DNF) -> bool {
+    // ⊥ ⇒ anything
+    if a.cubes.is_empty() {
+        return true;
+    }
+    // anything ⇒ ⊤ (single empty cube)
+    if b.cubes.len() == 1 && b.cubes.iter().next().unwrap().is_empty() {
+        return true;
+    }
+    // For each cube ca in a, there must exist a cube cb in b with ca ⊆ cb.
+    a.cubes
+        .iter()
+        .all(|ca| b.cubes.iter().any(|cb| cb.is_subset(ca)))
+}
+
+/// Check face equivalence: `a ⇔ b` (i.e. `a ⇒ b ∧ b ⇒ a`).
+#[allow(dead_code)]
+pub fn dnf_equiv(a: &DNF, b: &DNF) -> bool {
+    dnf_leq(a, b) && dnf_leq(b, a)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn meet_drops_contradictory_cube() {
+        let dnf = eval_interval(&I::Meet(
+            Arc::new(I::Var(0)),
+            Arc::new(I::Neg(Arc::new(I::Var(0)))),
+        ));
+
+        assert_eq!(dnf, dnf_bot());
+    }
+
+    #[test]
+    fn leq_bot_implies_anything() {
+        assert!(dnf_leq(&dnf_bot(), &eval_interval(&I::Var(0))));
+    }
+
+    #[test]
+    fn leq_anything_implies_top() {
+        assert!(dnf_leq(&eval_interval(&I::Var(0)), &dnf_top()));
+    }
+
+    #[test]
+    fn leq_top_implies_bot_is_false() {
+        assert!(!dnf_leq(&dnf_top(), &dnf_bot()));
+    }
+
+    #[test]
+    fn leq_same_variable() {
+        let v = eval_interval(&I::Var(0));
+        assert!(dnf_leq(&v, &v));
+    }
+
+    #[test]
+    fn leq_meet_implies_one_operand() {
+        // (i0 ∧ i1) ⇒ i0
+        let meet = eval_interval(&I::Meet(Arc::new(I::Var(0)), Arc::new(I::Var(1))));
+        let v0 = eval_interval(&I::Var(0));
+        assert!(dnf_leq(&meet, &v0));
+    }
+
+    #[test]
+    fn leq_join_of_implies_each() {
+        // i0 ⇒ (i0 ∨ i1)
+        let v0 = eval_interval(&I::Var(0));
+        let join = eval_interval(&I::Join(Arc::new(I::Var(0)), Arc::new(I::Var(1))));
+        assert!(dnf_leq(&v0, &join));
+    }
+
+    #[test]
+    fn simplify_drops_inconsistent_cubes_before_absorption() {
+        let mut inconsistent = BTreeSet::new();
+        inconsistent.insert(Literal::Pos(0));
+        inconsistent.insert(Literal::NegVar(0));
+
+        let mut consistent = BTreeSet::new();
+        consistent.insert(Literal::Pos(1));
+
+        let dnf = dnf_join(
+            &DNF {
+                cubes: [inconsistent].into_iter().collect(),
+            },
+            &DNF {
+                cubes: [consistent.clone()].into_iter().collect(),
+            },
+        );
+
+        assert_eq!(dnf.cubes, [consistent].into_iter().collect());
+    }
+
+    // --- Face equivalence tests ---
+
+    #[test]
+    fn equiv_same_is_true() {
+        let v0 = eval_interval(&I::Var(0));
+        assert!(dnf_equiv(&v0, &v0));
+    }
+
+    #[test]
+    fn equiv_different_is_false() {
+        let v0 = eval_interval(&I::Var(0));
+        let v1 = eval_interval(&I::Var(1));
+        assert!(!dnf_equiv(&v0, &v1));
+    }
+
+    #[test]
+    fn equiv_meet_commutative() {
+        // (i0 ∧ i1) ⇔ (i1 ∧ i0)
+        let ab = eval_interval(&I::Meet(Arc::new(I::Var(0)), Arc::new(I::Var(1))));
+        let ba = eval_interval(&I::Meet(Arc::new(I::Var(1)), Arc::new(I::Var(0))));
+        assert!(dnf_equiv(&ab, &ba));
+    }
+
+    #[test]
+    fn equiv_join_commutative() {
+        let ab = eval_interval(&I::Join(Arc::new(I::Var(0)), Arc::new(I::Var(1))));
+        let ba = eval_interval(&I::Join(Arc::new(I::Var(1)), Arc::new(I::Var(0))));
+        assert!(dnf_equiv(&ab, &ba));
+    }
+
+    // --- De Morgan tests ---
+
+    #[test]
+    fn demorgan_neg_meet() {
+        // ¬(i0 ∧ i1) = ¬i0 ∨ ¬i1
+        let neg_meet = eval_interval(&I::Neg(Arc::new(I::Meet(
+            Arc::new(I::Var(0)),
+            Arc::new(I::Var(1)),
+        ))));
+        let join_negs = eval_interval(&I::Join(
+            Arc::new(I::Neg(Arc::new(I::Var(0)))),
+            Arc::new(I::Neg(Arc::new(I::Var(1)))),
+        ));
+        assert!(dnf_equiv(&neg_meet, &join_negs));
+    }
+
+    #[test]
+    fn demorgan_neg_join() {
+        // ¬(i0 ∨ i1) = ¬i0 ∧ ¬i1
+        let neg_join = eval_interval(&I::Neg(Arc::new(I::Join(
+            Arc::new(I::Var(0)),
+            Arc::new(I::Var(1)),
+        ))));
+        let meet_negs = eval_interval(&I::Meet(
+            Arc::new(I::Neg(Arc::new(I::Var(0)))),
+            Arc::new(I::Neg(Arc::new(I::Var(1)))),
+        ));
+        assert!(dnf_equiv(&neg_join, &meet_negs));
+    }
+
+    // --- Negation idempotence ---
+
+    #[test]
+    fn neg_idempotent() {
+        // ¬¬i0 = i0
+        let v0 = eval_interval(&I::Var(0));
+        let double_neg = eval_interval(&I::Neg(Arc::new(I::Neg(Arc::new(I::Var(0))))));
+        assert!(dnf_equiv(&v0, &double_neg));
+    }
+
+    // --- Absorption tests ---
+
+    #[test]
+    fn absorption_meet_join() {
+        // i0 ∧ (i0 ∨ i1) = i0
+        let v0 = eval_interval(&I::Var(0));
+        let result = eval_interval(&I::Meet(
+            Arc::new(I::Var(0)),
+            Arc::new(I::Join(Arc::new(I::Var(0)), Arc::new(I::Var(1)))),
+        ));
+        assert!(dnf_equiv(&v0, &result));
+    }
+
+    #[test]
+    fn absorption_join_meet() {
+        // i0 ∨ (i0 ∧ i1) = i0
+        let result = eval_interval(&I::Join(
+            Arc::new(I::Var(0)),
+            Arc::new(I::Meet(Arc::new(I::Var(0)), Arc::new(I::Var(1)))),
+        ));
+        let v0 = eval_interval(&I::Var(0));
+        assert!(dnf_equiv(&v0, &result));
+    }
+
+    // --- Top/bot edge cases ---
+
+    #[test]
+    fn equiv_top_top() {
+        assert!(dnf_equiv(&dnf_top(), &dnf_top()));
+    }
+
+    #[test]
+    fn equiv_bot_bot() {
+        assert!(dnf_equiv(&dnf_bot(), &dnf_bot()));
+    }
+
+    #[test]
+    fn equiv_top_not_bot() {
+        assert!(!dnf_equiv(&dnf_top(), &dnf_bot()));
+    }
+}

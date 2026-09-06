@@ -181,7 +181,20 @@ The kernel substitutes the scrutinee's index `suc n` into `cons`'s arg type `Vec
 
 **Scope**: ~4 functions to modify (`Datatype` struct, parser param classification, `check_dt_inner` TCon handler, `subst_params_local`). Medium regression risk — the existing 264 tests should pass unchanged since they don't use indexed types, but the pattern matching codepath is kernel-critical.
 
-#### A7. need new kernel architecture 🔴
+#### A7. need new kernel architecture ✅
+
+**Completed** (2026-09-06): Extracted the kernel as a separate crate (`owl-kernel`) from the monolithic `owl` crate. The kernel now contains the minimal trusted computing base (TCB):
+- `owl-kernel`: ~18,000 lines (syntax, NbE, typechecker, equality, interval, session, env)
+- `owl-frontend`: ~8,100 lines (parser, tactics, driver)
+- `owl-cli`: ~500 lines (thin CLI wrapper)
+
+Key changes:
+1. Moved `Ctx` and `Pos` types from `typechecker` to `syntax` to break circular dependencies
+2. Created workspace structure with three crates
+3. Decoupled tactics from kernel via `TacticResolver` trait
+4. All 275 tests pass, `cargo fmt` clean
+
+The kernel is now a self-contained crate that can be audited independently. Tactics and solvers live in the frontend and are re-checked by the kernel.
 
 ---
 

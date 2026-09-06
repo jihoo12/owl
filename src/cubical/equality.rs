@@ -10,8 +10,7 @@ use std::sync::Arc;
 
 use crate::cubical::nbe::{meta_mentions, nbe_eval, nbe_eval_ctx, try_solve_meta};
 use crate::cubical::session::Session;
-use crate::cubical::syntax::{LevelExpr, Name, Term, beta, shift};
-use crate::cubical::typechecker::Ctx;
+use crate::cubical::syntax::{Ctx, LevelExpr, Name, Term, beta, shift};
 
 // ---------------------------------------------------------------------------
 // Term size (fuel derivation)
