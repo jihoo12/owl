@@ -8,6 +8,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ptr;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use crate::interval::I;
@@ -22,7 +23,9 @@ pub type Globals = Arc<Mutex<Vec<Value>>>;
 /// All implicit state consolidated into one struct.
 pub struct Session {
     // ── NbE state ───────────────────────────────────────────────────
-    pub dts: Vec<Datatype>,
+    pub dts: Rc<Vec<Datatype>>,
+    /// Index from datatype name → position in `dts` for O(1) lookup.
+    pub dt_index: HashMap<Name, usize>,
     pub globals: Option<Globals>,
     pub eval_cache: HashMap<Term, Term>,
     pub eval_depth: usize,
@@ -69,7 +72,8 @@ pub struct Session {
 impl Session {
     pub fn new() -> Self {
         Session {
-            dts: Vec::new(),
+            dts: Rc::new(Vec::new()),
+            dt_index: HashMap::new(),
             globals: None,
             eval_cache: HashMap::new(),
             eval_depth: 0,
@@ -101,10 +105,19 @@ impl Default for Session {
 impl Session {
     // ── NbE: datatypes ──────────────────────────────────────────────
     pub fn set_current_dts(&mut self, dts: &[Datatype]) {
-        self.dts = dts.to_vec();
+        self.dt_index = dts
+            .iter()
+            .enumerate()
+            .map(|(i, dt)| (dt.name.clone(), i))
+            .collect();
+        self.dts = Rc::new(dts.to_vec());
     }
-    pub fn current_dts(&self) -> Vec<Datatype> {
-        self.dts.clone()
+    pub fn current_dts(&self) -> Rc<Vec<Datatype>> {
+        Rc::clone(&self.dts)
+    }
+    /// O(1) datatype lookup by name.
+    pub fn find_dt(&self, name: &str) -> Option<&Datatype> {
+        self.dt_index.get(name).map(|&i| &self.dts[i])
     }
 
     // ── NbE: globals ────────────────────────────────────────────────

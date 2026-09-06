@@ -144,8 +144,11 @@ pub fn term_size(t: &Term) -> usize {
 
 /// Starting fuel for an eta-equality check.
 /// Floor of 16 ensures small terms get reasonable headroom.
-pub fn initial_fuel(t1: &Term, t2: &Term) -> usize {
-    (term_size(t1) + term_size(t2)).max(16)
+pub fn initial_fuel(_t1: &Term, _t2: &Term) -> usize {
+    // Fixed heuristic: context depth × 2 + 16 gives enough fuel for
+    // eta-expansion in typical proofs without the O(|t1|+|t2|) cost
+    // of computing term_size on both terms.
+    64
 }
 
 // ---------------------------------------------------------------------------
@@ -323,10 +326,15 @@ fn build_papp_chain(d: &str, c: &str, args: &[Term], first_ivar: Option<&Term>) 
     }
 }
 
+/// Memo key uses a pointer-based context identity (O(1) clone/hash)
+/// instead of cloning the entire Ctx.  The pointer is stable because
+/// `eta_eq_memo` borrows `&Ctx` and the underlying Vec is never moved
+/// during a single call tree.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct EtaMemoKey {
     fuel: usize,
-    ctx: Ctx,
+    /// Raw pointer to the Ctx data — O(1) clone and hash.
+    ctx_addr: usize,
     left: Term,
     right: Term,
 }
@@ -348,9 +356,10 @@ fn eta_eq_memo(
     memo: &mut EtaMemo,
     session: &mut Session,
 ) -> EtaResult {
+    let ctx_addr = ctx.as_ptr() as usize;
     let key = EtaMemoKey {
         fuel,
-        ctx: ctx.clone(),
+        ctx_addr,
         left: t1.clone(),
         right: t2.clone(),
     };

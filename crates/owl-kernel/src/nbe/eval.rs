@@ -581,8 +581,7 @@ fn eval_nbe_inner(
                 .collect();
             // Eagerly desugar when the record evaluates to a VCon.
             if let Value::VCon(ref dt, ref con, ref args) = r_val {
-                let dts = session.current_dts();
-                if let Some(dt_sig) = dts.iter().find(|d| &d.name == dt) {
+                if let Some(dt_sig) = session.find_dt(dt) {
                     if let Some(field_names) = &dt_sig.field_names {
                         let mut new_args = args.clone();
                         for (field, val) in &updates_val {
@@ -625,7 +624,7 @@ fn eval_nbe_inner(
             // eval env) are left neutral.
             let mut reduced: Option<Term> = None;
             if let Some(endpoint) = value_to_endpoint(&r_v)
-                && let Some(dt) = session.current_dts().iter().find(|dt| &dt.name == data)
+                && let Some(dt) = session.find_dt(data)
                 && let Some(sig) = dt.pcons.iter().find(|c| &c.name == con)
             {
                 let arity = args.len();
@@ -680,7 +679,7 @@ fn eval_nbe_inner(
             // levels; faces referencing the datatype's parameters (levels
             // >= arity in the face scope) are left neutral.
             let mut reduced: Option<Term> = None;
-            if let Some(dt) = session.current_dts().iter().find(|dt| &dt.name == data)
+            if let Some(dt) = session.find_dt(data)
                 && let Some(sig) = dt.sqcons.iter().find(|c| &c.name == con)
             {
                 let arity = args.len();
@@ -751,7 +750,7 @@ fn eval_nbe_inner(
             // parameters (levels >= arity in the face scope) are left neutral.
             let mut reduced: Option<Term> = None;
             if !ivars.is_empty()
-                && let Some(dt) = session.current_dts().iter().find(|dt| &dt.name == data)
+                && let Some(dt) = session.find_dt(data)
                 && let Some(sig) = dt.cellcons.iter().find(|c| &c.name == con)
                 && ivars.len() == sig.dimension()
             {
@@ -863,11 +862,10 @@ fn eval_nbe_inner(
                 }
             }
         }
-        Term::TUnify(a, bx) => {
-            let _a_val = eval_nbe(env, globals, global_offset, a, session);
-            let _bx_val = eval_nbe(env, globals, global_offset, bx, session);
+        Term::TUnify(_a, _bx) => {
             // The typechecker pre-validates unification, so just return tt.
-            Value::VCon("Unit".to_string(), "tt".to_string(), vec![])
+            // Skip evaluating the operands — they are never used.
+            Value::VCon("Unit".into(), "tt".into(), Arc::new([]))
         }
     }
 }

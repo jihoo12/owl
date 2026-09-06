@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 // ---------------------------------------------------------------------------
 // Interval Syntax
@@ -82,16 +83,22 @@ fn show_cube(c: &BTreeSet<Literal>) -> String {
 
 /// Top element: a single empty cube (always true).
 pub fn dnf_top() -> DNF {
-    let mut cubes = BTreeSet::new();
-    cubes.insert(BTreeSet::new());
-    DNF { cubes }
+    static TOP: OnceLock<DNF> = OnceLock::new();
+    TOP.get_or_init(|| {
+        let mut cubes = BTreeSet::new();
+        cubes.insert(BTreeSet::new());
+        DNF { cubes }
+    })
+    .clone()
 }
 
 /// Bottom element: no cubes (always false).
 pub fn dnf_bot() -> DNF {
-    DNF {
+    static BOT: OnceLock<DNF> = OnceLock::new();
+    BOT.get_or_init(|| DNF {
         cubes: BTreeSet::new(),
-    }
+    })
+    .clone()
 }
 
 /// Remove any cube that is a strict superset of another cube in the set

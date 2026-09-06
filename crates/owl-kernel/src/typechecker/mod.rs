@@ -6,6 +6,7 @@
 //   crate::eval::{is_top_dnf, is_bot_dnf}
 //   crate::equality::{definitionally_equal_ctx, definitionally_equal_ctx_r, EtaResult}
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod context;
@@ -55,12 +56,7 @@ pub fn require_equal(
     got: &Term,
     session: &mut Session,
 ) -> Result<(), TypeError> {
-    let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
-    crate::debug_log!(
-        "require_equal: {} == {}",
-        show_term(&names, expected),
-        show_term(&names, got)
-    );
+    crate::debug_log!("require_equal: ctx[{}]", ctx.len());
     match definitionally_equal_ctx_r(ctx, expected, got, session) {
         EtaResult::Equal => Ok(()),
         EtaResult::NotEqual => Err(TypeError::TypeMismatch {
@@ -151,26 +147,26 @@ pub(crate) fn type_level_dt(
             // For PathP-style dependent paths, a may be a PLam (type family).
             // In that case, check that the body of the PLam is well-typed,
             // and verify endpoints against the instantiated family.
-            let n = match nbe_eval_ctx(ctx.len(), a, session) {
+            let a_ev = nbe_eval_ctx(ctx.len(), a, session);
+            let n = match &a_ev {
                 Term::PLam(_, body) => {
                     // The type family body should be well-typed in a context
                     // with an interval variable. We check that the family
                     // returns values in some universe by checking at i0.
                     let ctx2 = extend_ctx("_i".to_string(), interval_ty(), ctx);
                     let a_at0 =
-                        nbe_eval_ctx(ctx2.len(), &beta(&body, &Term::TInterval(I::I0)), session);
+                        nbe_eval_ctx(ctx2.len(), &beta(body, &Term::TInterval(I::I0)), session);
                     type_level_dt(dts, &ctx2, &a_at0, session)?
                 }
                 _ => type_level_dt(dts, ctx, a, session)?,
             };
-            let a_ = nbe_eval_ctx(ctx.len(), a, session);
-            let u_ty = match &a_ {
+            let u_ty = match &a_ev {
                 Term::PLam(_, body) => {
                     nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I0)), session)
                 }
                 p => p.clone(),
             };
-            let v_ty = match &a_ {
+            let v_ty = match &a_ev {
                 Term::PLam(_, body) => {
                     nbe_eval_ctx(ctx.len(), &beta(body, &Term::TInterval(I::I1)), session)
                 }
@@ -201,9 +197,8 @@ pub(crate) fn type_level_dt(
             Term::TSSet => Ok(LevelExpr::LConst(1)), // SSet : U1
             Term::TUniv(n) => Ok(n.clone()),
             Term::TData(d, _) => {
-                let level = dts
-                    .iter()
-                    .find(|dt| dt.name == d)
+                let level = session
+                    .find_dt(d)
                     .and_then(|dt| dt.universe_level.clone())
                     .unwrap_or(LevelExpr::LConst(0));
                 Ok(level)
@@ -337,8 +332,7 @@ fn infer_dt_inner(
     t: &Term,
     session: &mut Session,
 ) -> Result<Term, TypeError> {
-    let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
-    crate::debug_scope!("infer {} : ctx[{}]", show_term(&names, t), ctx.len());
+    crate::debug_scope!("infer : ctx[{}]", ctx.len());
     session.set_current_dts(dts);
     match t {
         // Variable
@@ -923,7 +917,7 @@ fn infer_dt_inner(
         Term::TProj(field, r) => match infer_dt(dts, ctx, r, session) {
             Ok(r_ty) => match nbe_eval(&r_ty, session) {
                 Term::TData(dname, params) => {
-                    if let Some(dt) = dts.iter().find(|dt| dt.name == dname) {
+                    if let Some(dt) = session.find_dt(dname) {
                         if let Some(field_names) = &dt.field_names {
                             if let Some(con_sig) = dt.cons.first() {
                                 if let Some(idx) = field_names.iter().position(|n| n == field) {
@@ -967,12 +961,12 @@ fn infer_dt_inner(
             let r_ty = infer_dt(dts, ctx, r, session)?;
             match nbe_eval(&r_ty, session) {
                 Term::TData(dname, params) => {
-                    let dt = dts.iter().find(|dt| dt.name == dname).ok_or_else(|| {
-                        TypeError::UnknownDatatype {
+                    let dt = session
+                        .find_dt(dname)
+                        .ok_or_else(|| TypeError::UnknownDatatype {
                             name: dname.clone(),
                             pos: err_pos(ctx, r, session),
-                        }
-                    })?;
+                        })?;
                     let field_names = dt.field_names.as_ref().ok_or_else(|| {
                         TypeError::Other(format!("'{}' is not a record type", dname))
                     })?;
@@ -1284,13 +1278,12 @@ fn infer_dt_inner(
         // Inductive types / HITs
         // ------------------------------------------------------------------
         Term::TData(d, args) => {
-            let dt =
-                dts.iter()
-                    .find(|dt| &dt.name == d)
-                    .ok_or_else(|| TypeError::UnknownDatatype {
-                        name: d.clone(),
-                        pos: err_pos(ctx, t, session),
-                    })?;
+            let dt = session
+                .find_dt(d)
+                .ok_or_else(|| TypeError::UnknownDatatype {
+                    name: d.clone(),
+                    pos: err_pos(ctx, t, session),
+                })?;
             if args.len() >= dt.params.len() {
                 if let Some(level) = dt.universe_level.clone() {
                     return Ok(Term::TUniv(level));
@@ -1413,13 +1406,12 @@ fn infer_dt_inner(
         }
 
         Term::TCon(d, c, args) => {
-            let dt =
-                dts.iter()
-                    .find(|dt| &dt.name == d)
-                    .ok_or_else(|| TypeError::UnknownDatatype {
-                        name: d.clone(),
-                        pos: err_pos(ctx, t, session),
-                    })?;
+            let dt = session
+                .find_dt(d)
+                .ok_or_else(|| TypeError::UnknownDatatype {
+                    name: d.clone(),
+                    pos: err_pos(ctx, t, session),
+                })?;
             if let Some(sig) = dt.find_con(c) {
                 let num_params = dt.params.len();
                 let (param_terms, _checked_args) =
@@ -1454,13 +1446,12 @@ fn infer_dt_inner(
         }
 
         Term::TPCon(d, pc, args, r) => {
-            let dt =
-                dts.iter()
-                    .find(|dt| &dt.name == d)
-                    .ok_or_else(|| TypeError::UnknownDatatype {
-                        name: d.clone(),
-                        pos: err_pos(ctx, t, session),
-                    })?;
+            let dt = session
+                .find_dt(d)
+                .ok_or_else(|| TypeError::UnknownDatatype {
+                    name: d.clone(),
+                    pos: err_pos(ctx, t, session),
+                })?;
             let sig = dt
                 .find_pcon(pc)
                 .ok_or_else(|| TypeError::UnknownConstructor {
@@ -1485,13 +1476,12 @@ fn infer_dt_inner(
         }
 
         Term::TSqCon(d, sc, args, r, s) => {
-            let dt =
-                dts.iter()
-                    .find(|dt| &dt.name == d)
-                    .ok_or_else(|| TypeError::UnknownDatatype {
-                        name: d.clone(),
-                        pos: err_pos(ctx, t, session),
-                    })?;
+            let dt = session
+                .find_dt(d)
+                .ok_or_else(|| TypeError::UnknownDatatype {
+                    name: d.clone(),
+                    pos: err_pos(ctx, t, session),
+                })?;
             let sig = dt
                 .find_sqcon(sc)
                 .ok_or_else(|| TypeError::UnknownConstructor {
@@ -1562,13 +1552,12 @@ fn infer_dt_inner(
         }
 
         Term::TCellCon(d, cc, args, ivars) => {
-            let dt =
-                dts.iter()
-                    .find(|dt| &dt.name == d)
-                    .ok_or_else(|| TypeError::UnknownDatatype {
-                        name: d.clone(),
-                        pos: err_pos(ctx, t, session),
-                    })?;
+            let dt = session
+                .find_dt(d)
+                .ok_or_else(|| TypeError::UnknownDatatype {
+                    name: d.clone(),
+                    pos: err_pos(ctx, t, session),
+                })?;
             let sig = dt
                 .find_cellcon(cc)
                 .ok_or_else(|| TypeError::UnknownConstructor {
@@ -1671,13 +1660,12 @@ fn infer_dt_inner(
                     });
                 }
             };
-            let dt =
-                dts.iter()
-                    .find(|dt| dt.name == d)
-                    .ok_or_else(|| TypeError::UnknownDatatype {
-                        name: d.clone(),
-                        pos: err_pos(ctx, scrut, session),
-                    })?;
+            let dt = session
+                .find_dt(d)
+                .ok_or_else(|| TypeError::UnknownDatatype {
+                    name: d.clone(),
+                    pos: err_pos(ctx, scrut, session),
+                })?;
 
             // Desugar record patterns
             let cases_owned: Vec<ElimCase> = {
@@ -1715,6 +1703,14 @@ fn infer_dt_inner(
                 buf
             };
             let cases: &[ElimCase] = &cases_owned;
+
+            // Pre-build a name→index map for O(1) case lookup (avoids O(C²)
+            // linear scans when matching cases to constructor signatures).
+            let case_map: HashMap<&str, usize> = cases
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (c.con.as_str(), i))
+                .collect();
 
             // Verify motive
             let motive_dom = Term::TData(d.clone(), scrut_params.clone());
@@ -1778,9 +1774,9 @@ fn infer_dt_inner(
 
             // Check all ordinary constructor cases.
             for con_sig in &dt.cons {
-                let case = cases
-                    .iter()
-                    .find(|c| c.con == con_sig.name)
+                let case = case_map
+                    .get(con_sig.name.as_str())
+                    .map(|&i| &cases[i])
                     .ok_or_else(|| TypeError::MissingCase {
                         con: con_sig.name.clone(),
                         pos: err_pos(ctx, scrut, session),
@@ -1797,7 +1793,15 @@ fn infer_dt_inner(
                         pos: err_pos(ctx, scrut, session),
                     });
                 }
-                let mut case_ctx = ctx.clone();
+                // Build case context efficiently: collect original ctx
+                // bindings (reversed) + new binder bindings, then reverse
+                // once. Avoids O(n × k) from repeated extend_ctx clones.
+                let total =
+                    ctx.len() + case.binders.len() + if case.as_name.is_some() { 1 } else { 0 };
+                let mut case_rev: Ctx = Vec::with_capacity(total);
+                for (n, ty) in ctx.iter().rev() {
+                    case_rev.push((n.clone(), ty.clone()));
+                }
                 let mut con_args_in_ctx: Vec<Term> = Vec::new();
                 for (k, binder_name) in case.binders.iter().enumerate() {
                     let mut arg_ty = shift(k as i32, 0, &subst_arg_tys[k]);
@@ -1807,8 +1811,10 @@ fn infer_dt_inner(
                     let arg_ty_ev = nbe_eval(&arg_ty, session);
                     let depth = k as i32;
                     con_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
-                    case_ctx = extend_ctx(binder_name.clone(), arg_ty_ev, &case_ctx);
+                    case_rev.push((binder_name.clone(), arg_ty_ev));
                 }
+                let mut case_ctx: Ctx = case_rev;
+                case_ctx.reverse();
                 let extra_shift = if case.as_name.is_some() { 1i32 } else { 0i32 };
                 if let Some(ref as_n) = case.as_name {
                     let as_ty = nbe_eval(&Term::TData(d.clone(), scrut_params.clone()), session);
@@ -1830,9 +1836,9 @@ fn infer_dt_inner(
 
             // Check all path constructor cases.
             for pcon_sig in &dt.pcons {
-                let case = cases
-                    .iter()
-                    .find(|c| c.con == pcon_sig.name)
+                let case = case_map
+                    .get(pcon_sig.name.as_str())
+                    .map(|&i| &cases[i])
                     .ok_or_else(|| TypeError::MissingCase {
                         con: pcon_sig.name.clone(),
                         pos: err_pos(ctx, scrut, session),
@@ -1853,7 +1859,11 @@ fn infer_dt_inner(
                 }
                 let ord_binders = &case.binders[..subst_arg_tys.len()];
                 let i_name = &case.binders[subst_arg_tys.len()];
-                let mut case_ctx = ctx.clone();
+                let total_p = ctx.len() + ord_binders.len() + 1;
+                let mut case_rev: Ctx = Vec::with_capacity(total_p);
+                for (n, ty) in ctx.iter().rev() {
+                    case_rev.push((n.clone(), ty.clone()));
+                }
                 let mut pcon_args_in_ctx: Vec<Term> = Vec::new();
                 for (k, binder_name) in ord_binders.iter().enumerate() {
                     let arg_ty = pcon_args_in_ctx
@@ -1862,11 +1872,12 @@ fn infer_dt_inner(
                         .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
                     let depth = k as i32;
                     pcon_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
-                    case_ctx =
-                        extend_ctx(binder_name.clone(), nbe_eval(&arg_ty, session), &case_ctx);
+                    case_rev.push((binder_name.clone(), nbe_eval(&arg_ty, session)));
                 }
+                case_rev.push((i_name.clone(), interval_ty()));
+                let mut case_ctx: Ctx = case_rev;
+                case_ctx.reverse();
                 let arity = subst_arg_tys.len();
-                case_ctx = extend_ctx(i_name.clone(), interval_ty(), &case_ctx);
                 let ord_var_no_i: Vec<Term> = (0..arity)
                     .map(|k| Term::TVar((arity - 1 - k) as i32))
                     .collect();
@@ -1989,9 +2000,9 @@ fn infer_dt_inner(
 
             // Check all square constructor cases.
             for sqcon_sig in &dt.sqcons {
-                let case = cases
-                    .iter()
-                    .find(|c| c.con == sqcon_sig.name)
+                let case = case_map
+                    .get(sqcon_sig.name.as_str())
+                    .map(|&i| &cases[i])
                     .ok_or_else(|| TypeError::MissingCase {
                         con: sqcon_sig.name.clone(),
                         pos: err_pos(ctx, scrut, session),
@@ -2013,7 +2024,11 @@ fn infer_dt_inner(
                 let ord_binders_sq = &case.binders[..subst_arg_tys.len()];
                 let r_name = &case.binders[subst_arg_tys.len()];
                 let s_name = &case.binders[subst_arg_tys.len() + 1];
-                let mut case_ctx_sq = ctx.clone();
+                let total_sq = ctx.len() + ord_binders_sq.len() + 2;
+                let mut case_rev: Ctx = Vec::with_capacity(total_sq);
+                for (n, ty) in ctx.iter().rev() {
+                    case_rev.push((n.clone(), ty.clone()));
+                }
                 let mut sqcon_args_in_ctx: Vec<Term> = Vec::new();
                 for (k, binder_name) in ord_binders_sq.iter().enumerate() {
                     let arg_ty = sqcon_args_in_ctx
@@ -2022,15 +2037,13 @@ fn infer_dt_inner(
                         .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
                     let depth = k as i32;
                     sqcon_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
-                    case_ctx_sq = extend_ctx(
-                        binder_name.clone(),
-                        nbe_eval(&arg_ty, session),
-                        &case_ctx_sq,
-                    );
+                    case_rev.push((binder_name.clone(), nbe_eval(&arg_ty, session)));
                 }
+                case_rev.push((r_name.clone(), interval_ty()));
+                case_rev.push((s_name.clone(), interval_ty()));
+                let mut case_ctx_sq: Ctx = case_rev;
+                case_ctx_sq.reverse();
                 let arity_sq = subst_arg_tys.len();
-                case_ctx_sq = extend_ctx(r_name.clone(), interval_ty(), &case_ctx_sq);
-                case_ctx_sq = extend_ctx(s_name.clone(), interval_ty(), &case_ctx_sq);
                 let ord_var_no_rs: Vec<Term> = (0..arity_sq)
                     .map(|k| Term::TVar((arity_sq - 1 - k) as i32))
                     .collect();
@@ -2169,9 +2182,9 @@ fn infer_dt_inner(
 
             // Check all n-dimensional cell constructor cases.
             for cellcon_sig in &dt.cellcons {
-                let case = cases
-                    .iter()
-                    .find(|c| c.con == cellcon_sig.name)
+                let case = case_map
+                    .get(cellcon_sig.name.as_str())
+                    .map(|&i| &cases[i])
                     .ok_or_else(|| TypeError::MissingCase {
                         con: cellcon_sig.name.clone(),
                         pos: err_pos(ctx, scrut, session),
@@ -2194,7 +2207,11 @@ fn infer_dt_inner(
                 }
                 let ord_binders_cell = &case.binders[..subst_arg_tys.len()];
                 let ivar_names: Vec<&String> = case.binders[subst_arg_tys.len()..].iter().collect();
-                let mut case_ctx_cell = ctx.clone();
+                let total_cell = ctx.len() + ord_binders_cell.len() + ivar_names.len();
+                let mut case_rev: Ctx = Vec::with_capacity(total_cell);
+                for (n, ty) in ctx.iter().rev() {
+                    case_rev.push((n.clone(), ty.clone()));
+                }
                 let mut cellcon_args_in_ctx: Vec<Term> = Vec::new();
                 for (k, binder_name) in ord_binders_cell.iter().enumerate() {
                     let arg_ty = cellcon_args_in_ctx
@@ -2203,16 +2220,14 @@ fn infer_dt_inner(
                         .fold(subst_arg_tys[k].clone(), |ty, a| beta(&ty, a));
                     let depth = k as i32;
                     cellcon_args_in_ctx.push(shift(depth + 1, 0, &Term::TVar(0)));
-                    case_ctx_cell = extend_ctx(
-                        binder_name.clone(),
-                        nbe_eval(&arg_ty, session),
-                        &case_ctx_cell,
-                    );
+                    case_rev.push((binder_name.clone(), nbe_eval(&arg_ty, session)));
                 }
+                for iv_name in ivar_names.iter() {
+                    case_rev.push((iv_name.to_string(), interval_ty()));
+                }
+                let mut case_ctx_cell: Ctx = case_rev;
+                case_ctx_cell.reverse();
                 let arity_cell = subst_arg_tys.len();
-                for iv_name in ivar_names.iter().rev() {
-                    case_ctx_cell = extend_ctx(iv_name.to_string(), interval_ty(), &case_ctx_cell);
-                }
                 let ord_var_no_ivars: Vec<Term> = (0..arity_cell)
                     .map(|k| Term::TVar((arity_cell - 1 - k) as i32))
                     .collect();
@@ -2438,13 +2453,7 @@ fn check_dt_inner(
     ty: &Term,
     session: &mut Session,
 ) -> Result<(), TypeError> {
-    let names: Vec<Name> = ctx.iter().map(|(n, _)| n.clone()).collect();
-    crate::debug_scope!(
-        "check {} : {} : ctx[{}]",
-        show_term(&names, t),
-        show_term(&names, ty),
-        ctx.len()
-    );
+    crate::debug_scope!("check : ctx[{}]", ctx.len());
     session.set_current_dts(dts);
     match t {
         // Lambda introduction
@@ -2614,12 +2623,12 @@ fn check_dt_inner(
                 }
                 _ => (d.clone(), vec![]),
             };
-            let dt = dts.iter().find(|dt| dt.name == expected_d).ok_or_else(|| {
-                TypeError::UnknownDatatype {
+            let dt = session
+                .find_dt(expected_d)
+                .ok_or_else(|| TypeError::UnknownDatatype {
                     name: expected_d.clone(),
                     pos: err_pos(ctx, t, session),
-                }
-            })?;
+                })?;
             if let Some(sig) = dt.find_con(c) {
                 if args.len() != sig.arity() {
                     return Err(TypeError::WrongNumberOfArgs {
@@ -2725,12 +2734,12 @@ fn check_dt_inner(
             let expected_nf = nbe_eval(ty, session);
             if let Term::TData(ed, _) = &expected_nf {
                 if ed == d {
-                    let dt_ = dts.iter().find(|dt| &dt.name == d).ok_or_else(|| {
-                        TypeError::UnknownDatatype {
+                    let dt_ = session
+                        .find_dt(d)
+                        .ok_or_else(|| TypeError::UnknownDatatype {
                             name: d.clone(),
                             pos: err_pos(ctx, t, session),
-                        }
-                    })?;
+                        })?;
                     let sig = dt_
                         .find_sqcon(sc)
                         .ok_or_else(|| TypeError::UnknownConstructor {
@@ -2769,12 +2778,12 @@ fn check_dt_inner(
             let expected_nf = nbe_eval(ty, session);
             if let Term::TData(ed, _) = &expected_nf {
                 if ed == d {
-                    let dt_ = dts.iter().find(|dt| &dt.name == d).ok_or_else(|| {
-                        TypeError::UnknownDatatype {
+                    let dt_ = session
+                        .find_dt(d)
+                        .ok_or_else(|| TypeError::UnknownDatatype {
                             name: d.clone(),
                             pos: err_pos(ctx, t, session),
-                        }
-                    })?;
+                        })?;
                     let sig =
                         dt_.find_cellcon(cc)
                             .ok_or_else(|| TypeError::UnknownConstructor {
