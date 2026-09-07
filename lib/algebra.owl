@@ -113,10 +113,15 @@ record Module
 -- ────────────────────────────────────────────────────────────────────────
 --
 -- `Nat` is a commutative *semi*ring (no additive inverses), but the
--- `CommRing` record only demands the semiring laws, so the Part-3 globals
--- from lib/ring_laws.owl bundle directly into the first concrete tactic
--- instance: `by ring with NatCommRing` proves polynomial identities over
--- Nat without threading a record parameter through every theorem.
+-- `CommRing` record only demands the semiring laws — it does not require
+-- additive inverses — so the Part-3 globals from lib/ring_laws.owl bundle
+-- directly into the first concrete tactic instance: `by ring with
+-- NatCommRing` proves polynomial identities over Nat without threading a
+-- record parameter through every theorem.
+--
+-- NOTE: despite the name `CommRing`, this record captures commutative
+-- semiring laws.  The name is kept for tactic resolution compatibility
+-- (`by ring` matches on the datatype name `CommRing`).
 import "ring_laws.owl"
 
 def NatCommRing : CommRing Nat add mul zero one :=

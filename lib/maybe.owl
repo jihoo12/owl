@@ -38,5 +38,5 @@ def is_nothing : forall (A : Type), Maybe A -> Bool :=
   | nothing => true
   | just x => false
 
--- map is idempotent: map f (map g m) = map (f . g) m
--- (omitted: would require function composition)
+-- NOTE: map composition (map f (map g m) = map (f . g) m) would require
+-- function composition, which is not yet provided by the standard library.

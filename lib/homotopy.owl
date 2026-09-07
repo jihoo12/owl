@@ -155,7 +155,12 @@ def isGroupoid : forall (A : Type), Type :=
 def isContr : forall (A : Type), Type :=
   fun A => Σ (center : A), forall (x : A), Path A center x
 
--- A type is 0-connected if its propositional truncation is contractible.
--- Equivalently: there exists a point such that all points are path-connected.
+-- A type is 0-connected if any two elements are merely equal, i.e. the
+-- propositional truncation of their identity type is contractible.
+-- Without truncation elimination we cannot express this directly, so we
+-- provide the closest expressible property: any two elements are path-equal.
+-- NOTE: this is actually the definition of isProp (a proposition), which is
+-- strictly stronger than 0-connectedness.  True 0-connectedness requires
+-- truncation elimination (which is not yet available in this kernel).
 def isConnected : forall (A : Type), Type :=
   fun A => forall (x : A), forall (y : A), Path A x y

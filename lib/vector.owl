@@ -13,14 +13,14 @@ inductive Vec (A : Type) (n : Nat) where
   | cons : A -> Vec A n -> Vec A (suc n)
 
 -- head: safe because n is suc _, so Vec is non-empty.
--- The nil branch is unreachable (zero ≠ suc n) but required for exhaustiveness.
+-- The nil branch is unreachable (zero ≠ suc n) by index unification.
 def vhead : forall (A : Type), forall (n : Nat), A -> Vec A (suc n) -> A :=
   fun A n default v => match v return A with
   | nil => default
   | cons x xs => x
 
 -- tail: safe because n is suc _, so Vec is non-empty.
--- The nil branch is unreachable (zero ≠ suc n) but required for exhaustiveness.
+-- The nil branch is unreachable (zero ≠ suc n) by index unification.
 def vtail : forall (A : Type), forall (n : Nat), Vec A (suc n) -> Vec A n :=
   fun A n v => match v return Vec A n with
   | nil => nil

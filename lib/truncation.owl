@@ -3,6 +3,13 @@
 -- Provides the propositional truncation `Trunc A` (a HIT that collapses all
 -- paths between elements). For general n-truncation properties, use the
 -- `isNType n A` parser sugar (desugars to nested Pi/Path types).
+--
+-- NOTE: a full eliminator `trunc_rec : isProp P -> (A -> P) -> Trunc A -> P`
+-- cannot yet be expressed because:
+-- 1. The kernel's path-constructor case in match requires the cube body's
+--    endpoints to agree with the inc case results by computation.
+-- 2. The `return` annotation on match does not support polymorphic type
+--    variables as the return type.
 
 inductive Trunc (A : Type) where
   | inc : A -> Trunc A
