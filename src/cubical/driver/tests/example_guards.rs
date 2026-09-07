@@ -657,10 +657,6 @@ fn all_example_files_check() {
 #[test]
 fn bad_examples_must_fail() {
     // Negative tests: every bad_examples/*.owl must FAIL to typecheck.
-    // Some files are known to currently pass (parser handles them); skip them.
-    let skip = [
-        "parse_forall_after_arrow.owl", // parser accepts forall after ->
-    ];
     let bad_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("bad_examples");
     let mut files: Vec<_> = std::fs::read_dir(&bad_dir)
         .expect("bad_examples/ should exist")
@@ -670,7 +666,7 @@ fn bad_examples_must_fail() {
                 .to_string_lossy()
                 .into_owned()
         })
-        .filter(|n| n.ends_with(".owl") && !skip.contains(&n.as_str()))
+        .filter(|n| n.ends_with(".owl"))
         .collect();
     files.sort();
     for name in &files {
