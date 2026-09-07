@@ -31,6 +31,7 @@ record Field (A : Type) (add : A -> A -> A) (mul : A -> A -> A) (inv : A -> A) (
   field mul_add_l : forall (a : A), forall (b : A), forall (c : A), Path A (mul a (add b c)) (add (mul a b) (mul a c))
   field mul_add_r : forall (a : A), forall (b : A), forall (c : A), Path A (mul (add a b) c) (add (mul a c) (mul b c))
   field inv_mul : forall (a : A), (Path A zero a -> Empty) -> Path A (mul a (inv a)) one
+  field inv_mul_l : forall (a : A), (Path A zero a -> Empty) -> Path A (mul (inv a) a) one
   field inv_one : Path A (inv one) one
   field inv_mul_dist : forall (a : A), forall (b : A), (Path A zero a -> Empty) -> (Path A zero b -> Empty) -> Path A (inv (mul a b)) (mul (inv a) (inv b))
   field inv_div : forall (a : A), forall (b : A), (Path A zero a -> Empty) -> (Path A zero b -> Empty) -> Path A (inv (mul a (inv b))) (mul b (inv a))

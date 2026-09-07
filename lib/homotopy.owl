@@ -81,16 +81,10 @@ def funext : forall (A : Type), forall (B : Type),
   fun A B f g h => <i> fun (x : A) => h x @ i
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- 3. Bi-invertible maps and equivalences
+-- 3. Equivalences
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- A bi-invertible map has both a left and right inverse.
--- Fields use inlined types because record fields can't reference prior defs.
-record BiInvertibleMap (A : Type) (B : Type) (f : A -> B) (g : B -> A) where
-  field gf : forall (x : A), Path A (g (f x)) x
-  field fg : forall (y : B), Path B (f (g y)) y
-
--- An equivalence is a bi-invertible map.
+-- An equivalence is a bi-invertible map (left and right inverse).
 -- Fields use inlined types because record fields can't reference prior defs.
 record IsEquiv (A : Type) (B : Type) (f : A -> B) (g : B -> A) where
   field gf : forall (x : A), Path A (g (f x)) x

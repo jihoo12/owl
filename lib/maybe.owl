@@ -38,11 +38,5 @@ def is_nothing : forall (A : Type), Maybe A -> Bool :=
   | nothing => true
   | just x => false
 
--- fromMaybe: like maybe_default but argument order matches Haskell.
-def from_maybe : forall (A : Type), A -> Maybe A -> A :=
-  fun A default m => match m return A with
-  | nothing => default
-  | just x => x
-
 -- map is idempotent: map f (map g m) = map (f . g) m
 -- (omitted: would require function composition)
