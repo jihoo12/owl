@@ -249,6 +249,7 @@ mod tests {
         Datatype {
             name: name.to_string(),
             params: vec![("A".into(), Term::TUniv(LevelExpr::LConst(0)))],
+            indices: vec![],
             cons: vec![crate::cubical::syntax::ConSig {
                 name: "mk".into(),
                 arg_tys,

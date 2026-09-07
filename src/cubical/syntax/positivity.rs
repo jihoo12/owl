@@ -633,6 +633,7 @@ mod tests {
         let dt = Datatype {
             name: "Nat".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![
                 ConSig {
                     return_args: None,
@@ -659,6 +660,7 @@ mod tests {
         let dt = Datatype {
             name: "List".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![
                 ConSig {
                     return_args: None,
@@ -688,6 +690,7 @@ mod tests {
         let dt = Datatype {
             name: "Bad".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![ConSig {
                 return_args: None,
                 name: "mk".into(),
@@ -717,6 +720,7 @@ mod tests {
         let dt = Datatype {
             name: "Bad".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![ConSig {
                 return_args: None,
                 name: "cons".into(),
@@ -743,6 +747,7 @@ mod tests {
         let dt = Datatype {
             name: "Bad".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![ConSig {
                 return_args: None,
                 name: "cons".into(),
@@ -772,6 +777,7 @@ mod tests {
         let dt = Datatype {
             name: "Bad".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![ConSig {
                 return_args: None,
                 name: "cons".into(),
@@ -802,6 +808,7 @@ mod tests {
         let dt = Datatype {
             name: "Pair".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![ConSig {
                 return_args: None,
                 name: "mk".into(),
@@ -825,6 +832,7 @@ mod tests {
         let dt = Datatype {
             name: "S1".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![ConSig {
                 return_args: None,
                 name: "base".into(),
@@ -852,6 +860,7 @@ mod tests {
         Datatype {
             name: name.into(),
             params: vec![("A".into(), Term::TUniv(LevelExpr::LConst(0)))],
+            indices: vec![],
             cons: vec![ConSig {
                 return_args: None,
                 name: "mk".into(),

@@ -533,7 +533,13 @@ pub struct Datatype {
     /// Parameter declarations, e.g. `(A : Type)` in `inductive Trunc (A : Type) where ...`.
     /// Each entry is (param_name, param_type). Parameters are in outermost-first
     /// order and their types form a telescope (each type can reference earlier params).
+    /// This includes both true parameters (same across all constructors, like `A` in
+    /// `List A`) and indices (vary per constructor, like `n` in `Vec A n`).
     pub params: Vec<(Name, Term)>,
+    /// Indices into `params` that are true indices (vary per constructor).
+    /// E.g. for `Vec (A : Type) (n : Nat)`, `indices = [1]` because `n` varies.
+    /// Empty for non-indexed types like `List`, `Nat`, `Bool`.
+    pub indices: Vec<usize>,
     pub cons: Vec<ConSig>,
     pub pcons: Vec<PConSig>,
     pub sqcons: Vec<SqConSig>,
@@ -1946,6 +1952,7 @@ mod tests {
         let dt = Datatype {
             name: "Nat".into(),
             params: vec![],
+            indices: vec![],
             cons: vec![
                 ConSig {
                     name: "zero".into(),

@@ -54,9 +54,6 @@ pub fn infer_and_check_params_seeded(
         let mut prev_args: Vec<Term> = Vec::new();
         for (k, arg) in args.iter().enumerate() {
             let mut arg_ty = sig_arg_tys[k].clone();
-            // Use parallel substitution to avoid sequential subst interference:
-            // when param values contain TVar(0) (e.g. inside `fun X => mkR ...`),
-            // sequential subst calls corrupt each other's de Bruijn indices.
             arg_ty = subst_params(num_params, &param_terms, &arg_ty);
             if let Term::TVar(idx) = &arg_ty {
                 let i = *idx as usize;

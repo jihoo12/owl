@@ -80,6 +80,50 @@ pub fn require_equal(
     }
 }
 
+/// Simple syntactic unification for index terms.
+/// Returns `true` if the terms can be unified, accumulating variable bindings
+/// in `solution`.  Handles: TVar binding, TData/TCon/TApp structural matching.
+fn unify_index_term(a: &Term, b: &Term, solution: &mut Vec<(i32, Term)>) -> bool {
+    match (a, b) {
+        (Term::TVar(i), _) => {
+            if let Some(existing) = solution.iter().find(|(j, _)| j == i) {
+                existing.1 == *b
+            } else {
+                solution.push((*i, b.clone()));
+                true
+            }
+        }
+        (_, Term::TVar(j)) => {
+            if let Some(existing) = solution.iter().find(|(k, _)| k == j) {
+                existing.1 == *a
+            } else {
+                solution.push((*j, a.clone()));
+                true
+            }
+        }
+        (Term::TData(d1, args1), Term::TData(d2, args2))
+            if d1 == d2 && args1.len() == args2.len() =>
+        {
+            args1
+                .iter()
+                .zip(args2.iter())
+                .all(|(a, b)| unify_index_term(a, b, solution))
+        }
+        (Term::TCon(d1, c1, args1), Term::TCon(d2, c2, args2))
+            if d1 == d2 && c1 == c2 && args1.len() == args2.len() =>
+        {
+            args1
+                .iter()
+                .zip(args2.iter())
+                .all(|(a, b)| unify_index_term(a, b, solution))
+        }
+        (Term::TApp(f1, a1), Term::TApp(f2, a2)) => {
+            unify_index_term(f1, f2, solution) && unify_index_term(a1, a2, solution)
+        }
+        _ => a == b,
+    }
+}
+
 pub fn require_equal_endpt(
     ctx: &Ctx,
     expected: &Term,
@@ -1709,14 +1753,22 @@ fn infer_dt_inner(
                 }
             }
 
-            // Helper: substitute determined params into a constructor's arg_tys.
-            fn subst_params_local(arg_tys: &[Term], params: &[Term]) -> Vec<Term> {
+            // Helper: substitute determined (non-index) params into a constructor's
+            // arg_tys.  Index params are left as TVar references for later unification.
+            fn subst_params_local(
+                arg_tys: &[Term],
+                params: &[Term],
+                indices: &[usize],
+            ) -> Vec<Term> {
                 let num_params = params.len();
                 arg_tys
                     .iter()
                     .map(|ty| {
                         let mut t = ty.clone();
                         for (k, p) in params.iter().enumerate() {
+                            if indices.contains(&k) {
+                                continue; // Skip index params — solved by unification
+                            }
                             let target = (num_params - 1 - k) as i32;
                             t = subst(target, p, &t);
                         }
@@ -1747,7 +1799,61 @@ fn infer_dt_inner(
                         con: con_sig.name.clone(),
                         pos: err_pos(ctx, scrut, session),
                     })?;
-                let subst_arg_tys = subst_params_local(&con_sig.arg_tys, &scrut_params);
+                let subst_arg_tys =
+                    subst_params_local(&con_sig.arg_tys, &scrut_params, &dt.indices);
+                // Index unification: unify the constructor's index expressions
+                // with the scrutinee's index values.
+                let mut index_solution: Vec<(i32, Term)> = Vec::new();
+                if !dt.indices.is_empty() {
+                    if let Some(ref return_args) = con_sig.return_args {
+                        let num_params = dt.params.len();
+                        // Substitute only non-index params into return_args
+                        let substituted_return: Vec<Term> = return_args
+                            .iter()
+                            .map(|arg| {
+                                let mut t = arg.clone();
+                                for (k, p) in scrut_params.iter().enumerate() {
+                                    if dt.indices.contains(&k) {
+                                        continue;
+                                    }
+                                    let target = (num_params - 1 - k) as i32;
+                                    t = subst(target, p, &t);
+                                }
+                                t
+                            })
+                            .collect();
+                        // Unify each index position
+                        let mut impossible = false;
+                        for &idx_pos in &dt.indices {
+                            if idx_pos < substituted_return.len() && idx_pos < scrut_params.len() {
+                                let con_index = &substituted_return[idx_pos];
+                                let scrut_index = &scrut_params[idx_pos];
+                                if !unify_index_term(con_index, scrut_index, &mut index_solution) {
+                                    impossible = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if impossible {
+                            continue; // Skip impossible case
+                        }
+                    }
+                }
+                // Apply index solution to arg types
+                let subst_arg_tys: Vec<Term> = if index_solution.is_empty() {
+                    subst_arg_tys
+                } else {
+                    subst_arg_tys
+                        .iter()
+                        .map(|ty| {
+                            let mut t = ty.clone();
+                            for &(var, ref val) in &index_solution {
+                                t = subst(var, val, &t);
+                            }
+                            t
+                        })
+                        .collect()
+                };
                 if case.binders.len() != subst_arg_tys.len() {
                     return Err(TypeError::BadElimCase {
                         con: con_sig.name.clone(),
@@ -1799,7 +1905,8 @@ fn infer_dt_inner(
                         con: pcon_sig.name.clone(),
                         pos: err_pos(ctx, scrut, session),
                     })?;
-                let subst_arg_tys = subst_params_local(&pcon_sig.arg_tys, &scrut_params);
+                let subst_arg_tys =
+                    subst_params_local(&pcon_sig.arg_tys, &scrut_params, &dt.indices);
                 let expected_binders = subst_arg_tys.len() + 1;
                 if case.binders.len() != expected_binders {
                     return Err(TypeError::BadElimCase {
@@ -1958,7 +2065,8 @@ fn infer_dt_inner(
                         con: sqcon_sig.name.clone(),
                         pos: err_pos(ctx, scrut, session),
                     })?;
-                let subst_arg_tys = subst_params_local(&sqcon_sig.arg_tys, &scrut_params);
+                let subst_arg_tys =
+                    subst_params_local(&sqcon_sig.arg_tys, &scrut_params, &dt.indices);
                 let expected_binders = subst_arg_tys.len() + 2;
                 if case.binders.len() != expected_binders {
                     return Err(TypeError::BadElimCase {
@@ -2138,7 +2246,8 @@ fn infer_dt_inner(
                         con: cellcon_sig.name.clone(),
                         pos: err_pos(ctx, scrut, session),
                     })?;
-                let subst_arg_tys = subst_params_local(&cellcon_sig.arg_tys, &scrut_params);
+                let subst_arg_tys =
+                    subst_params_local(&cellcon_sig.arg_tys, &scrut_params, &dt.indices);
                 let dim = cellcon_sig.dimension();
                 let expected_binders = subst_arg_tys.len() + dim;
                 if case.binders.len() != expected_binders {
@@ -2398,6 +2507,73 @@ pub fn check_dt(
     result
 }
 
+/// Given a constructor's return_arg expression (in constructor scope) and the
+/// corresponding expected param value (in case body scope), extract the raw
+/// constructor-scope value for any TVar referenced in the return_arg.
+fn extract_raw_from_return_arg(
+    return_arg: &Term,
+    expected: Option<&Term>,
+    raw: &mut Vec<Option<Term>>,
+    num_params: usize,
+) {
+    // Peel both return_arg and expected to find a TVar(k) and its matching value.
+    let (inner_k, peeled_exp) = peel_pair(return_arg, expected, num_params);
+    if let Some(k_val) = inner_k {
+        if k_val >= 0 && (k_val as usize) < num_params {
+            let idx = num_params - 1 - k_val as usize;
+            if raw[idx].is_none() {
+                if let Some(inner) = peeled_exp {
+                    raw[idx] = Some(inner);
+                }
+            }
+        }
+    }
+}
+
+/// Try to peel both a return_arg and expected term simultaneously.
+/// Returns (Some(k), Some(inner_exp)) if the structures match.
+fn peel_pair(
+    return_arg: &Term,
+    expected: Option<&Term>,
+    num_params: usize,
+) -> (Option<i32>, Option<Term>) {
+    match return_arg {
+        Term::TVar(k) => {
+            let k_val = *k;
+            if k_val >= 0 && (k_val as usize) < num_params {
+                return (Some(k_val), expected.cloned());
+            }
+            (None, None)
+        }
+        Term::TApp(_, inner_arg) => {
+            if let Some(exp) = expected {
+                if let Term::TApp(_, exp_inner) = exp {
+                    return peel_pair(&**inner_arg, Some(&**exp_inner), num_params);
+                }
+            }
+            (None, None)
+        }
+        Term::TCon(_, _, args) if !args.is_empty() => {
+            if let Some(exp) = expected {
+                if let Term::TCon(_, _, eargs) = exp {
+                    if !eargs.is_empty() {
+                        return peel_pair(
+                            args.last().unwrap(),
+                            Some(eargs.last().unwrap()),
+                            num_params,
+                        );
+                    }
+                }
+            }
+            (None, None)
+        }
+        _ => (None, None),
+    }
+}
+/// corresponding expected param value (in case body scope), extract the raw
+/// constructor-scope value for any TVar referenced in the return_arg.
+///
+/// For example, if return_arg = `suc(TVar(0))` and expected = `suc(n)`, then
 fn check_dt_inner(
     dts: &[Datatype],
     ctx: &Ctx,
@@ -2597,9 +2773,27 @@ fn check_dt_inner(
                     });
                 }
                 let num_params = dt.params.len();
-                let initial: Vec<Option<Term>> = (0..num_params)
-                    .map(|i| expected_params.get(i).cloned())
-                    .collect();
+                // For indexed types, compute raw constructor-scope param values
+                // by inverting the constructor's return_args against the
+                // expected params.
+                let initial: Vec<Option<Term>> = if !dt.indices.is_empty() {
+                    if let Some(ref return_args) = sig.return_args {
+                        let mut raw: Vec<Option<Term>> = vec![None; num_params];
+                        for (i, ra) in return_args.iter().enumerate() {
+                            let exp = expected_params.get(i);
+                            extract_raw_from_return_arg(ra, exp, &mut raw, num_params);
+                        }
+                        raw
+                    } else {
+                        (0..num_params)
+                            .map(|i| expected_params.get(i).cloned())
+                            .collect()
+                    }
+                } else {
+                    (0..num_params)
+                        .map(|i| expected_params.get(i).cloned())
+                        .collect()
+                };
                 let (param_terms, _checked_args) = infer_and_check_params_seeded(
                     dts,
                     ctx,
@@ -2609,7 +2803,13 @@ fn check_dt_inner(
                     &initial,
                     session,
                 )?;
-                let params = build_params(&param_terms);
+                let params = if !dt.indices.is_empty() {
+                    // For indexed types, use the expected params directly
+                    // since index values are determined by the expected type.
+                    expected_params.clone()
+                } else {
+                    build_params(&param_terms)
+                };
                 // For zero-arity constructors with index constraints, verify
                 // that the constructor's return-type constraints are consistent
                 // with the expected type. Without this, refl : Eq A x x is
@@ -2639,14 +2839,12 @@ fn check_dt_inner(
                             }
                         }
                         if has_repeated {
+                            let reversed: Vec<Option<Term>> =
+                                param_terms.iter().rev().cloned().collect();
                             let substituted: Vec<Term> = return_args
                                 .iter()
                                 .map(|arg| {
-                                    crate::cubical::syntax::subst_params(
-                                        num_params,
-                                        &param_terms,
-                                        arg,
-                                    )
+                                    crate::cubical::syntax::subst_params(num_params, &reversed, arg)
                                 })
                                 .collect();
                             let inferred_ty = Term::TData(d.clone(), substituted);

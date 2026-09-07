@@ -296,6 +296,7 @@ impl Parser {
         let mut local_dt = Datatype {
             name: name.clone(),
             params: params.clone(),
+            indices: vec![],
             cons: Vec::new(),
             pcons: Vec::new(),
             sqcons: Vec::new(),
@@ -461,9 +462,40 @@ impl Parser {
         for _ in &params {
             self.term_env.remove(0);
         }
+        // Classify params into parameters (same across all constructors) and
+        // indices (vary per constructor).  We look at each constructor's
+        // return_args: for param position i, if the term at that position
+        // differs between any two constructors, position i is an index.
+        let num_params = params.len();
+        let mut indices: Vec<usize> = Vec::new();
+        if num_params > 0 && cons.len() > 1 {
+            for i in 0..num_params {
+                let mut first_arg: Option<&Term> = None;
+                let mut is_index = false;
+                for con in &cons {
+                    if let Some(ref return_args) = con.return_args {
+                        if let Some(arg) = return_args.get(i) {
+                            match first_arg {
+                                None => first_arg = Some(arg),
+                                Some(prev) => {
+                                    if prev != arg {
+                                        is_index = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if is_index {
+                    indices.push(i);
+                }
+            }
+        }
         let mut dt = Datatype {
             name,
             params,
+            indices,
             cons,
             pcons,
             sqcons,
@@ -516,6 +548,7 @@ impl Parser {
         let mut local_dt = Datatype {
             name: name.clone(),
             params: params.clone(),
+            indices: vec![],
             cons: Vec::new(),
             pcons: Vec::new(),
             sqcons: Vec::new(),
@@ -2536,6 +2569,10 @@ impl Parser {
                 for face in &mut cellcon.faces {
                     *face = update(face);
                 }
+            }
+            // Shift index positions to account for prepended module params.
+            for idx in &mut dt.indices {
+                *idx += m;
             }
         }
     }

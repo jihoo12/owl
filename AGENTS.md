@@ -78,7 +78,7 @@ cargo run -- check examples/nat.owl   # typecheck a file
 cargo run -- eval  examples/nat.owl   # typecheck + normalize main/last def
 cargo run -- check lib/ring_laws.owl  # check a library
 cargo fmt                          # format Rust (run after editing .rs files)
-scripts/verify.sh                  # full verification pipeline (build+fmt+test+rescan)
+scripts/verify.sh                  # full verification pipeline (build+fmt+test)
 scripts/verify.sh --quick          # alias; no slow suites remain (see §4)
 ```
 
@@ -163,11 +163,9 @@ use it when reducing or typechecking behaves unexpectedly.
 3. Run tests: targeted `cargo test <name>` first, then the full suite
    (`cargo test` — fast enough to run for every change).
 4. `cargo run -- check` on the `.owl` files you touched or added.
-5. `uvx rust-analyzer-db scan src --db rust_code.db` so the db reflects the new
-   source.
-6. Update `TODO.md` per §3, including the keyword-grep and cross-reference
+5. Update `TODO.md` per §3, including the keyword-grep and cross-reference
    step — don't skip it because the change "feels" self-contained.
-7. **Never claim a change works without actually running the commands.** A
+6. **Never claim a change works without actually running the commands.** A
    passing claim must be backed by observed output, and a "done" claim about
    a specific capability must be backed by a minimal example exercising that
    exact capability, not just the aggregate test count.
@@ -178,8 +176,6 @@ use it when reducing or typechecking behaves unexpectedly.
 |-----------|-----------------------------------------------------|
 | `/verify` | run the full verification pipeline and fix failures |
 | `/test`   | run `cargo test $ARGUMENTS`                         |
-| `/rescan` | rescan the rust-analyzer-db and summarize stats     |
-| `/analyze`| deep-dive one item/function via the db (source, complexity, callers) |
 | `/sync-todo` | reconcile `TODO.md` with the actual state of the work |
 
 ## 8. Owl language gotchas (kernel-facing invariants)

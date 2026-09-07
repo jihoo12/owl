@@ -18,7 +18,7 @@
   
   Also improved the hcomp re-entrancy guard (depth 1 → depth 2) and enhanced the J eliminator to handle constructor applications. Documented the `unsafe` block in `session.rs` as sound with safety justification. 275/275 tests pass, `cargo fmt` clean.
 
-- [x] **A6 — Soundness fix for indexed type zero-arity constructors.** ✅ Added `return_args: Option<Vec<Term>>` to `ConSig` struct, storing the TData args from constructor return types during parsing. Modified `check_dt_inner` TCon handler: for zero-arity constructors with repeated de Bruijn vars in return_args (indicating index constraints like refl's `Eq A x x`), substitute inferred params into return_args and check the result matches the expected type via `require_equal`. Scoped to avoid false positives for constructors without index constraints (like nil). Added `bad_examples/soundness_indexed.owl` as negative test, `bad_examples_must_fail` guard test. 275/275 tests pass, `cargo fmt` clean. **Note**: Full index unification (vtail etc.) remains OPEN — see A6.
+- [x] **A6 — Indexed dependent pattern matching / index unification.** ✅ Full implementation. Added `indices: Vec<usize>` to `Datatype` for parameter vs index classification. Parser classifies params by comparing return_args across constructors. TElim handler: `subst_params_local` skips index params; `unify_index_term` unifies constructor return_args with case index values; unsolvable → impossible case. TCon handler: `extract_raw_from_return_arg` inverts return_args against expected_params to extract raw index variable values for correct arg type substitution. Fixed `.rev()` double-reversal in `infer_and_check_params_seeded` (params.rs). Files: `syntax/mod.rs`, `parser/grammar.rs`, `typechecker/mod.rs`, `typechecker/params.rs`. Examples: `examples/indexed_elim.owl`, `lib/vector.owl`. 275/275 tests pass, `cargo fmt` clean.
 
 - [x] **G1 — Core data types.** ✅ Created standalone library files for all core data types. `lib/bool.owl`: Bool with not/and/or/xor/if/eq + proofs (not_not, and_idem, or_idem, and_comm, or_comm). `lib/list.owl`: List with append/reverse/map/foldl/foldr/length/filter/any/all + proofs (append_nil_l, append_assoc, map_append). `lib/maybe.owl`: Maybe with default/map/bind/is_just/is_nothing/from_maybe. `lib/vector.owl`: Vec type with nil/cons/vhead/vnil (dependent elimination limited by kernel). `lib/int.owl`: Int with abs/sign/neg/add/mul/is_nonneg. Added 5 example demos (bool_demo, list_demo, maybe_demo, vector_demo, int_ops_demo) and 10 guard tests (5 lib + 5 demo). 274/274 tests pass, `cargo fmt` clean.
 
@@ -168,28 +168,23 @@ This enables square composition (2D hcomp): composing paths whose type is itself
 
 **Files**: `nbe/hcomp.rs`. **Example**: `examples/higher_dim_hcomp.owl` (tests empty system, constant tube, two-tube, fill, hfill, nested hcomp through Path types). 258/258 tests pass.
 
-#### A6. Indexed dependent pattern matching / index unification 🔴
+#### A6. Indexed dependent pattern matching / index unification ✅ DONE
 
-**Status**: Soundness fix done ✅ — full index unification still OPEN.
+**Completed**: Full index unification for indexed dependent pattern matching is now implemented.
 
-**Soundness fix (done)**: Added `return_args: Option<Vec<Term>>` to `ConSig` in `syntax/mod.rs`. The parser extracts the TData arguments from each constructor's return type and stores them. In `check_dt_inner` (TCon handler), for zero-arity constructors whose `return_args` contain a repeated de Bruijn variable at index positions (indicating an index constraint like `refl : Eq A x x`), we substitute the inferred params into `return_args` and check the result matches the expected type via `require_equal`. This catches the soundness bug where `refl : Eq Nat zero (suc zero)` was accepted because the old check was circular (params seeded from expected, then compared). The check is scoped to avoid false positives for constructors like `nil : Vec A zero` (no repeated vars) that would fail due to a separate pre-existing issue where parameter propagation to nested constructors doesn't account for index families. Files: `syntax/mod.rs`, `parser/grammar.rs`, `typechecker/mod.rs`, `driver/tests/example_guards.rs`. `bad_examples/soundness_indexed.owl` added as negative test. 275/275 tests pass, `cargo fmt` clean.
+**What was done**:
+1. Added `indices: Vec<usize>` field to `Datatype` struct — classifies params as parameters vs indices.
+2. Parser classifies params by comparing `return_args` across constructors (same = parameter, varying = index).
+3. `subst_params_local` in TElim handler skips index params, keeping them as TVar references for unification.
+4. TElim handler: after non-index param substitution, uses `unify_index_term` to unify constructor's return_args with the case's expected index values. Unsolvable cases → `continue` (impossible case). Unified index values substituted into case body types.
+5. TCon handler: uses `extract_raw_from_return_arg` to peel constructor wrappers (TApp/TCon) and extract raw index variable values from return_args, enabling correct arg type substitution for constructors with index-computing return types (e.g., `cons : A -> Vec A n -> Vec A (suc n)`).
+6. Fixed `.rev()` double-reversal bug in `infer_and_check_params_seeded` in `params.rs` — `subst_params` already handles de Bruijn order internally.
 
-**Remaining: full index unification (OPEN)**:
-The kernel still cannot do dependent elimination on indexed types. Example failure:
-```
-def vtail : forall (A : Type), forall (n : Nat), Vec A (suc n) -> Vec A n :=
-  fun A n v => match v return Vec A n with
-  | nil => nil
-  | cons x xs => xs  -- ERROR: xs : Vec A (suc n), expected Vec A n
-```
-The kernel substitutes the scrutinee's index `suc n` into `cons`'s arg type `Vec A n`, giving `xs : Vec A (suc n)`. It should instead unify `suc n' = suc n` (where `n'` is `cons`'s fresh index) to derive `n' = n`, making `xs : Vec A n`.
+**Key insight**: The constructor's arg_tys reference raw index variables (e.g., TVar(0) = n), but `expected_params` from the scrutinee type have the full index expression (e.g., suc(n)). Direct substitution gives wrong arg types (xs : Vec A (suc n) instead of Vec A n). The fix: invert the constructor's `return_args` against `expected_params` to extract raw variable values.
 
-**Root cause**: `Datatype` has no distinction between **parameters** (same in all constructors, like `A` in `List A`) and **indices** (vary per constructor, like `n` in `Vec A n`). All type arguments are stored as `params: Vec<(Name, Term)>`. Full fix requires:
-1. Add `indices: Vec<usize>` field to `Datatype` — indices into `params` that are true indices.
-2. Add **index unification** during pattern matching in `check_dt_inner` / `TElim` handler.
-3. Update `subst_params_local` to use unified index values.
-
-**Scope**: ~4 functions to modify (`Datatype` struct, parser param classification, `check_dt_inner` TCon handler, `subst_params_local`). Medium regression risk — the existing 264 tests should pass unchanged since they don't use indexed types, but the pattern matching codepath is kernel-critical.
+Files: `syntax/mod.rs`, `parser/grammar.rs`, `typechecker/mod.rs`, `typechecker/params.rs`.
+Examples: `examples/indexed_elim.owl` (vtail + vcons), `lib/vector.owl`.
+275/275 tests pass, `cargo fmt` clean.
 
 #### A7. need new kernel architecture ✅
 
@@ -433,7 +428,7 @@ Spectrum types for stable homotopy theory. Research-level.
 10. ~~**F1 (interactive REPL)**~~ — ✅ done.
 11. ~~**C1 (datatypes in parameterized modules)**~~ — ✅ done. Unblocks Cubical Agda module parity.
 12. ~~**G1 (core data types)**~~ — ✅ done. List, Vector, Maybe, Int, Bool libraries with proofs. Foundational for stdlib.
-13. ~~**A6 (indexed dependent pattern matching)**~~ — 🔴 soundness fix done ✅. Kernel no longer proves False via zero-arity constructor index mismatch. Full index unification (vtail, etc.) still OPEN. 275/275 tests pass.
+13. ~~**A6 (indexed dependent pattern matching)**~~ — ✅ done. Full index unification implemented: param classification, TElim index unification, TCon return_args inversion. vtail + vcons work. 275/275 tests pass.
 14. **G3 (logic)** — propositional logic, quantifiers, decidability. Unlocks ideal predicates for G6.
 14. **G2 (algebra extensions)** — lattices, ordered structures. Feeds into G5 (categories of algebraic structures).
 15. **G5 (category theory)** — Category, Functor, NatTrans, Yoneda. Showcases G1–G2.
